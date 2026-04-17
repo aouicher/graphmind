@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { GraphBuilder } from "../../core/graph/builder.js";
+import { startWatcher } from "../../core/graph/watcher.js";
 import { Registry } from "../../core/registry.js";
 import { log } from "../../utils/logger.js";
 import { metaPath } from "../../utils/paths.js";
@@ -11,7 +12,8 @@ export function registerBuildCommand(program: Command): void {
 		.description("Build the code graph for a project")
 		.option("--all", "Build all registered projects")
 		.option("--full", "Force full rebuild (ignore cache)")
-		.action(async (slug: string | undefined, opts: { all?: boolean; full?: boolean }) => {
+		.option("--watch", "Watch mode — rebuild on file changes (debounced 2s)")
+		.action(async (slug: string | undefined, opts: { all?: boolean; full?: boolean; watch?: boolean }) => {
 			const registry = new Registry();
 
 			const projects = opts.all
@@ -27,6 +29,17 @@ export function registerBuildCommand(program: Command): void {
 						: "Not in a registered project. Run: graphmind register",
 				);
 				process.exitCode = 1;
+				return;
+			}
+
+			if (opts.watch) {
+				const watchSlug = projects[0]?.slug;
+				if (!watchSlug) {
+					log.error("Watch mode requires a single project.");
+					process.exitCode = 1;
+					return;
+				}
+				startWatcher(watchSlug);
 				return;
 			}
 
