@@ -7,6 +7,7 @@ import {
 import { registerGraphTools } from "./tools/graph-tools.js";
 import { registerMemoryTools } from "./tools/memory-tools.js";
 import { registerMetaTools } from "./tools/meta-tools.js";
+import { registerCrossTools } from "./tools/cross-tools.js";
 
 export interface McpServerOptions {
 	transport: "stdio" | "http";
@@ -32,6 +33,7 @@ export async function startMcpServer(options: McpServerOptions): Promise<void> {
 		...registerGraphTools(),
 		...registerMemoryTools(),
 		...registerMetaTools(),
+		...registerCrossTools(),
 	];
 
 	server.setRequestHandler(ListToolsRequestSchema, async () => ({

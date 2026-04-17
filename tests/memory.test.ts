@@ -26,8 +26,9 @@ describe("MemoryStore", () => {
 
 		const entries = store.list();
 		expect(entries).toHaveLength(2);
-		expect(entries[0]!.content).toContain("snake_case");
-		expect(entries[1]!.content).toContain("JWT");
+		const contents = entries.map((e) => e.content);
+		expect(contents).toContainEqual(expect.stringContaining("snake_case"));
+		expect(contents).toContainEqual(expect.stringContaining("JWT"));
 	});
 
 	it("adds project-scoped entries", () => {

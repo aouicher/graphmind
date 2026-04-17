@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { dirname, extname, join, relative } from "node:path";
 import type Database from "better-sqlite3";
 import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
 import { FileHashCache } from "./cache.js";
@@ -105,63 +105,10 @@ export class GraphBuilder {
 			 OR to_id IN (SELECT id FROM symbols WHERE file = ?)`,
 		);
 
-		const processFile = this.db.transaction((file: { path: string; content: string; language: string; relPath: string }) => {
-			deleteFileEdges.run(file.relPath, file.relPath);
-			deleteFileSymbols.run(file.relPath);
+		const pendingImports: Array<{ relPath: string; imports: ParsedImport[] }> = [];
+		const pendingCalls: Array<{ relPath: string; callSites: ParsedCallSite[] }> = [];
 
-			let parsed: ParsedFile;
-			try {
-				parsed = parser.parseFile(file.path, file.content, file.language);
-			} catch {
-				return { symbols: 0, edges: 0 };
-			}
-
-			const now = Math.floor(Date.now() / 1000);
-			insertFile.run(file.relPath, file.language, "", now);
-
-			const symbolIds = new Map<string, number>();
-			for (const sym of parsed.symbols) {
-				const info = insertSymbol.run(
-					sym.name,
-					sym.kind,
-					file.relPath,
-					sym.lineStart,
-					sym.lineEnd,
-					sym.signature ?? null,
-					sym.doc ?? null,
-				);
-				symbolIds.set(sym.name, Number(info.lastInsertRowid));
-			}
-
-			let edges = 0;
-			for (const cs of parsed.callSites) {
-				const fromId = symbolIds.get(cs.caller);
-				const toId = symbolIds.get(cs.callee);
-				if (fromId && toId) {
-					insertEdge.run(fromId, toId, "calls", file.relPath);
-					edges++;
-				}
-			}
-
-			for (const imp of parsed.imports) {
-				for (const spec of imp.specifiers) {
-					const cleanSpec = spec.replace(/^\* as /, "");
-					const toId = symbolIds.get(cleanSpec);
-					if (toId) {
-						const fromSymbols = this.db
-							.prepare("SELECT id FROM symbols WHERE file = ? LIMIT 1")
-							.get(file.relPath) as { id: number } | undefined;
-						if (fromSymbols) {
-							insertEdge.run(fromSymbols.id, toId, "imports", file.relPath);
-							edges++;
-						}
-					}
-				}
-			}
-
-			return { symbols: parsed.symbols.length, edges };
-		});
-
+		// Pass 1: Parse all files, insert symbols
 		for (const file of files) {
 			const content = readFileSync(file.fullPath, "utf-8");
 			const relPath = relative(projectPath, file.fullPath);
@@ -171,19 +118,102 @@ export class GraphBuilder {
 				continue;
 			}
 
-			const result = processFile({
-				path: file.fullPath,
-				content,
-				language: file.language,
-				relPath,
-			});
-			totalSymbols += result.symbols;
-			totalEdges += result.edges;
-			processed++;
+			deleteFileEdges.run(relPath, relPath);
+			deleteFileSymbols.run(relPath);
 
+			let parsed: ParsedFile;
+			try {
+				parsed = parser.parseFile(file.fullPath, content, file.language);
+			} catch {
+				continue;
+			}
+
+			const now = Math.floor(Date.now() / 1000);
+			insertFile.run(relPath, file.language, "", now);
+
+			for (const sym of parsed.symbols) {
+				insertSymbol.run(
+					sym.name,
+					sym.kind,
+					relPath,
+					sym.lineStart,
+					sym.lineEnd,
+					sym.signature ?? null,
+					sym.doc ?? null,
+				);
+				totalSymbols++;
+			}
+
+			if (parsed.callSites.length > 0) {
+				pendingCalls.push({ relPath, callSites: parsed.callSites });
+			}
+			if (parsed.imports.length > 0) {
+				pendingImports.push({ relPath, imports: parsed.imports });
+			}
+
+			processed++;
 			this.cache.update(relPath, content);
 		}
 
+		// Pass 2: Resolve cross-file edges
+		const findSymbol = this.db.prepare(
+			"SELECT id, file FROM symbols WHERE name = ?",
+		);
+		const findSymbolInFile = this.db.prepare(
+			"SELECT id FROM symbols WHERE name = ? AND file = ?",
+		);
+		const findFirstSymbolInFile = this.db.prepare(
+			"SELECT id FROM symbols WHERE file = ? LIMIT 1",
+		);
+
+		const resolveEdges = this.db.transaction(() => {
+			// Resolve call sites: look up callee across all files
+			for (const { relPath, callSites } of pendingCalls) {
+				for (const cs of callSites) {
+					const callerRow = findSymbolInFile.get(cs.caller, relPath) as { id: number } | undefined;
+					if (!callerRow) continue;
+
+					// Try same file first, then any file
+					let calleeRow = findSymbolInFile.get(cs.callee, relPath) as { id: number } | undefined;
+					if (!calleeRow) {
+						calleeRow = findSymbol.get(cs.callee) as { id: number; file: string } | undefined;
+					}
+					if (calleeRow) {
+						insertEdge.run(callerRow.id, calleeRow.id, "calls", relPath);
+						totalEdges++;
+					}
+				}
+			}
+
+			// Resolve imports: link importing file to imported symbols
+			for (const { relPath, imports } of pendingImports) {
+				for (const imp of imports) {
+					const resolvedFile = this.resolveImportPath(imp.source, relPath);
+
+					for (const spec of imp.specifiers) {
+						const cleanSpec = spec.replace(/^\* as /, "");
+
+						// Find the imported symbol in the target file
+						let targetRow: { id: number } | undefined;
+						if (resolvedFile) {
+							targetRow = findSymbolInFile.get(cleanSpec, resolvedFile) as { id: number } | undefined;
+						}
+						if (!targetRow) {
+							targetRow = findSymbol.get(cleanSpec) as { id: number } | undefined;
+						}
+						if (!targetRow) continue;
+
+						const sourceRow = findFirstSymbolInFile.get(relPath) as { id: number } | undefined;
+						if (sourceRow) {
+							insertEdge.run(sourceRow.id, targetRow.id, "imports", relPath);
+							totalEdges++;
+						}
+					}
+				}
+			}
+		});
+
+		resolveEdges();
 		this.cache.save();
 
 		return {
@@ -237,6 +267,23 @@ export class GraphBuilder {
 				}
 			}
 		}
+	}
+
+	private resolveImportPath(importSource: string, fromFile: string): string | null {
+		if (!importSource.startsWith(".")) return null;
+
+		const dir = dirname(fromFile);
+		const base = join(dir, importSource).replace(/\\/g, "/");
+
+		const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.js"];
+		for (const ext of extensions) {
+			const candidate = base + ext;
+			const row = this.db
+				.prepare("SELECT path FROM files WHERE path = ?")
+				.get(candidate) as { path: string } | undefined;
+			if (row) return row.path;
+		}
+		return null;
 	}
 
 	private async getParser(): Promise<NativeParser> {
