@@ -32,12 +32,10 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit",
-		"postinstall": "node -e \"try{require('better-sqlite3')}catch(e){if(e.message.includes('MODULE_VERSION')){require('child_process').execSync('npm rebuild better-sqlite3',{stdio:'inherit'})}}\"",
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.12.1",
-		"better-sqlite3": "^12.9.0",
 		"chalk": "^5.4.1",
 		"chokidar": "^4.0.3",
 		"commander": "^13.1.0",
@@ -46,7 +44,6 @@
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@napi-rs/cli": "^3.6.2",
-		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^22.12.0",
 		"@types/uuid": "^10.0.0",
 		"tsup": "^8.3.6",
@@ -57,6 +54,6 @@
 		"@xenova/transformers": "^2.17.2"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.13.0"
 	}
 }

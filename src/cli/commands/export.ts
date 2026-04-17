@@ -24,7 +24,7 @@ function getFileEdges(db: ReturnType<typeof initDatabase>): GraphEdge[] {
 			JOIN symbols s2 ON e.to_id = s2.id
 			WHERE s1.file != s2.file
 		`)
-		.all() as GraphEdge[];
+		.all() as unknown as GraphEdge[];
 }
 
 function sanitizeId(s: string): string {
@@ -257,7 +257,7 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 		.prepare(
 			"SELECT name, kind, file, line_start, signature, doc FROM symbols ORDER BY file, line_start",
 		)
-		.all() as SymbolRow[];
+		.all() as unknown as SymbolRow[];
 
 	const edges = db
 		.prepare(`
@@ -267,7 +267,7 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 		JOIN symbols s1 ON e.from_id = s1.id
 		JOIN symbols s2 ON e.to_id = s2.id
 	`)
-		.all() as EdgeRow[];
+		.all() as unknown as EdgeRow[];
 
 	db.close();
 

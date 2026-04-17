@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import Database from "better-sqlite3";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { graphDir } from "../../utils/paths.js";
 
 export interface EmbeddingRow {
@@ -12,10 +12,10 @@ export interface EmbeddingRow {
 	embedding: Buffer;
 }
 
-function initEmbeddingsDb(dbPath: string): Database.Database {
-	mkdirSync(dirname(dbPath), { recursive: true });
-	const db = new Database(dbPath);
-	db.pragma("journal_mode = WAL");
+function initEmbeddingsDb(dbPath: string): DatabaseSync {
+	mkdirSync(join(dbPath, ".."), { recursive: true });
+	const db = new DatabaseSync(dbPath);
+	db.exec("PRAGMA journal_mode = WAL");
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS embeddings (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +31,7 @@ function initEmbeddingsDb(dbPath: string): Database.Database {
 }
 
 export class EmbeddingStore {
-	private db: Database.Database;
+	private db: DatabaseSync;
 
 	constructor(slug: string) {
 		const dbPath = join(graphDir(slug), "embeddings.db");
@@ -54,20 +54,24 @@ export class EmbeddingStore {
 		const stmt = this.db.prepare(
 			"INSERT INTO embeddings (symbol_name, symbol_kind, file, text, embedding) VALUES (?, ?, ?, ?, ?)",
 		);
-		const tx = this.db.transaction(() => {
+		this.db.exec("BEGIN TRANSACTION");
+		try {
 			for (const row of rows) {
 				stmt.run(row.symbol_name, row.symbol_kind, row.file, row.text, row.embedding);
 			}
-		});
-		tx();
+			this.db.exec("COMMIT");
+		} catch (e) {
+			this.db.exec("ROLLBACK");
+			throw e;
+		}
 	}
 
 	all(): EmbeddingRow[] {
-		return this.db.prepare("SELECT * FROM embeddings").all() as EmbeddingRow[];
+		return this.db.prepare("SELECT * FROM embeddings").all() as unknown as EmbeddingRow[];
 	}
 
 	count(): number {
-		return (this.db.prepare("SELECT COUNT(*) as cnt FROM embeddings").get() as { cnt: number }).cnt;
+		return (this.db.prepare("SELECT COUNT(*) as cnt FROM embeddings").get() as unknown as { cnt: number }).cnt;
 	}
 
 	close(): void {

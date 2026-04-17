@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 export interface SymbolRow {
 	id: number;
@@ -21,10 +21,10 @@ export interface EdgeRow {
 }
 
 export class GraphQueries {
-	constructor(private db: Database.Database) {}
+	constructor(private db: DatabaseSync) {}
 
 	findSymbol(name: string): SymbolRow[] {
-		return this.db.prepare("SELECT * FROM symbols WHERE name = ?").all(name) as SymbolRow[];
+		return this.db.prepare("SELECT * FROM symbols WHERE name = ?").all(name) as unknown as SymbolRow[];
 	}
 
 	searchSymbols(query: string, limit = 20): SymbolRow[] {
@@ -36,7 +36,7 @@ export class GraphQueries {
 				 ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
 				 LIMIT ?`,
 			)
-			.all(query, limit) as SymbolRow[];
+			.all(query, limit) as unknown as SymbolRow[];
 	}
 
 	callers(symbolName: string): Array<SymbolRow & { edge_kind: string }> {
@@ -47,7 +47,7 @@ export class GraphQueries {
 				 JOIN symbols target ON target.id = e.to_id
 				 WHERE target.name = ?`,
 			)
-			.all(symbolName) as Array<SymbolRow & { edge_kind: string }>;
+			.all(symbolName) as unknown as Array<SymbolRow & { edge_kind: string }>;
 	}
 
 	callees(symbolName: string): Array<SymbolRow & { edge_kind: string }> {
@@ -58,7 +58,7 @@ export class GraphQueries {
 				 JOIN symbols source ON source.id = e.from_id
 				 WHERE source.name = ?`,
 			)
-			.all(symbolName) as Array<SymbolRow & { edge_kind: string }>;
+			.all(symbolName) as unknown as Array<SymbolRow & { edge_kind: string }>;
 	}
 
 	fileDeps(filePath: string): Array<{ file: string; kind: string; count: number }> {
@@ -72,7 +72,7 @@ export class GraphQueries {
 				 GROUP BY target_s.file, e.kind
 				 ORDER BY count DESC`,
 			)
-			.all(filePath, filePath) as Array<{ file: string; kind: string; count: number }>;
+			.all(filePath, filePath) as unknown as Array<{ file: string; kind: string; count: number }>;
 	}
 
 	fileReverseDeps(filePath: string): Array<{ file: string; kind: string; count: number }> {
@@ -86,7 +86,7 @@ export class GraphQueries {
 				 GROUP BY source_s.file, e.kind
 				 ORDER BY count DESC`,
 			)
-			.all(filePath, filePath) as Array<{ file: string; kind: string; count: number }>;
+			.all(filePath, filePath) as unknown as Array<{ file: string; kind: string; count: number }>;
 	}
 
 	impact(filePath: string, maxDepth = 5): string[] {
@@ -114,7 +114,7 @@ export class GraphQueries {
 	}
 
 	symbolsInFile(filePath: string): SymbolRow[] {
-		return this.db.prepare("SELECT * FROM symbols WHERE file = ?").all(filePath) as SymbolRow[];
+		return this.db.prepare("SELECT * FROM symbols WHERE file = ?").all(filePath) as unknown as SymbolRow[];
 	}
 
 	topConnected(limit = 20): Array<{ file: string; connections: number }> {
@@ -127,7 +127,7 @@ export class GraphQueries {
 				 ORDER BY connections DESC
 				 LIMIT ?`,
 			)
-			.all(limit) as Array<{ file: string; connections: number }>;
+			.all(limit) as unknown as Array<{ file: string; connections: number }>;
 	}
 
 	detectCycles(): Array<{ from_file: string; to_file: string }> {
@@ -145,13 +145,13 @@ export class GraphQueries {
 				   WHERE s3.file = s2.file AND s4.file = s1.file
 				 )`,
 			)
-			.all() as Array<{ from_file: string; to_file: string }>;
+			.all() as unknown as Array<{ from_file: string; to_file: string }>;
 	}
 
 	stats(): { symbols: number; edges: number; files: number } {
-		const symbols = (this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as { c: number }).c;
-		const edges = (this.db.prepare("SELECT COUNT(*) as c FROM edges").get() as { c: number }).c;
-		const files = (this.db.prepare("SELECT COUNT(*) as c FROM files").get() as { c: number }).c;
+		const symbols = (this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as unknown as { c: number }).c;
+		const edges = (this.db.prepare("SELECT COUNT(*) as c FROM edges").get() as unknown as { c: number }).c;
+		const files = (this.db.prepare("SELECT COUNT(*) as c FROM files").get() as unknown as { c: number }).c;
 		return { symbols, edges, files };
 	}
 
@@ -160,6 +160,6 @@ export class GraphQueries {
 			.prepare(
 				"SELECT language, COUNT(*) as count FROM files WHERE language IS NOT NULL GROUP BY language ORDER BY count DESC",
 			)
-			.all() as Array<{ language: string; count: number }>;
+			.all() as unknown as Array<{ language: string; count: number }>;
 	}
 }

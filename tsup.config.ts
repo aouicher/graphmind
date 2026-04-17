@@ -1,4 +1,4 @@
-import { cpSync, existsSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "tsup";
 
@@ -8,7 +8,8 @@ export default defineConfig({
 		index: "src/index.ts",
 	},
 	format: ["esm"],
-	target: "node20",
+	target: "node22",
+	external: ["node:sqlite"],
 	dts: true,
 	clean: true,
 	sourcemap: true,
@@ -18,6 +19,14 @@ export default defineConfig({
 		js: "#!/usr/bin/env node",
 	},
 	onSuccess: async () => {
+		for (const file of readdirSync("dist")) {
+			if (!file.endsWith(".js")) continue;
+			const p = join("dist", file);
+			const src = readFileSync(p, "utf-8");
+			if (src.includes('from "sqlite"')) {
+				writeFileSync(p, src.replace(/from "sqlite"/g, 'from "node:sqlite"'));
+			}
+		}
 		const nativeDir = "src/native";
 		if (existsSync(nativeDir)) {
 			for (const file of readdirSync(nativeDir)) {

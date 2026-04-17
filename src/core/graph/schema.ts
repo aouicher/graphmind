@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS files (
@@ -54,14 +54,13 @@ CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
 END;
 `;
 
-export function initDatabase(dbPath: string): Database.Database {
-	const db = new Database(dbPath);
-	db.pragma("journal_mode = WAL");
-	db.pragma("foreign_keys = ON");
+export function initDatabase(dbPath: string): DatabaseSync {
+	const db = new DatabaseSync(dbPath);
+	db.exec("PRAGMA journal_mode = WAL");
+	db.exec("PRAGMA foreign_keys = ON");
 	db.exec(SCHEMA_SQL);
 
-	// Migrate: add content column if missing (pre-0.1.13 databases)
-	const cols = db.prepare("PRAGMA table_info(symbols)").all() as Array<{ name: string }>;
+	const cols = db.prepare("PRAGMA table_info(symbols)").all() as unknown as Array<{ name: string }>;
 	if (!cols.some((c) => c.name === "content")) {
 		db.exec("ALTER TABLE symbols ADD COLUMN content TEXT");
 		db.exec("DROP TABLE IF EXISTS symbols_fts");

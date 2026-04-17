@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import { log } from "../../utils/logger.js";
 import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
 import { FileHashCache } from "./cache.js";
@@ -77,7 +77,7 @@ export interface BuildResult {
 }
 
 export class GraphBuilder {
-	private db: Database.Database;
+	private db: DatabaseSync;
 	private cache: FileHashCache;
 	private nativeParser: NativeParser | null = null;
 
@@ -192,17 +192,16 @@ export class GraphBuilder {
 		const findSymbolInFile = this.db.prepare("SELECT id FROM symbols WHERE name = ? AND file = ?");
 		const findFirstSymbolInFile = this.db.prepare("SELECT id FROM symbols WHERE file = ? LIMIT 1");
 
-		const resolveEdges = this.db.transaction(() => {
-			// Resolve call sites: look up callee across all files
+		this.db.exec("BEGIN TRANSACTION");
+		try {
 			for (const { relPath, callSites } of pendingCalls) {
 				for (const cs of callSites) {
-					const callerRow = findSymbolInFile.get(cs.caller, relPath) as { id: number } | undefined;
+					const callerRow = findSymbolInFile.get(cs.caller, relPath) as unknown as { id: number } | undefined;
 					if (!callerRow) continue;
 
-					// Try same file first, then any file
-					let calleeRow = findSymbolInFile.get(cs.callee, relPath) as { id: number } | undefined;
+					let calleeRow = findSymbolInFile.get(cs.callee, relPath) as unknown as { id: number } | undefined;
 					if (!calleeRow) {
-						calleeRow = findSymbol.get(cs.callee) as { id: number; file: string } | undefined;
+						calleeRow = findSymbol.get(cs.callee) as unknown as { id: number; file: string } | undefined;
 					}
 					if (calleeRow) {
 						insertEdge.run(callerRow.id, calleeRow.id, "calls", relPath);
@@ -211,7 +210,6 @@ export class GraphBuilder {
 				}
 			}
 
-			// Resolve imports: link importing file to imported symbols
 			for (const { relPath, imports } of pendingImports) {
 				for (const imp of imports) {
 					const resolvedFile = this.resolveImportPath(imp.source, relPath);
@@ -219,7 +217,6 @@ export class GraphBuilder {
 					for (const spec of imp.specifiers) {
 						const cleanSpec = spec.replace(/^\* as /, "");
 
-						// Find the imported symbol in the target file
 						let targetRow: { id: number } | undefined;
 						if (resolvedFile) {
 							targetRow = findSymbolInFile.get(cleanSpec, resolvedFile) as
@@ -227,11 +224,11 @@ export class GraphBuilder {
 								| undefined;
 						}
 						if (!targetRow) {
-							targetRow = findSymbol.get(cleanSpec) as { id: number } | undefined;
+							targetRow = findSymbol.get(cleanSpec) as unknown as { id: number } | undefined;
 						}
 						if (!targetRow) continue;
 
-						const sourceRow = findFirstSymbolInFile.get(relPath) as { id: number } | undefined;
+						const sourceRow = findFirstSymbolInFile.get(relPath) as unknown as { id: number } | undefined;
 						if (sourceRow) {
 							insertEdge.run(sourceRow.id, targetRow.id, "imports", relPath);
 							totalEdges++;
@@ -239,9 +236,11 @@ export class GraphBuilder {
 					}
 				}
 			}
-		});
-
-		resolveEdges();
+			this.db.exec("COMMIT");
+		} catch (e) {
+			this.db.exec("ROLLBACK");
+			throw e;
+		}
 		this.cache.save();
 
 		return {
@@ -253,7 +252,7 @@ export class GraphBuilder {
 		};
 	}
 
-	getDatabase(): Database.Database {
+	getDatabase(): DatabaseSync {
 		return this.db;
 	}
 
@@ -323,7 +322,7 @@ export class GraphBuilder {
 		const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.js"];
 		for (const ext of extensions) {
 			const candidate = base + ext;
-			const row = this.db.prepare("SELECT path FROM files WHERE path = ?").get(candidate) as
+			const row = this.db.prepare("SELECT path FROM files WHERE path = ?").get(candidate) as unknown as
 				| { path: string }
 				| undefined;
 			if (row) return row.path;
