@@ -64,7 +64,7 @@ export function registerDiffImpactCommand(program: Command): void {
 
 			const db = initDatabase(dbPath);
 			const q = new GraphQueries(db);
-			const depth = parseInt(opts.depth, 10);
+			const depth = Number.parseInt(opts.depth, 10);
 
 			const allImpacted = new Set<string>();
 			for (const file of changedFiles) {

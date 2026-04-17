@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { sessionsDir, sessionLogPath } from "../../utils/paths.js";
+import { sessionLogPath, sessionsDir } from "../../utils/paths.js";
 
 export class SessionLogger {
 	constructor() {

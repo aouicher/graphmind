@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Command } from "commander";
-import { CrossLinkStore } from "../../core/cross/links.js";
 import { inferCrossLinks } from "../../core/cross/infer.js";
+import { CrossLinkStore } from "../../core/cross/links.js";
 import { GraphQueries } from "../../core/graph/queries.js";
 import { initDatabase } from "../../core/graph/schema.js";
 import { Registry } from "../../core/registry.js";
@@ -86,9 +86,7 @@ export function registerCrossCommand(program: Command): void {
 			console.log();
 		});
 
-	const crossLink = program
-		.command("cross-link")
-		.description("Manage cross-project links");
+	const crossLink = program.command("cross-link").description("Manage cross-project links");
 
 	crossLink
 		.command("add <from> <to>")
@@ -96,19 +94,21 @@ export function registerCrossCommand(program: Command): void {
 		.requiredOption("-r, --reason <reason>", "Why these projects are linked")
 		.option("-t, --type <type>", "Link type", "depends-on")
 		.option("--symbols <symbols...>", "Shared symbols")
-		.action((from: string, to: string, opts: { reason: string; type: string; symbols?: string[] }) => {
-			const store = new CrossLinkStore();
-			const link = store.add({
-				from,
-				to,
-				type: opts.type as "depends-on" | "shares-pattern" | "extends" | "uses-types-from",
-				reason: opts.reason,
-				symbols: opts.symbols ?? [],
-				inferred: false,
-				confidence: 1.0,
-			});
-			log.success(`Link added: ${from} → ${to} (${link.id.slice(0, 8)})`);
-		});
+		.action(
+			(from: string, to: string, opts: { reason: string; type: string; symbols?: string[] }) => {
+				const store = new CrossLinkStore();
+				const link = store.add({
+					from,
+					to,
+					type: opts.type as "depends-on" | "shares-pattern" | "extends" | "uses-types-from",
+					reason: opts.reason,
+					symbols: opts.symbols ?? [],
+					inferred: false,
+					confidence: 1.0,
+				});
+				log.success(`Link added: ${from} → ${to} (${link.id.slice(0, 8)})`);
+			},
+		);
 
 	crossLink
 		.command("infer")

@@ -31,7 +31,8 @@ export function registerMemoryTools(): ToolDef[] {
 		},
 		{
 			name: "gm_memory_add",
-			description: "Add a fact to memory (requires confirmation). Returns the entry for review before saving.",
+			description:
+				"Add a fact to memory (requires confirmation). Returns the entry for review before saving.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -71,7 +72,14 @@ export function registerMemoryTools(): ToolDef[] {
 				const entry = store.add(args.fact as string, {
 					project: args.project as string | undefined,
 					global: args.global as boolean | undefined,
-					type: args.type as "decision" | "pattern" | "convention" | "bug" | "context" | "session" | undefined,
+					type: args.type as
+						| "decision"
+						| "pattern"
+						| "convention"
+						| "bug"
+						| "context"
+						| "session"
+						| undefined,
 					tags: args.tags as string[] | undefined,
 				});
 				return { saved: true, id: entry.id, created: entry.created };

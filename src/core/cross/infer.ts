@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
+import { graphDbPath } from "../../utils/paths.js";
 import { initDatabase } from "../graph/schema.js";
 import { Registry } from "../registry.js";
-import { graphDbPath } from "../../utils/paths.js";
 import { type CrossLink, CrossLinkStore } from "./links.js";
 
 interface SharedSymbol {
@@ -23,9 +23,10 @@ export function inferCrossLinks(): CrossLink[] {
 		if (!existsSync(dbPath)) continue;
 
 		const db = initDatabase(dbPath);
-		const symbols = db
-			.prepare("SELECT DISTINCT name, kind FROM symbols")
-			.all() as Array<{ name: string; kind: string }>;
+		const symbols = db.prepare("SELECT DISTINCT name, kind FROM symbols").all() as Array<{
+			name: string;
+			kind: string;
+		}>;
 		db.close();
 
 		for (const sym of symbols) {
@@ -33,7 +34,7 @@ export function inferCrossLinks(): CrossLink[] {
 			if (!symbolMap.has(key)) {
 				symbolMap.set(key, new Set());
 			}
-			symbolMap.get(key)!.add(project.slug);
+			symbolMap.get(key)?.add(project.slug);
 		}
 	}
 
@@ -46,9 +47,7 @@ export function inferCrossLinks(): CrossLink[] {
 	}
 
 	const newLinks: CrossLink[] = [];
-	const linkPairs = new Set(
-		existing.map((l) => `${l.from}:${l.to}`),
-	);
+	const linkPairs = new Set(existing.map((l) => `${l.from}:${l.to}`));
 
 	for (const sym of shared) {
 		for (let i = 0; i < sym.projects.length; i++) {

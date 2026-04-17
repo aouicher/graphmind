@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { watch } from "chokidar";
-import { GraphBuilder } from "./builder.js";
-import { Registry } from "../registry.js";
-import { metaPath } from "../../utils/paths.js";
 import { log } from "../../utils/logger.js";
+import { metaPath } from "../../utils/paths.js";
+import { Registry } from "../registry.js";
+import { GraphBuilder } from "./builder.js";
 
 const SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
 const DEBOUNCE_MS = 2000;
@@ -17,18 +17,10 @@ export function startWatcher(slug: string): void {
 		return;
 	}
 
-	const ignored = [
-		/node_modules/,
-		/\.git/,
-		/dist/,
-		/build/,
-		/coverage/,
-		/__pycache__/,
-		/\.next/,
-	];
+	const ignored = [/node_modules/, /\.git/, /dist/, /build/, /coverage/, /__pycache__/, /\.next/];
 
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-	let pendingFiles = new Set<string>();
+	const pendingFiles = new Set<string>();
 
 	const watcher = watch(project.path, {
 		ignored,
@@ -44,9 +36,9 @@ export function startWatcher(slug: string): void {
 
 		const builder = new GraphBuilder(slug);
 		try {
-			const result = await builder.build(project!.path, {
+			const result = await builder.build(project?.path, {
 				full: false,
-				exclude: project!.exclude,
+				exclude: project?.exclude,
 			});
 
 			registry.updateProject(slug, {

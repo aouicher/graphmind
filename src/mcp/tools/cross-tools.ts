@@ -27,7 +27,13 @@ export function registerCrossTools(): ToolDef[] {
 			handler: async (args) => {
 				const registry = new Registry();
 				const projects = registry.list();
-				const results: Array<{ project: string; name: string; kind: string; file: string; line: number }> = [];
+				const results: Array<{
+					project: string;
+					name: string;
+					kind: string;
+					file: string;
+					line: number;
+				}> = [];
 
 				for (const project of projects) {
 					const dbPath = graphDbPath(project.slug);
@@ -37,10 +43,18 @@ export function registerCrossTools(): ToolDef[] {
 					const symbols = q.findSymbol(args.symbol as string);
 					db.close();
 					for (const s of symbols) {
-						results.push({ project: project.slug, name: s.name, kind: s.kind, file: s.file, line: s.line_start });
+						results.push({
+							project: project.slug,
+							name: s.name,
+							kind: s.kind,
+							file: s.file,
+							line: s.line_start,
+						});
 					}
 				}
-				return results.length > 0 ? results : `No symbol "${args.symbol}" found across ${projects.length} project(s)`;
+				return results.length > 0
+					? results
+					: `No symbol "${args.symbol}" found across ${projects.length} project(s)`;
 			},
 		},
 		{
@@ -95,7 +109,10 @@ export function registerCrossTools(): ToolDef[] {
 						cwd: project.path,
 						encoding: "utf-8",
 					});
-					changedFiles = output.split("\n").map((f) => f.trim()).filter(Boolean);
+					changedFiles = output
+						.split("\n")
+						.map((f) => f.trim())
+						.filter(Boolean);
 				} catch {
 					return "Failed to run git diff.";
 				}

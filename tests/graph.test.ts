@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { initDatabase } from "../src/core/graph/schema.js";
-import { GraphQueries } from "../src/core/graph/queries.js";
 import { FileHashCache } from "../src/core/graph/cache.js";
+import { GraphQueries } from "../src/core/graph/queries.js";
+import { initDatabase } from "../src/core/graph/schema.js";
 
-const TEST_DIR = join(tmpdir(), "graphmind-test-graph-" + Date.now());
+const TEST_DIR = join(tmpdir(), `graphmind-test-graph-${Date.now()}`);
 
 describe("Graph Schema", () => {
 	let dbPath: string;
@@ -38,9 +38,7 @@ describe("Graph Schema", () => {
 		const db1 = initDatabase(dbPath);
 		db1.close();
 		const db2 = initDatabase(dbPath);
-		const tables = db2
-			.prepare("SELECT name FROM sqlite_master WHERE type='table'")
-			.all();
+		const tables = db2.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
 		expect(tables.length).toBeGreaterThan(0);
 		db2.close();
 	});
@@ -59,10 +57,24 @@ describe("GraphQueries", () => {
 
 		db.prepare(
 			"INSERT INTO symbols (name, kind, file, line_start, line_end, signature) VALUES (?, ?, ?, ?, ?, ?)",
-		).run("authenticate", "function", "src/auth.ts", 10, 20, "(token: string): Promise<AuthResult>");
+		).run(
+			"authenticate",
+			"function",
+			"src/auth.ts",
+			10,
+			20,
+			"(token: string): Promise<AuthResult>",
+		);
 		db.prepare(
 			"INSERT INTO symbols (name, kind, file, line_start, line_end, signature) VALUES (?, ?, ?, ?, ?, ?)",
-		).run("validateToken", "function", "src/utils/jwt.ts", 5, 15, "(token: string): DecodedToken | null");
+		).run(
+			"validateToken",
+			"function",
+			"src/utils/jwt.ts",
+			5,
+			15,
+			"(token: string): DecodedToken | null",
+		);
 		db.prepare(
 			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
 		).run("UserRepository", "class", "src/user.ts", 1, 30);
@@ -70,8 +82,18 @@ describe("GraphQueries", () => {
 			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
 		).run("handleRequest", "function", "src/index.ts", 5, 10);
 
-		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(1, 2, "calls", "src/auth.ts");
-		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(4, 1, "calls", "src/index.ts");
+		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(
+			1,
+			2,
+			"calls",
+			"src/auth.ts",
+		);
+		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(
+			4,
+			1,
+			"calls",
+			"src/index.ts",
+		);
 	});
 
 	afterEach(() => {
@@ -82,38 +104,38 @@ describe("GraphQueries", () => {
 	it("finds symbols by name", () => {
 		const results = queries.findSymbol("authenticate");
 		expect(results).toHaveLength(1);
-		expect(results[0]!.kind).toBe("function");
-		expect(results[0]!.file).toBe("src/auth.ts");
+		expect(results[0]?.kind).toBe("function");
+		expect(results[0]?.file).toBe("src/auth.ts");
 	});
 
 	it("finds callers", () => {
 		const callers = queries.callers("authenticate");
 		expect(callers).toHaveLength(1);
-		expect(callers[0]!.name).toBe("handleRequest");
+		expect(callers[0]?.name).toBe("handleRequest");
 	});
 
 	it("finds callees", () => {
 		const callees = queries.callees("authenticate");
 		expect(callees).toHaveLength(1);
-		expect(callees[0]!.name).toBe("validateToken");
+		expect(callees[0]?.name).toBe("validateToken");
 	});
 
 	it("searches via FTS", () => {
 		const results = queries.searchSymbols("auth*");
 		expect(results.length).toBeGreaterThan(0);
-		expect(results[0]!.name).toBe("authenticate");
+		expect(results[0]?.name).toBe("authenticate");
 	});
 
 	it("computes file dependencies", () => {
 		const deps = queries.fileDeps("src/auth.ts");
 		expect(deps).toHaveLength(1);
-		expect(deps[0]!.file).toBe("src/utils/jwt.ts");
+		expect(deps[0]?.file).toBe("src/utils/jwt.ts");
 	});
 
 	it("computes reverse file dependencies", () => {
 		const rdeps = queries.fileReverseDeps("src/auth.ts");
 		expect(rdeps).toHaveLength(1);
-		expect(rdeps[0]!.file).toBe("src/index.ts");
+		expect(rdeps[0]?.file).toBe("src/index.ts");
 	});
 
 	it("computes impact (transitive reverse deps)", () => {

@@ -36,11 +36,7 @@ describe("MCP Tools Registration", () => {
 	});
 
 	it("all tools have descriptions and input schemas", () => {
-		const allTools = [
-			...registerGraphTools(),
-			...registerMemoryTools(),
-			...registerMetaTools(),
-		];
+		const allTools = [...registerGraphTools(), ...registerMemoryTools(), ...registerMetaTools()];
 
 		for (const tool of allTools) {
 			expect(tool.description).toBeTruthy();
@@ -53,10 +49,7 @@ describe("MCP Tools Registration", () => {
 		const tools = registerMemoryTools();
 		const addTool = tools.find((t) => t.name === "gm_memory_add")!;
 
-		const result = await addTool.handler(
-			{ fact: "Test fact", confirmed: false },
-			null,
-		);
+		const result = await addTool.handler({ fact: "Test fact", confirmed: false }, null);
 		expect(result).toHaveProperty("confirmation_required", true);
 		expect(result).toHaveProperty("preview");
 	});

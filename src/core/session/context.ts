@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
+import { graphDbPath, metaPath } from "../../utils/paths.js";
 import { GraphQueries } from "../graph/queries.js";
 import { initDatabase } from "../graph/schema.js";
 import { MemoryStore } from "../memory/store.js";
 import { Registry } from "../registry.js";
-import { graphDbPath, metaPath } from "../../utils/paths.js";
 
 export interface SessionContext {
 	project: {

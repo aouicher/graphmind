@@ -23,7 +23,11 @@ export interface ParsedFile {
 	}>;
 }
 
-export declare const parseFile: ((path: string, source: string, language: string) => ParsedFile) | null;
-export declare const parseFiles: ((files: Array<{ path: string; source: string; language: string }>) => ParsedFile[]) | null;
+export declare const parseFile:
+	| ((path: string, source: string, language: string) => ParsedFile)
+	| null;
+export declare const parseFiles:
+	| ((files: Array<{ path: string; source: string; language: string }>) => ParsedFile[])
+	| null;
 export declare const supportedLanguages: (() => string[]) | null;
 export declare const available: boolean;

@@ -13,7 +13,7 @@ export function registerMcpCommand(program: Command): void {
 		.option("--projects <slugs>", "Restrict to specific projects (comma-separated)")
 		.action(async (opts: { transport: string; port: string; projects?: string }) => {
 			if (opts.transport === "http") {
-				const port = parseInt(opts.port, 10);
+				const port = Number.parseInt(opts.port, 10);
 				log.info(`Starting MCP server on http://127.0.0.1:${port}`);
 			} else {
 				log.info("Starting MCP server (stdio)");
@@ -24,7 +24,7 @@ export function registerMcpCommand(program: Command): void {
 			const { startMcpServer } = await import("../../mcp/server.js");
 			await startMcpServer({
 				transport: opts.transport as "stdio" | "http",
-				port: parseInt(opts.port, 10),
+				port: Number.parseInt(opts.port, 10),
 				projects: projectFilter,
 			});
 		});

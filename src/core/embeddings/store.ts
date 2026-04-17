@@ -1,6 +1,6 @@
-import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import Database from "better-sqlite3";
 import { graphDir } from "../../utils/paths.js";
 
 export interface EmbeddingRow {
@@ -44,7 +44,9 @@ export class EmbeddingStore {
 
 	insert(row: Omit<EmbeddingRow, "id">): void {
 		this.db
-			.prepare("INSERT INTO embeddings (symbol_name, symbol_kind, file, text, embedding) VALUES (?, ?, ?, ?, ?)")
+			.prepare(
+				"INSERT INTO embeddings (symbol_name, symbol_kind, file, text, embedding) VALUES (?, ?, ?, ?, ?)",
+			)
 			.run(row.symbol_name, row.symbol_kind, row.file, row.text, row.embedding);
 	}
 

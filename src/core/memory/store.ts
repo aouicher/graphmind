@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { v4 as uuid } from "uuid";
-import { memoryDir, globalMemoryPath, memoryPath } from "../../utils/paths.js";
+import { globalMemoryPath, memoryDir, memoryPath } from "../../utils/paths.js";
 
 export interface MemoryEntry {
 	id: string;
@@ -74,9 +74,7 @@ export class MemoryStore {
 			}
 		}
 
-		return entries.sort(
-			(a, b) => new Date(b.created).getTime() - new Date(a.created).getTime(),
-		);
+		return entries.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 	}
 
 	delete(id: string, project?: string): boolean {

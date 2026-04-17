@@ -1,12 +1,12 @@
-import type { Command } from "commander";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Command } from "commander";
+import { GraphQueries } from "../../core/graph/queries.js";
+import { initDatabase } from "../../core/graph/schema.js";
 import { Registry } from "../../core/registry.js";
 import { log } from "../../utils/logger.js";
 import { metaPath } from "../../utils/paths.js";
 import { graphDbPath } from "../../utils/paths.js";
-import { initDatabase } from "../../core/graph/schema.js";
-import { GraphQueries } from "../../core/graph/queries.js";
 
 const SECTION_START = "<!-- graphmind:start -->";
 const SECTION_END = "<!-- graphmind:end -->";

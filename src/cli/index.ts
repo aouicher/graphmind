@@ -8,16 +8,13 @@ import { registerMcpCommand } from "./commands/mcp.js";
 import { registerMemoryCommand } from "./commands/memory.js";
 import { registerQueryCommand } from "./commands/query.js";
 import { registerRegisterCommand } from "./commands/register.js";
-import { registerSessionCommand } from "./commands/session.js";
 import { registerSearchCommand } from "./commands/search.js";
+import { registerSessionCommand } from "./commands/session.js";
 import { registerSyncCommand } from "./commands/sync.js";
 
 const program = new Command();
 
-program
-	.name("graphmind")
-	.description("Your codebase has memory. Use it.")
-	.version("0.1.0");
+program.name("graphmind").description("Your codebase has memory. Use it.").version("0.1.0");
 
 registerRegisterCommand(program);
 registerBuildCommand(program);

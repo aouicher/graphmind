@@ -1,5 +1,5 @@
+import type { UserRepository } from "./user";
 import { validateToken } from "./utils/jwt";
-import { UserRepository } from "./user";
 
 export interface AuthResult {
 	valid: boolean;

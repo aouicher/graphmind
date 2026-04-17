@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionLogger } from "../src/core/session/logger.js";
 
-const TEST_DIR = join(tmpdir(), "graphmind-test-session-" + Date.now());
+const TEST_DIR = join(tmpdir(), `graphmind-test-session-${Date.now()}`);
 
 describe("SessionLogger", () => {
 	beforeEach(() => {

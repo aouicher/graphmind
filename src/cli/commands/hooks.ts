@@ -36,18 +36,14 @@ function installHook(hooksDir: string, name: string, content: string): boolean {
 }
 
 export function registerHooksCommand(program: Command): void {
-	const hooks = program
-		.command("hooks")
-		.description("Manage git hooks for graphmind");
+	const hooks = program.command("hooks").description("Manage git hooks for graphmind");
 
 	hooks
 		.command("install [slug]")
 		.description("Install git hooks (post-commit + pre-push)")
 		.action((slug?: string) => {
 			const registry = new Registry();
-			const project = slug
-				? registry.get(slug)
-				: registry.findByPath(process.cwd());
+			const project = slug ? registry.get(slug) : registry.findByPath(process.cwd());
 
 			if (!project) {
 				log.error("Not in a registered project.");
@@ -81,9 +77,7 @@ export function registerHooksCommand(program: Command): void {
 		.description("Remove graphmind git hooks")
 		.action((slug?: string) => {
 			const registry = new Registry();
-			const project = slug
-				? registry.get(slug)
-				: registry.findByPath(process.cwd());
+			const project = slug ? registry.get(slug) : registry.findByPath(process.cwd());
 
 			if (!project) {
 				log.error("Not in a registered project.");

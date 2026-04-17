@@ -17,7 +17,8 @@ export function registerSearchTools(): ToolDef[] {
 	return [
 		{
 			name: "gm_search",
-			description: "Semantic search across symbols. Supports multi-query with semicolons. Falls back to FTS if embeddings unavailable.",
+			description:
+				"Semantic search across symbols. Supports multi-query with semicolons. Falls back to FTS if embeddings unavailable.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -30,9 +31,10 @@ export function registerSearchTools(): ToolDef[] {
 			},
 			handler: async (args, projectFilter) => {
 				const registry = new Registry();
-				const slug = (args.project as string)
-					?? projectFilter?.[0]
-					?? registry.findByPath(process.cwd())?.slug;
+				const slug =
+					(args.project as string) ??
+					projectFilter?.[0] ??
+					registry.findByPath(process.cwd())?.slug;
 
 				if (!slug) return "Not in a registered project. Provide a project slug.";
 
@@ -52,7 +54,10 @@ export function registerSearchTools(): ToolDef[] {
 
 				const db = initDatabase(dbPath);
 				const q = new GraphQueries(db);
-				const ftsQuery = query.split(/\s+/).map((w) => `${w}*`).join(" ");
+				const ftsQuery = query
+					.split(/\s+/)
+					.map((w) => `${w}*`)
+					.join(" ");
 				let results = q.searchSymbols(ftsQuery);
 				db.close();
 

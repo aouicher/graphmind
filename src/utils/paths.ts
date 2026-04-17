@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 function home(): string {
-	return process.env["HOME"] ?? homedir();
+	return process.env.HOME ?? homedir();
 }
 
 export function graphmindDir(): string {

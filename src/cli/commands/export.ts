@@ -32,7 +32,11 @@ function sanitizeId(s: string): string {
 }
 
 function exportDot(edges: GraphEdge[], title: string): string {
-	const lines = [`digraph "${title}" {`, "  rankdir=LR;", '  node [shape=box, style=filled, fillcolor="#e8e8e8"];'];
+	const lines = [
+		`digraph "${title}" {`,
+		"  rankdir=LR;",
+		'  node [shape=box, style=filled, fillcolor="#e8e8e8"];',
+	];
 	const files = new Set<string>();
 	for (const e of edges) {
 		files.add(e.from_file);
@@ -49,7 +53,7 @@ function exportDot(edges: GraphEdge[], title: string): string {
 }
 
 function exportMermaid(edges: GraphEdge[], title: string): string {
-	const lines = [`graph LR`, `  %% ${title}`];
+	const lines = ["graph LR", `  %% ${title}`];
 	const files = new Set<string>();
 	for (const e of edges) {
 		files.add(e.from_file);
@@ -70,17 +74,25 @@ function exportJson(edges: GraphEdge[], title: string): string {
 		files.add(e.from_file);
 		files.add(e.to_file);
 	}
-	return JSON.stringify({
-		title,
-		nodes: [...files].map((f) => ({ id: f })),
-		edges: edges.map((e) => ({ from: e.from_file, to: e.to_file, kind: e.kind })),
-	}, null, 2);
+	return JSON.stringify(
+		{
+			title,
+			nodes: [...files].map((f) => ({ id: f })),
+			edges: edges.map((e) => ({ from: e.from_file, to: e.to_file, kind: e.kind })),
+		},
+		null,
+		2,
+	);
 }
 
 function exportCrossDot(): string {
 	const store = new CrossLinkStore();
 	const links = store.list();
-	const lines = ['digraph "cross-project" {', "  rankdir=LR;", '  node [shape=box, style=filled, fillcolor="#d4e6f1"];'];
+	const lines = [
+		'digraph "cross-project" {',
+		"  rankdir=LR;",
+		'  node [shape=box, style=filled, fillcolor="#d4e6f1"];',
+	];
 	const projects = new Set<string>();
 	for (const l of links) {
 		projects.add(l.from);
@@ -122,11 +134,15 @@ function exportCrossJson(): string {
 		projects.add(l.from);
 		projects.add(l.to);
 	}
-	return JSON.stringify({
-		title: "cross-project",
-		nodes: [...projects].map((p) => ({ id: p })),
-		edges: links.map((l) => ({ from: l.from, to: l.to, type: l.type, reason: l.reason })),
-	}, null, 2);
+	return JSON.stringify(
+		{
+			title: "cross-project",
+			nodes: [...projects].map((p) => ({ id: p })),
+			edges: links.map((l) => ({ from: l.from, to: l.to, type: l.type, reason: l.reason })),
+		},
+		null,
+		2,
+	);
 }
 
 export function registerExportCommand(program: Command): void {
@@ -136,58 +152,66 @@ export function registerExportCommand(program: Command): void {
 		.option("-f, --format <format>", "Output format: dot, mermaid, json")
 		.option("--cross", "Export cross-project graph instead")
 		.option("--obsidian <path>", "Export as Obsidian vault to given directory")
-		.action((slug: string | undefined, opts: { format?: string; cross?: boolean; obsidian?: string }) => {
-			if (opts.obsidian) {
-				exportObsidian(slug, opts.obsidian);
-				return;
-			}
+		.action(
+			(slug: string | undefined, opts: { format?: string; cross?: boolean; obsidian?: string }) => {
+				if (opts.obsidian) {
+					exportObsidian(slug, opts.obsidian);
+					return;
+				}
 
-			const format = opts.format as Format | undefined;
-			if (!format || !["dot", "mermaid", "json"].includes(format)) {
-				log.error(`Specify format: -f dot|mermaid|json, or --obsidian <path>`);
-				process.exitCode = 1;
-				return;
-			}
+				const format = opts.format as Format | undefined;
+				if (!format || !["dot", "mermaid", "json"].includes(format)) {
+					log.error("Specify format: -f dot|mermaid|json, or --obsidian <path>");
+					process.exitCode = 1;
+					return;
+				}
 
-			if (opts.cross) {
-				const output = format === "dot" ? exportCrossDot()
-					: format === "mermaid" ? exportCrossMermaid()
-					: exportCrossJson();
+				if (opts.cross) {
+					const output =
+						format === "dot"
+							? exportCrossDot()
+							: format === "mermaid"
+								? exportCrossMermaid()
+								: exportCrossJson();
+					console.log(output);
+					return;
+				}
+
+				const registry = new Registry();
+				const resolvedSlug = slug ?? registry.findByPath(process.cwd())?.slug;
+
+				if (!resolvedSlug) {
+					log.error("Not in a registered project. Use: graphmind export <slug> -f <format>");
+					process.exitCode = 1;
+					return;
+				}
+
+				const dbPath = graphDbPath(resolvedSlug);
+				if (!existsSync(dbPath)) {
+					log.error(`No graph for "${resolvedSlug}". Run: graphmind build`);
+					process.exitCode = 1;
+					return;
+				}
+
+				const db = initDatabase(dbPath);
+				const edges = getFileEdges(db);
+				db.close();
+
+				if (edges.length === 0) {
+					log.dim("No cross-file edges to export.");
+					return;
+				}
+
+				const title = resolvedSlug;
+				const output =
+					format === "dot"
+						? exportDot(edges, title)
+						: format === "mermaid"
+							? exportMermaid(edges, title)
+							: exportJson(edges, title);
 				console.log(output);
-				return;
-			}
-
-			const registry = new Registry();
-			const resolvedSlug = slug ?? registry.findByPath(process.cwd())?.slug;
-
-			if (!resolvedSlug) {
-				log.error("Not in a registered project. Use: graphmind export <slug> -f <format>");
-				process.exitCode = 1;
-				return;
-			}
-
-			const dbPath = graphDbPath(resolvedSlug);
-			if (!existsSync(dbPath)) {
-				log.error(`No graph for "${resolvedSlug}". Run: graphmind build`);
-				process.exitCode = 1;
-				return;
-			}
-
-			const db = initDatabase(dbPath);
-			const edges = getFileEdges(db);
-			db.close();
-
-			if (edges.length === 0) {
-				log.dim("No cross-file edges to export.");
-				return;
-			}
-
-			const title = resolvedSlug;
-			const output = format === "dot" ? exportDot(edges, title)
-				: format === "mermaid" ? exportMermaid(edges, title)
-				: exportJson(edges, title);
-			console.log(output);
-		});
+			},
+		);
 }
 
 interface SymbolRow {
@@ -229,17 +253,21 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 
 	const db = initDatabase(dbPath);
 
-	const symbols = db.prepare(
-		"SELECT name, kind, file, line_start, signature, doc FROM symbols ORDER BY file, line_start",
-	).all() as SymbolRow[];
+	const symbols = db
+		.prepare(
+			"SELECT name, kind, file, line_start, signature, doc FROM symbols ORDER BY file, line_start",
+		)
+		.all() as SymbolRow[];
 
-	const edges = db.prepare(`
+	const edges = db
+		.prepare(`
 		SELECT s1.name as from_name, s1.kind as from_kind,
 		       s2.name as to_name, s2.kind as to_kind, e.kind as edge_kind
 		FROM edges e
 		JOIN symbols s1 ON e.from_id = s1.id
 		JOIN symbols s2 ON e.to_id = s2.id
-	`).all() as EdgeRow[];
+	`)
+		.all() as EdgeRow[];
 
 	db.close();
 
@@ -247,14 +275,14 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 	for (const e of edges) {
 		const key = e.from_name;
 		if (!edgeMap.has(key)) edgeMap.set(key, []);
-		edgeMap.get(key)!.push(e);
+		edgeMap.get(key)?.push(e);
 	}
 
 	const reverseMap = new Map<string, EdgeRow[]>();
 	for (const e of edges) {
 		const key = e.to_name;
 		if (!reverseMap.has(key)) reverseMap.set(key, []);
-		reverseMap.get(key)!.push(e);
+		reverseMap.get(key)?.push(e);
 	}
 
 	for (const sym of symbols) {
@@ -301,7 +329,7 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 	const byFile = new Map<string, SymbolRow[]>();
 	for (const sym of symbols) {
 		if (!byFile.has(sym.file)) byFile.set(sym.file, []);
-		byFile.get(sym.file)!.push(sym);
+		byFile.get(sym.file)?.push(sym);
 	}
 
 	for (const [file, syms] of byFile) {

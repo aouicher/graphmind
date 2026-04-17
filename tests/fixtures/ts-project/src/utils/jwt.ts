@@ -13,7 +13,7 @@ export function validateToken(token: string): DecodedToken | null {
 
 	return {
 		userId: parts[1]!,
-		exp: parseInt(parts[2]!, 10),
+		exp: Number.parseInt(parts[2]!, 10),
 	};
 }
 

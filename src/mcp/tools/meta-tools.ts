@@ -73,8 +73,7 @@ export function registerMetaTools(): ToolDef[] {
 			},
 			handler: async (args) => {
 				const registry = new Registry();
-				const slug =
-					(args.project as string) ?? registry.findByPath(process.cwd())?.slug;
+				const slug = (args.project as string) ?? registry.findByPath(process.cwd())?.slug;
 
 				if (!slug) return "Not in a registered project.";
 
@@ -107,9 +106,7 @@ export function registerMetaTools(): ToolDef[] {
 						path: project.path,
 						lastBuild: project.lastBuild,
 					},
-					graph: stats
-						? { ...stats, languages: langs }
-						: null,
+					graph: stats ? { ...stats, languages: langs } : null,
 					meta,
 					recentMemories,
 				};

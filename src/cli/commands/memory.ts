@@ -4,16 +4,18 @@ import { MemoryStore } from "../../core/memory/store.js";
 import { log } from "../../utils/logger.js";
 
 export function registerMemoryCommand(program: Command): void {
-	const memory = program
-		.command("memory")
-		.description("Manage declarative memory");
+	const memory = program.command("memory").description("Manage declarative memory");
 
 	memory
 		.command("add <content>")
 		.description("Add a memory entry")
 		.option("-p, --project <slug>", "Associate with project")
 		.option("-g, --global", "Store as global memory")
-		.option("-t, --type <type>", "Entry type (decision|pattern|convention|bug|context|session)", "context")
+		.option(
+			"-t, --type <type>",
+			"Entry type (decision|pattern|convention|bug|context|session)",
+			"context",
+		)
 		.option("--tags <tags...>", "Tags for the entry")
 		.action(
 			(
@@ -40,7 +42,7 @@ export function registerMemoryCommand(program: Command): void {
 			const store = new MemoryStore();
 			const search = new MemorySearch();
 			const entries = store.list(opts.project);
-			const results = search.search(entries, query, parseInt(opts.limit, 10));
+			const results = search.search(entries, query, Number.parseInt(opts.limit, 10));
 
 			if (results.length === 0) {
 				log.dim("No matching memories found.");
@@ -48,7 +50,7 @@ export function registerMemoryCommand(program: Command): void {
 			}
 
 			for (const r of results) {
-				const scope = r.global ? "global" : r.project ?? "global";
+				const scope = r.global ? "global" : (r.project ?? "global");
 				const tags = r.tags.length > 0 ? ` [${r.tags.join(", ")}]` : "";
 				console.log(`\n  ${r.id.slice(0, 8)} (${r.type}, ${scope})${tags}`);
 				console.log(`  ${r.content}`);
@@ -66,13 +68,15 @@ export function registerMemoryCommand(program: Command): void {
 			const entries = store.list(opts.project);
 
 			if (entries.length === 0) {
-				log.dim("No memories stored. Run: graphmind memory add \"<fact>\"");
+				log.dim('No memories stored. Run: graphmind memory add "<fact>"');
 				return;
 			}
 
 			for (const e of entries) {
-				const scope = e.global ? "global" : e.project ?? "global";
-				console.log(`  ${e.id.slice(0, 8)} │ ${e.type.padEnd(10)} │ ${scope.padEnd(12)} │ ${e.content.slice(0, 60)}`);
+				const scope = e.global ? "global" : (e.project ?? "global");
+				console.log(
+					`  ${e.id.slice(0, 8)} │ ${e.type.padEnd(10)} │ ${scope.padEnd(12)} │ ${e.content.slice(0, 60)}`,
+				);
 			}
 			console.log(`\n  ${entries.length} entries total`);
 		});

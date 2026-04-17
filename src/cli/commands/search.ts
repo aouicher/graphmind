@@ -19,7 +19,9 @@ export function registerSearchCommand(program: Command): void {
 		.action(async (query: string, opts: { in?: string; kind?: string; limit: string }) => {
 			const available = await isAvailable();
 			if (!available) {
-				log.error("Semantic search requires @xenova/transformers. Install: npm i @xenova/transformers");
+				log.error(
+					"Semantic search requires @xenova/transformers. Install: npm i @xenova/transformers",
+				);
 				log.dim("Falling back to FTS keyword search...\n");
 				fallbackFtsSearch(query, opts);
 				return;
@@ -34,7 +36,7 @@ export function registerSearchCommand(program: Command): void {
 				return;
 			}
 
-			const limit = parseInt(opts.limit, 10);
+			const limit = Number.parseInt(opts.limit, 10);
 			const results = await semanticSearch(slug, query, { limit, kind: opts.kind });
 
 			if (results.length === 0) {
@@ -78,9 +80,12 @@ export function registerSearchCommand(program: Command): void {
 			}
 
 			const db = initDatabase(dbPath);
-			const symbols = db
-				.prepare("SELECT name, kind, file, signature FROM symbols")
-				.all() as Array<{ name: string; kind: string; file: string; signature: string | null }>;
+			const symbols = db.prepare("SELECT name, kind, file, signature FROM symbols").all() as Array<{
+				name: string;
+				kind: string;
+				file: string;
+				signature: string | null;
+			}>;
 			db.close();
 
 			if (symbols.length === 0) {
@@ -123,7 +128,7 @@ export function registerSearchCommand(program: Command): void {
 			}
 
 			store.close();
-			console.log(`\n`);
+			console.log("\n");
 			log.success(`Embedded ${processed} symbols for "${slug}".`);
 		});
 }
@@ -150,11 +155,14 @@ function fallbackFtsSearch(
 
 	const db = initDatabase(dbPath);
 	const q = new GraphQueries(db);
-	const ftsQuery = query.split(/\s+/).map((w) => `${w}*`).join(" ");
+	const ftsQuery = query
+		.split(/\s+/)
+		.map((w) => `${w}*`)
+		.join(" ");
 	const results = q.searchSymbols(ftsQuery);
 	db.close();
 
-	const limit = parseInt(opts.limit, 10);
+	const limit = Number.parseInt(opts.limit, 10);
 	const filtered = opts.kind ? results.filter((r) => r.kind === opts.kind) : results;
 	const limited = filtered.slice(0, limit);
 

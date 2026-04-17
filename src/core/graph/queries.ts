@@ -148,8 +148,7 @@ export class GraphQueries {
 	}
 
 	stats(): { symbols: number; edges: number; files: number } {
-		const symbols = (this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as { c: number })
-			.c;
+		const symbols = (this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as { c: number }).c;
 		const edges = (this.db.prepare("SELECT COUNT(*) as c FROM edges").get() as { c: number }).c;
 		const files = (this.db.prepare("SELECT COUNT(*) as c FROM files").get() as { c: number }).c;
 		return { symbols, edges, files };

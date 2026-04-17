@@ -1,6 +1,8 @@
+// biome-ignore lint/suspicious/noExplicitAny: @xenova/transformers has no exported pipeline type
 let pipeline: any = null;
 let loadAttempted = false;
 
+// biome-ignore lint/suspicious/noExplicitAny: dynamic import with no type exports
 async function loadPipeline(): Promise<any> {
 	if (pipeline) return pipeline;
 	if (loadAttempted) return null;

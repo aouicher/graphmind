@@ -56,7 +56,10 @@ export class CrossLinkStore {
 		const filtered = entries.filter((e) => e.id !== id);
 		if (filtered.length === entries.length) return false;
 		const tmpPath = `${filePath}.tmp.${Date.now()}`;
-		writeFileSync(tmpPath, filtered.map((e) => JSON.stringify(e)).join("\n") + (filtered.length ? "\n" : ""));
+		writeFileSync(
+			tmpPath,
+			filtered.map((e) => JSON.stringify(e)).join("\n") + (filtered.length ? "\n" : ""),
+		);
 		renameSync(tmpPath, filePath);
 		return true;
 	}

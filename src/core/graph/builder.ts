@@ -159,15 +159,9 @@ export class GraphBuilder {
 		}
 
 		// Pass 2: Resolve cross-file edges
-		const findSymbol = this.db.prepare(
-			"SELECT id, file FROM symbols WHERE name = ?",
-		);
-		const findSymbolInFile = this.db.prepare(
-			"SELECT id FROM symbols WHERE name = ? AND file = ?",
-		);
-		const findFirstSymbolInFile = this.db.prepare(
-			"SELECT id FROM symbols WHERE file = ? LIMIT 1",
-		);
+		const findSymbol = this.db.prepare("SELECT id, file FROM symbols WHERE name = ?");
+		const findSymbolInFile = this.db.prepare("SELECT id FROM symbols WHERE name = ? AND file = ?");
+		const findFirstSymbolInFile = this.db.prepare("SELECT id FROM symbols WHERE file = ? LIMIT 1");
 
 		const resolveEdges = this.db.transaction(() => {
 			// Resolve call sites: look up callee across all files
@@ -199,7 +193,9 @@ export class GraphBuilder {
 						// Find the imported symbol in the target file
 						let targetRow: { id: number } | undefined;
 						if (resolvedFile) {
-							targetRow = findSymbolInFile.get(cleanSpec, resolvedFile) as { id: number } | undefined;
+							targetRow = findSymbolInFile.get(cleanSpec, resolvedFile) as
+								| { id: number }
+								| undefined;
 						}
 						if (!targetRow) {
 							targetRow = findSymbol.get(cleanSpec) as { id: number } | undefined;
@@ -281,9 +277,9 @@ export class GraphBuilder {
 		const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.js"];
 		for (const ext of extensions) {
 			const candidate = base + ext;
-			const row = this.db
-				.prepare("SELECT path FROM files WHERE path = ?")
-				.get(candidate) as { path: string } | undefined;
+			const row = this.db.prepare("SELECT path FROM files WHERE path = ?").get(candidate) as
+				| { path: string }
+				| undefined;
 			if (row) return row.path;
 		}
 		return null;

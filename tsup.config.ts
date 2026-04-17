@@ -1,6 +1,6 @@
-import { defineConfig } from "tsup";
 import { cpSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { defineConfig } from "tsup";
 
 export default defineConfig({
 	entry: {

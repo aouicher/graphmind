@@ -1,11 +1,11 @@
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../src/core/graph/schema.js";
 import { GraphQueries } from "../src/core/graph/queries.js";
+import { initDatabase } from "../src/core/graph/schema.js";
 
-const TEST_DIR = join(tmpdir(), "graphmind-test-diffimpact-" + Date.now());
+const TEST_DIR = join(tmpdir(), `graphmind-test-diffimpact-${Date.now()}`);
 
 describe("diff-impact logic", () => {
 	let db: ReturnType<typeof initDatabase>;
@@ -17,15 +17,38 @@ describe("diff-impact logic", () => {
 		db = initDatabase(dbPath);
 		queries = new GraphQueries(db);
 
-		db.prepare("INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)").run("handler", "function", "src/api/handler.ts", 1, 20);
-		db.prepare("INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)").run("validate", "function", "src/core/validate.ts", 1, 15);
-		db.prepare("INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)").run("utils", "function", "src/utils/helpers.ts", 1, 10);
-		db.prepare("INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)").run("entry", "function", "src/index.ts", 1, 5);
+		db.prepare(
+			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
+		).run("handler", "function", "src/api/handler.ts", 1, 20);
+		db.prepare(
+			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
+		).run("validate", "function", "src/core/validate.ts", 1, 15);
+		db.prepare(
+			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
+		).run("utils", "function", "src/utils/helpers.ts", 1, 10);
+		db.prepare(
+			"INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES (?, ?, ?, ?, ?)",
+		).run("entry", "function", "src/index.ts", 1, 5);
 
 		// handler calls validate, validate calls utils, entry calls handler
-		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(1, 2, "calls", "src/api/handler.ts");
-		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(2, 3, "calls", "src/core/validate.ts");
-		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(4, 1, "calls", "src/index.ts");
+		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(
+			1,
+			2,
+			"calls",
+			"src/api/handler.ts",
+		);
+		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(
+			2,
+			3,
+			"calls",
+			"src/core/validate.ts",
+		);
+		db.prepare("INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)").run(
+			4,
+			1,
+			"calls",
+			"src/index.ts",
+		);
 	});
 
 	afterEach(() => {

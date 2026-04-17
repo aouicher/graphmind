@@ -68,7 +68,10 @@ export async function semanticSearch(
 	options?: { limit?: number; kind?: string },
 ): Promise<SearchResult[]> {
 	const limit = options?.limit ?? 20;
-	const queries = query.split(";").map((q) => q.trim()).filter(Boolean);
+	const queries = query
+		.split(";")
+		.map((q) => q.trim())
+		.filter(Boolean);
 
 	const store = new EmbeddingStore(slug);
 	let rows = store.all();

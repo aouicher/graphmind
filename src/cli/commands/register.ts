@@ -78,7 +78,7 @@ export function registerRegisterCommand(program: Command): void {
 				const issues: string[] = [];
 
 				if (!pathExists) issues.push("path missing");
-				if (!p.lastBuild) issues.push("never built → run: graphmind build " + p.slug);
+				if (!p.lastBuild) issues.push(`never built → run: graphmind build ${p.slug}`);
 
 				if (issues.length === 0) {
 					log.success(`${p.slug}: OK (built ${p.lastBuild?.slice(0, 10)})`);
