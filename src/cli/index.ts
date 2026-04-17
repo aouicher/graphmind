@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { registerBuildCommand } from "./commands/build.js";
 import { registerCrossCommand } from "./commands/cross.js";
 import { registerDiffImpactCommand } from "./commands/diff-impact.js";
+import { registerExportCommand } from "./commands/export.js";
 import { registerMcpCommand } from "./commands/mcp.js";
 import { registerMemoryCommand } from "./commands/memory.js";
 import { registerQueryCommand } from "./commands/query.js";
@@ -25,6 +26,7 @@ registerCrossCommand(program);
 registerSessionCommand(program);
 registerDiffImpactCommand(program);
 registerSearchCommand(program);
+registerExportCommand(program);
 registerSyncCommand(program);
 registerMcpCommand(program);
 
