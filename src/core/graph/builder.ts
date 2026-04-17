@@ -35,6 +35,10 @@ const DEFAULT_EXCLUDE = [
 	"venv",
 	"vendor",
 	"target",
+	"public/packs",
+	"public/assets",
+	"tmp",
+	"log",
 ];
 
 interface ParsedSymbol {
