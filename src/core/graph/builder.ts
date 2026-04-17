@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node
 import { dirname, extname, join, relative } from "node:path";
 import type Database from "better-sqlite3";
 import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
+import { log } from "../../utils/logger.js";
 import { FileHashCache } from "./cache.js";
 import { parseMarkdown } from "./markdown.js";
 import { initDatabase } from "./schema.js";
@@ -94,6 +95,8 @@ export class GraphBuilder {
 		let totalSymbols = 0;
 		let totalEdges = 0;
 
+		log.info(`Found ${files.length} source files`);
+
 		const parser = await this.getParser();
 
 		const insertFile = this.db.prepare(
@@ -115,7 +118,13 @@ export class GraphBuilder {
 		const pendingCalls: Array<{ relPath: string; callSites: ParsedCallSite[] }> = [];
 
 		// Pass 1: Parse all files, insert symbols
+		let fileIndex = 0;
+		const logInterval = Math.max(1, Math.floor(files.length / 10));
 		for (const file of files) {
+			fileIndex++;
+			if (fileIndex % logInterval === 0 || fileIndex === files.length) {
+				log.info(`Parsing ${fileIndex}/${files.length}...`);
+			}
 			const content = readFileSync(file.fullPath, "utf-8");
 			const relPath = relative(projectPath, file.fullPath);
 
@@ -304,9 +313,13 @@ export class GraphBuilder {
 						fn(path, source, language) as unknown as ParsedFile,
 				};
 			} else {
+				log.warn("Native parser not available — only Markdown files will be indexed.");
+				log.warn("Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing");
 				this.nativeParser = new FallbackParser();
 			}
 		} catch {
+			log.warn("Native parser not available — only Markdown files will be indexed.");
+			log.warn("Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing");
 			this.nativeParser = new FallbackParser();
 		}
 		// biome-ignore lint/style/noNonNullAssertion: assigned in try/catch above
