@@ -196,12 +196,18 @@ export class GraphBuilder {
 		try {
 			for (const { relPath, callSites } of pendingCalls) {
 				for (const cs of callSites) {
-					const callerRow = findSymbolInFile.get(cs.caller, relPath) as unknown as { id: number } | undefined;
+					const callerRow = findSymbolInFile.get(cs.caller, relPath) as unknown as
+						| { id: number }
+						| undefined;
 					if (!callerRow) continue;
 
-					let calleeRow = findSymbolInFile.get(cs.callee, relPath) as unknown as { id: number } | undefined;
+					let calleeRow = findSymbolInFile.get(cs.callee, relPath) as unknown as
+						| { id: number }
+						| undefined;
 					if (!calleeRow) {
-						calleeRow = findSymbol.get(cs.callee) as unknown as { id: number; file: string } | undefined;
+						calleeRow = findSymbol.get(cs.callee) as unknown as
+							| { id: number; file: string }
+							| undefined;
 					}
 					if (calleeRow) {
 						insertEdge.run(callerRow.id, calleeRow.id, "calls", relPath);
@@ -228,7 +234,9 @@ export class GraphBuilder {
 						}
 						if (!targetRow) continue;
 
-						const sourceRow = findFirstSymbolInFile.get(relPath) as unknown as { id: number } | undefined;
+						const sourceRow = findFirstSymbolInFile.get(relPath) as unknown as
+							| { id: number }
+							| undefined;
 						if (sourceRow) {
 							insertEdge.run(sourceRow.id, targetRow.id, "imports", relPath);
 							totalEdges++;
@@ -322,9 +330,9 @@ export class GraphBuilder {
 		const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.js"];
 		for (const ext of extensions) {
 			const candidate = base + ext;
-			const row = this.db.prepare("SELECT path FROM files WHERE path = ?").get(candidate) as unknown as
-				| { path: string }
-				| undefined;
+			const row = this.db
+				.prepare("SELECT path FROM files WHERE path = ?")
+				.get(candidate) as unknown as { path: string } | undefined;
 			if (row) return row.path;
 		}
 		return null;
