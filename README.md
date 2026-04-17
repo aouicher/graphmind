@@ -24,10 +24,21 @@ npm install -g @graphmind/cli
 
 graphmind register .          # register your project
 graphmind build               # build the code graph
+graphmind sync                # inject graph context into CLAUDE.md
 graphmind mcp                 # start MCP server for Claude Code
 ```
 
-Add to `~/.claude.json`:
+## Setup with Claude Code
+
+### 1. Global MCP server (recommended)
+
+Add graphmind as a global MCP server so Claude Code can use it in every project:
+
+```bash
+claude mcp add graphmind -- graphmind mcp
+```
+
+Or manually in `~/.claude/settings.json`:
 ```json
 {
   "mcpServers": {
@@ -37,6 +48,69 @@ Add to `~/.claude.json`:
     }
   }
 }
+```
+
+### 2. Per-project CLAUDE.md (recommended)
+
+`graphmind sync` injects a section into your project's `CLAUDE.md` with graph stats and quick-reference commands. Claude reads this automatically at the start of every session.
+
+```bash
+cd your-project
+graphmind sync                # updates CLAUDE.md in current project
+graphmind sync --all          # updates CLAUDE.md for all registered projects
+```
+
+This adds a block like:
+```markdown
+<!-- graphmind:start -->
+## graphmind
+
+Last build: 2026-04-17 | 142 symbols | 87 edges | 34 files
+Languages: typescript (25), javascript (9)
+MCP: `graphmind mcp` (stdio)
+
+### Before editing anything
+- Symbol: `graphmind fn <symbol> --no-tests`
+- File: `graphmind deps <file>`
+- Git changes: `graphmind diff-impact`
+- Find by intent: `graphmind search "handle auth; validate token"`
+
+### Rebuild when
+Structural changes, new modules, after merge.
+Command: `graphmind build --incremental`
+<!-- graphmind:end -->
+```
+
+Re-run `graphmind sync` after each build to keep it current.
+
+### 3. Claude Code skill (optional)
+
+Installs a skill that teaches Claude the 3-layer rule: query the graph first, check memory second, read raw files only when needed.
+
+```bash
+graphmind install-skill
+```
+
+### 4. Git hooks (optional)
+
+Auto-rebuild on commit, impact check on push:
+
+```bash
+graphmind hooks install
+```
+
+### Multi-project setup
+
+Register multiple projects, then Claude can query across all of them:
+
+```bash
+cd ~/projects/api && graphmind register .
+cd ~/projects/web && graphmind register .
+cd ~/projects/shared-lib && graphmind register .
+
+graphmind build --all
+graphmind cross-link infer    # auto-detect shared symbols
+graphmind sync --all
 ```
 
 ## Architecture
@@ -112,10 +186,11 @@ graphmind embed [slug]              # build local embeddings (one-time)
 
 ### Export
 ```bash
-graphmind export [slug] -f dot      # Graphviz dot format
-graphmind export [slug] -f mermaid  # Mermaid diagram
-graphmind export [slug] -f json     # JSON graph
-graphmind export --cross -f mermaid # cross-project diagram
+graphmind export [slug] -f dot            # Graphviz dot format
+graphmind export [slug] -f mermaid        # Mermaid diagram
+graphmind export [slug] -f json           # JSON graph
+graphmind export --cross -f mermaid       # cross-project diagram
+graphmind export --obsidian ~/vault/      # Obsidian vault with [[wikilinks]]
 ```
 
 ### Cross-Project
@@ -147,34 +222,30 @@ graphmind hooks install       # post-commit + pre-push
 graphmind hooks uninstall     # remove graphmind hooks
 ```
 
-### Integration
-```bash
-graphmind mcp                 # start MCP server (stdio)
-graphmind sync [slug]         # update CLAUDE.md
-graphmind install-skill       # install Claude Code skill
-```
+## MCP Tools Reference
 
-## Claude Code Integration
+graphmind exposes 18 tools via MCP (Model Context Protocol):
 
-### MCP Server
-graphmind exposes tools via MCP (Model Context Protocol) over stdio:
-- `gm_query` / `gm_fn` / `gm_deps` / `gm_impact` — graph queries
-- `gm_memory_search` / `gm_memory_add` — memory operations
-- `gm_cross_query` / `gm_cross_deps` / `gm_cross_links` — cross-project
-- `gm_diff_impact` — git change impact analysis
-- `gm_status` / `gm_context` — project metadata
-
-### Skill
-```bash
-graphmind install-skill
-```
-Installs a Claude Code skill that teaches Claude the 3-layer rule: query the graph first, check memory second, read raw files only when needed.
-
-### CLAUDE.md Sync
-```bash
-graphmind sync
-```
-Injects a section into your project's `CLAUDE.md` with graph stats, quick-reference commands, and related projects.
+| Tool | Description |
+|------|-------------|
+| `gm_query` | Find symbol and its connections |
+| `gm_fn` | Function call chain + callers |
+| `gm_deps` | File-level dependency map |
+| `gm_impact` | Transitive reverse dependencies |
+| `gm_fn_impact` | Blast radius for a symbol |
+| `gm_diff_impact` | Impact of current git changes |
+| `gm_map` | Most-connected files |
+| `gm_cycles` | Circular dependency detection |
+| `gm_search` | Semantic + FTS search |
+| `gm_memory_search` | Search stored decisions/patterns |
+| `gm_memory_add` | Store a fact (requires confirmation) |
+| `gm_cross_query` | Symbol search across all projects |
+| `gm_cross_deps` | Cross-project dependency graph |
+| `gm_cross_links` | List all cross-project links |
+| `gm_cross_infer` | Auto-detect shared symbols |
+| `gm_status` | Project health and stats |
+| `gm_context` | Full project context for session start |
+| `gm_list_projects` | All registered projects |
 
 ## Security
 
