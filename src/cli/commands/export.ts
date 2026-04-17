@@ -317,8 +317,8 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 		}
 
 		lines.push("");
-		const fileName = `${sym.name}.md`;
-		writeFileSync(join(graphDir, fileName), lines.join("\n"));
+		const safeName = sym.name.replace(/[/\\:*?"<>|]/g, "_");
+		writeFileSync(join(graphDir, `${safeName}.md`), lines.join("\n"));
 	}
 
 	// Index file
