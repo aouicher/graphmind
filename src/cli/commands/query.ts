@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import type { Command } from "commander";
 import { GraphQueries } from "../../core/graph/queries.js";
 import { initDatabase } from "../../core/graph/schema.js";
-import { Registry } from "../../core/registry.js";
 import { log } from "../../utils/logger.js";
 import { graphDbPath } from "../../utils/paths.js";
+import { resolveProjectSlug } from "../resolve.js";
 
 function openQueries(slug: string): GraphQueries | null {
 	const dbPath = graphDbPath(slug);
@@ -17,13 +17,11 @@ function openQueries(slug: string): GraphQueries | null {
 }
 
 function resolveProject(slug: string | undefined, inProject?: string): string | null {
-	const registry = new Registry();
-	if (inProject) return inProject;
-	if (slug) return slug;
-	const project = registry.findByPath(process.cwd());
-	if (project) return project.slug;
-	log.error("Not in a registered project. Specify --in <slug> or register this directory.");
-	return null;
+	const resolved = resolveProjectSlug(inProject, slug);
+	if (!resolved) {
+		log.error("Not in a registered project. Specify --in <slug> or register this directory.");
+	}
+	return resolved ?? null;
 }
 
 export function registerQueryCommand(program: Command): void {

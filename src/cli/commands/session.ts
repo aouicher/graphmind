@@ -1,8 +1,8 @@
 import type { Command } from "commander";
-import { Registry } from "../../core/registry.js";
 import { buildSessionContext } from "../../core/session/context.js";
 import { SessionLogger } from "../../core/session/logger.js";
 import { log } from "../../utils/logger.js";
+import { resolveProjectSlug } from "../resolve.js";
 
 export function registerSessionCommand(program: Command): void {
 	const session = program.command("session").description("Session logging and context");
@@ -11,8 +11,7 @@ export function registerSessionCommand(program: Command): void {
 		.command("start [slug]")
 		.description("Log session start and show context")
 		.action((slug: string | undefined) => {
-			const registry = new Registry();
-			const resolved = slug ?? registry.findByPath(process.cwd())?.slug;
+			const resolved = resolveProjectSlug(slug);
 			if (!resolved) {
 				log.error("Not in a registered project. Specify a slug or register this directory.");
 				process.exitCode = 1;
@@ -45,8 +44,7 @@ export function registerSessionCommand(program: Command): void {
 		.description("Save session summary to log")
 		.option("-s, --slug <slug>", "Project slug")
 		.action((message: string | undefined, opts: { slug?: string }) => {
-			const registry = new Registry();
-			const resolved = opts.slug ?? registry.findByPath(process.cwd())?.slug;
+			const resolved = resolveProjectSlug(opts.slug);
 			if (!resolved) {
 				log.error("Not in a registered project.");
 				process.exitCode = 1;
@@ -64,8 +62,7 @@ export function registerSessionCommand(program: Command): void {
 		.description("Show recent session entries")
 		.option("-n, --limit <n>", "Number of entries", "10")
 		.action((slug: string | undefined, opts: { limit: string }) => {
-			const registry = new Registry();
-			const resolved = slug ?? registry.findByPath(process.cwd())?.slug;
+			const resolved = resolveProjectSlug(slug);
 
 			const logger = new SessionLogger();
 			const entries = logger.history(resolved, Number.parseInt(opts.limit, 10));

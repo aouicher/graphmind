@@ -5,6 +5,7 @@ import { startWatcher } from "../../core/graph/watcher.js";
 import { Registry } from "../../core/registry.js";
 import { log } from "../../utils/logger.js";
 import { metaPath } from "../../utils/paths.js";
+import { resolveProjectSlug } from "../resolve.js";
 
 export function registerBuildCommand(program: Command): void {
 	program
@@ -20,11 +21,14 @@ export function registerBuildCommand(program: Command): void {
 			) => {
 				const registry = new Registry();
 
+				const resolved = resolveProjectSlug(slug);
 				const projects = opts.all
 					? registry.list()
 					: slug
 						? [registry.get(slug)].filter(Boolean)
-						: [registry.findByPath(process.cwd())].filter(Boolean);
+						: resolved
+							? [registry.get(resolved)].filter(Boolean)
+							: [];
 
 				if (projects.length === 0) {
 					log.error(

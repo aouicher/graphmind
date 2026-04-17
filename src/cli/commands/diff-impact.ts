@@ -16,7 +16,11 @@ export function registerDiffImpactCommand(program: Command): void {
 		.option("--depth <n>", "Max trace depth", "5")
 		.action((opts: { in?: string; staged?: boolean; depth: string }) => {
 			const registry = new Registry();
-			const slug = opts.in ?? registry.findByPath(process.cwd())?.slug;
+			const projects = registry.list();
+			const slug =
+				opts.in ??
+				registry.findByPath(process.cwd())?.slug ??
+				(projects.length === 1 ? projects[0]?.slug : undefined);
 
 			if (!slug) {
 				log.error("Not in a registered project.");
