@@ -5,7 +5,7 @@ import { metaPath } from "../../utils/paths.js";
 import { Registry } from "../registry.js";
 import { GraphBuilder } from "./builder.js";
 
-const SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb"];
+const SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb", ".md"];
 const DEBOUNCE_MS = 2000;
 
 export function startWatcher(slug: string): void {

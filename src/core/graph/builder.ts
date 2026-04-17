@@ -3,6 +3,7 @@ import { dirname, extname, join, relative } from "node:path";
 import type Database from "better-sqlite3";
 import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
 import { FileHashCache } from "./cache.js";
+import { parseMarkdown } from "./markdown.js";
 import { initDatabase } from "./schema.js";
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -15,6 +16,7 @@ const LANGUAGE_MAP: Record<string, string> = {
 	".go": "go",
 	".rs": "rust",
 	".rb": "ruby",
+	".md": "markdown",
 };
 
 const DEFAULT_EXCLUDE = [
@@ -127,7 +129,11 @@ export class GraphBuilder {
 
 			let parsed: ParsedFile;
 			try {
-				parsed = parser.parseFile(file.fullPath, content, file.language);
+				if (file.language === "markdown") {
+					parsed = parseMarkdown(file.fullPath, content);
+				} else {
+					parsed = parser.parseFile(file.fullPath, content, file.language);
+				}
 			} catch {
 				continue;
 			}
