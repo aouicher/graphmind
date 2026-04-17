@@ -27,10 +27,10 @@ const DEFAULT_EXCLUDE = [
 interface ParsedSymbol {
 	name: string;
 	kind: string;
-	line_start: number;
-	line_end: number;
-	signature?: string;
-	doc?: string;
+	lineStart: number;
+	lineEnd: number;
+	signature?: string | null;
+	doc?: string | null;
 }
 
 interface ParsedCallSite {
@@ -43,15 +43,15 @@ interface ParsedImport {
 	source: string;
 	specifiers: string[];
 	line: number;
-	is_default: boolean;
-	from_file: string;
+	isDefault: boolean;
+	fromFile: string;
 }
 
 interface ParsedFile {
 	path: string;
 	language: string;
 	symbols: ParsedSymbol[];
-	call_sites: ParsedCallSite[];
+	callSites: ParsedCallSite[];
 	imports: ParsedImport[];
 }
 
@@ -125,8 +125,8 @@ export class GraphBuilder {
 					sym.name,
 					sym.kind,
 					file.relPath,
-					sym.line_start,
-					sym.line_end,
+					sym.lineStart,
+					sym.lineEnd,
 					sym.signature ?? null,
 					sym.doc ?? null,
 				);
@@ -134,7 +134,7 @@ export class GraphBuilder {
 			}
 
 			let edges = 0;
-			for (const cs of parsed.call_sites) {
+			for (const cs of parsed.callSites) {
 				const fromId = symbolIds.get(cs.caller);
 				const toId = symbolIds.get(cs.callee);
 				if (fromId && toId) {
@@ -243,15 +243,20 @@ export class GraphBuilder {
 		if (this.nativeParser) return this.nativeParser;
 
 		try {
-			const native = await import("../../native/graphmind-core.js");
-			this.nativeParser = {
-				parseFile: (path: string, source: string, language: string) =>
-					native.parseFile(path, source, language),
-			};
+			const native = await import("../../native/index.js");
+			const fn = native.parseFile;
+			if (native.available && fn) {
+				this.nativeParser = {
+					parseFile: (path, source, language) =>
+						fn(path, source, language) as unknown as ParsedFile,
+				};
+			} else {
+				this.nativeParser = new FallbackParser();
+			}
 		} catch {
 			this.nativeParser = new FallbackParser();
 		}
-		return this.nativeParser;
+		return this.nativeParser!;
 	}
 }
 
@@ -265,7 +270,7 @@ class FallbackParser implements NativeParser {
 			path,
 			language,
 			symbols: [],
-			call_sites: [],
+			callSites: [],
 			imports: [],
 		};
 	}

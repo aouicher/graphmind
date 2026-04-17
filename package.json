@@ -26,18 +26,19 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^11.7.0",
     "chalk": "^5.4.1",
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
-    "@modelcontextprotocol/sdk": "^1.12.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@napi-rs/cli": "^3.6.2",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.12.0",
     "@types/uuid": "^10.0.0",
-    "@biomejs/biome": "^1.9.4",
     "tsup": "^8.3.6",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

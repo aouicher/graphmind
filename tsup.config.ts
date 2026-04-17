@@ -1,4 +1,6 @@
 import { defineConfig } from "tsup";
+import { cpSync, existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 export default defineConfig({
 	entry: {
@@ -14,5 +16,15 @@ export default defineConfig({
 	shims: true,
 	banner: {
 		js: "#!/usr/bin/env node",
+	},
+	onSuccess: async () => {
+		const nativeDir = "src/native";
+		if (existsSync(nativeDir)) {
+			for (const file of readdirSync(nativeDir)) {
+				if (file.endsWith(".node")) {
+					cpSync(join(nativeDir, file), join("dist", file));
+				}
+			}
+		}
 	},
 });
