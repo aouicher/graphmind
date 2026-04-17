@@ -44,7 +44,8 @@ export function registerSearchCommand(program: Command): void {
 			const results = await semanticSearch(slug, query, { limit, kind: opts.kind });
 
 			if (results.length === 0) {
-				log.dim("No results. Have you run: graphmind embed?");
+				log.dim("No semantic results. Falling back to FTS...\n");
+				fallbackFtsSearch(query, opts);
 				return;
 			}
 
