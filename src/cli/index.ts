@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { Command } from "commander";
 import { registerBuildCommand } from "./commands/build.js";
+import { registerCleanCommand } from "./commands/clean.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
@@ -22,6 +23,7 @@ program.name("graphmind").description("Your codebase has memory. Use it.").versi
 
 registerRegisterCommand(program);
 registerBuildCommand(program);
+registerCleanCommand(program);
 registerQueryCommand(program);
 registerMemoryCommand(program);
 registerCrossCommand(program);
