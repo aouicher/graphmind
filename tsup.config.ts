@@ -16,7 +16,7 @@ export default defineConfig({
 	splitting: true,
 	shims: true,
 	banner: {
-		js: "#!/usr/bin/env node",
+		js: "#!/usr/bin/env node\nprocess.removeAllListeners('warning');",
 	},
 	onSuccess: async () => {
 		for (const file of readdirSync("dist")) {
