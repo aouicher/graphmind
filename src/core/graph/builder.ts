@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import type Database from "better-sqlite3";
-import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
 import { log } from "../../utils/logger.js";
+import { cacheDirPath, graphDbPath } from "../../utils/paths.js";
 import { FileHashCache } from "./cache.js";
 import { parseMarkdown } from "./markdown.js";
 import { initDatabase } from "./schema.js";
@@ -314,12 +314,16 @@ export class GraphBuilder {
 				};
 			} else {
 				log.warn("Native parser not available — only Markdown files will be indexed.");
-				log.warn("Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing");
+				log.warn(
+					"Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing",
+				);
 				this.nativeParser = new FallbackParser();
 			}
 		} catch {
 			log.warn("Native parser not available — only Markdown files will be indexed.");
-			log.warn("Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing");
+			log.warn(
+				"Prebuilt binaries not found. See: https://github.com/aouicher/graphmind#contributing",
+			);
 			this.nativeParser = new FallbackParser();
 		}
 		// biome-ignore lint/style/noNonNullAssertion: assigned in try/catch above

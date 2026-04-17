@@ -47,9 +47,11 @@ describe("MCP Tools Registration", () => {
 
 	it("gm_memory_add requires confirmation", async () => {
 		const tools = registerMemoryTools();
-		const addTool = tools.find((t) => t.name === "gm_memory_add")!;
+		const addTool = tools.find((t) => t.name === "gm_memory_add");
+		expect(addTool).toBeDefined();
 
-		const result = await addTool.handler({ fact: "Test fact", confirmed: false }, null);
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await addTool!.handler({ fact: "Test fact", confirmed: false }, null);
 		expect(result).toHaveProperty("confirmation_required", true);
 		expect(result).toHaveProperty("preview");
 	});

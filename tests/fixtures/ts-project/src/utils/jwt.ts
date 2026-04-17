@@ -12,8 +12,8 @@ export function validateToken(token: string): DecodedToken | null {
 	if (parts.length < 3) return null;
 
 	return {
-		userId: parts[1]!,
-		exp: Number.parseInt(parts[2]!, 10),
+		userId: parts[1] ?? "",
+		exp: Number.parseInt(parts[2] ?? "0", 10),
 	};
 }
 
