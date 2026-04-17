@@ -5,7 +5,18 @@ import { metaPath } from "../../utils/paths.js";
 import { Registry } from "../registry.js";
 import { GraphBuilder } from "./builder.js";
 
-const SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb", ".md"];
+const SUPPORTED_EXTENSIONS = [
+	".ts",
+	".tsx",
+	".js",
+	".jsx",
+	".mjs",
+	".py",
+	".go",
+	".rs",
+	".rb",
+	".md",
+];
 const DEBOUNCE_MS = 2000;
 
 export function startWatcher(slug: string): void {
@@ -36,8 +47,10 @@ export function startWatcher(slug: string): void {
 
 		const builder = new GraphBuilder(slug);
 		try {
+			// biome-ignore lint/style/noNonNullAssertion: null-checked at function entry
 			const result = await builder.build(project!.path, {
 				full: false,
+				// biome-ignore lint/style/noNonNullAssertion: null-checked at function entry
 				exclude: project!.exclude,
 			});
 

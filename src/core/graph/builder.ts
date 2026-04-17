@@ -309,6 +309,7 @@ export class GraphBuilder {
 		} catch {
 			this.nativeParser = new FallbackParser();
 		}
+		// biome-ignore lint/style/noNonNullAssertion: assigned in try/catch above
 		return this.nativeParser!;
 	}
 }

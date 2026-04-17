@@ -41,8 +41,8 @@ export function inferCrossLinks(): CrossLink[] {
 	const shared: SharedSymbol[] = [];
 	for (const [key, projectSet] of symbolMap) {
 		if (projectSet.size > 1) {
-			const [name, kind] = key.split(":");
-			shared.push({ name: name!, kind: kind!, projects: [...projectSet] });
+			const [name = "", kind = ""] = key.split(":");
+			shared.push({ name, kind, projects: [...projectSet] });
 		}
 	}
 
@@ -52,8 +52,8 @@ export function inferCrossLinks(): CrossLink[] {
 	for (const sym of shared) {
 		for (let i = 0; i < sym.projects.length; i++) {
 			for (let j = i + 1; j < sym.projects.length; j++) {
-				const from = sym.projects[i]!;
-				const to = sym.projects[j]!;
+				const from = sym.projects[i] ?? "";
+				const to = sym.projects[j] ?? "";
 				const pairKey = `${from}:${to}`;
 				const reversePairKey = `${to}:${from}`;
 

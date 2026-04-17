@@ -35,7 +35,7 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 	let codeBlockName = "";
 
 	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!;
+		const line = lines[i] ?? "";
 		const lineNum = i + 1;
 
 		if (line.startsWith("```")) {
@@ -43,9 +43,9 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 				inCodeBlock = true;
 				codeBlockStart = lineNum;
 				codeBlockLang = line.slice(3).trim().split(/\s/)[0] ?? "";
-				const prev = i > 0 ? lines[i - 1]! : "";
+				const prev = i > 0 ? (lines[i - 1] ?? "") : "";
 				const headerMatch = prev.match(/^#+\s+(.+)/);
-				codeBlockName = headerMatch ? headerMatch[1]! : `code-block-L${lineNum}`;
+				codeBlockName = headerMatch?.[1] ?? `code-block-L${lineNum}`;
 			} else {
 				inCodeBlock = false;
 				if (codeBlockLang) {
@@ -66,12 +66,14 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 
 		const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
 		if (headerMatch) {
-			const level = headerMatch[1]!.length;
-			const title = headerMatch[2]!.trim();
+			const hashes = headerMatch[1] ?? "";
+			const level = hashes.length;
+			const title = (headerMatch[2] ?? "").trim();
 			let end = lineNum;
 			for (let j = i + 1; j < lines.length; j++) {
-				const nextHeader = lines[j]!.match(/^(#{1,6})\s/);
-				if (nextHeader && nextHeader[1]!.length <= level) break;
+				const nextLine = lines[j] ?? "";
+				const nextHeader = nextLine.match(/^(#{1,6})\s/);
+				if (nextHeader && (nextHeader[1] ?? "").length <= level) break;
 				end = j + 1;
 			}
 			symbols.push({
@@ -88,7 +90,7 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 		let linkMatch: RegExpExecArray | null;
 		// biome-ignore lint/suspicious/noAssignInExpressions: regex iteration
 		while ((linkMatch = linkRegex.exec(line)) !== null) {
-			const target = linkMatch[2]!;
+			const target = linkMatch[2] ?? "";
 			if (seenLinks.has(target)) continue;
 			seenLinks.add(target);
 
@@ -96,7 +98,7 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 
 			imports.push({
 				source: target,
-				specifiers: [linkMatch[1]!],
+				specifiers: [linkMatch[1] ?? ""],
 				line: lineNum,
 				isDefault: true,
 				fromFile: path,
@@ -107,7 +109,7 @@ export function parseMarkdown(path: string, source: string): MarkdownParseResult
 		let wikiMatch: RegExpExecArray | null;
 		// biome-ignore lint/suspicious/noAssignInExpressions: regex iteration
 		while ((wikiMatch = wikilinkRegex.exec(line)) !== null) {
-			const target = wikiMatch[1]!;
+			const target = wikiMatch[1] ?? "";
 			if (seenLinks.has(target)) continue;
 			seenLinks.add(target);
 

@@ -194,7 +194,8 @@ Injects a section into your project's `CLAUDE.md` with graph stats, quick-refere
 | Python | `.py` | Stable |
 | Go | `.go` | Stable |
 | Rust | `.rs` | Stable |
-| Ruby | `.rb` | Classes, modules, methods, singleton methods, require/require_relative |
+| Ruby | `.rb` | Stable |
+| Markdown | `.md` | Stable |
 
 ## Data Storage
 

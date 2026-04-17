@@ -14,9 +14,11 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 	let normA = 0;
 	let normB = 0;
 	for (let i = 0; i < a.length; i++) {
-		dot += a[i]! * b[i]!;
-		normA += a[i]! * a[i]!;
-		normB += b[i]! * b[i]!;
+		const ai = a[i] ?? 0;
+		const bi = b[i] ?? 0;
+		dot += ai * bi;
+		normA += ai * ai;
+		normB += bi * bi;
 	}
 	const denom = Math.sqrt(normA) * Math.sqrt(normB);
 	return denom === 0 ? 0 : dot / denom;
@@ -45,7 +47,8 @@ function rrfMerge(rankings: SearchResult[][], k = 60): SearchResult[] {
 
 	for (const ranking of rankings) {
 		for (let i = 0; i < ranking.length; i++) {
-			const r = ranking[i]!;
+			const r = ranking[i];
+			if (!r) continue;
 			const key = `${r.file}:${r.symbol_name}`;
 			const existing = scores.get(key);
 			const rrfScore = 1 / (k + i + 1);
@@ -84,7 +87,7 @@ export async function semanticSearch(
 	if (rows.length === 0) return [];
 
 	if (queries.length === 1) {
-		const queryVec = await embed(queries[0]!);
+		const queryVec = await embed(queries[0] ?? "");
 		if (!queryVec) return [];
 		return searchSingle(queryVec, rows, limit);
 	}

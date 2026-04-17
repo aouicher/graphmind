@@ -157,11 +157,8 @@ fn build_ruby_signature(node: Node, source: &str) -> String {
 }
 
 fn superclass_signature(node: Node, source: &str) -> Option<String> {
-    if let Some(superclass) = node.child_by_field_name("superclass") {
-        Some(format!("< {}", node_text(superclass, source)))
-    } else {
-        None
-    }
+    node.child_by_field_name("superclass")
+        .map(|s| format!("< {}", node_text(s, source)))
 }
 
 fn extract_ruby_comment(node: Node, source: &str) -> Option<String> {
