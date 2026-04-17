@@ -1,5 +1,7 @@
 # graphmind
 
+[![CI](https://github.com/aouicher/graphmind/actions/workflows/ci.yml/badge.svg)](https://github.com/aouicher/graphmind/actions/workflows/ci.yml)
+
 > Your codebase has memory. Use it.
 
 Persistent, local-first code intelligence for Claude Code. Structural graph + semantic memory + cross-project links — all on your machine.
@@ -139,6 +141,12 @@ graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
 ```
 
+### Git Hooks
+```bash
+graphmind hooks install       # post-commit + pre-push
+graphmind hooks uninstall     # remove graphmind hooks
+```
+
 ### Integration
 ```bash
 graphmind mcp                 # start MCP server (stdio)
@@ -181,12 +189,12 @@ Injects a section into your project's `CLAUDE.md` with graph stats, quick-refere
 
 | Language | Extensions | Status |
 |----------|-----------|--------|
-| TypeScript | `.ts`, `.tsx` | Phase 1 |
-| JavaScript | `.js`, `.jsx`, `.mjs` | Phase 1 |
-| Python | `.py` | Phase 2 |
-| Ruby | `.rb` | Phase 2 |
-| Go | `.go` | Phase 2 |
-| Rust | `.rs` | Phase 2 |
+| TypeScript | `.ts`, `.tsx` | Stable |
+| JavaScript | `.js`, `.jsx`, `.mjs` | Stable |
+| Python | `.py` | Stable |
+| Go | `.go` | Stable |
+| Rust | `.rs` | Stable |
+| Ruby | `.rb` | Planned |
 
 ## Data Storage
 
@@ -207,9 +215,10 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 - [x] Phase 1: Core MVP (graph + memory + CLI + MCP)
 - [x] Phase 2: Cross-project, diff-impact, sessions
 - [x] Phase 3: Semantic search (local embeddings, RRF multi-query)
-- [x] Phase 4: Watch mode, export (dot/mermaid/json)
-- [ ] Phase 5: Python/Ruby/Go support
-- [ ] Phase 6: Obsidian vault export, git hooks
+- [x] Phase 4: Watch mode, export (dot/mermaid/json/obsidian)
+- [x] Phase 5: Python, Go, Rust language support
+- [x] Phase 6: Git hooks, CI/CD, npm publish pipeline
+- [ ] Phase 7: Ruby support, incremental embeddings
 
 ## Contributing
 

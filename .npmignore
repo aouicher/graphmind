@@ -1,0 +1,13 @@
+crates/
+tests/
+docs/
+.github/
+.claude/
+.omc/
+*.db
+*.jsonl
+biome.json
+tsconfig.json
+tsup.config.ts
+Cargo.toml
+Cargo.lock
