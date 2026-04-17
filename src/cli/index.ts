@@ -1,5 +1,9 @@
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { registerBuildCommand } from "./commands/build.js";
+
+const require = createRequire(import.meta.url);
+const { version } = require("../../package.json") as { version: string };
 import { registerCrossCommand } from "./commands/cross.js";
 import { registerDiffImpactCommand } from "./commands/diff-impact.js";
 import { registerExportCommand } from "./commands/export.js";
@@ -14,7 +18,7 @@ import { registerSyncCommand } from "./commands/sync.js";
 
 const program = new Command();
 
-program.name("graphmind").description("Your codebase has memory. Use it.").version("0.1.0");
+program.name("graphmind").description("Your codebase has memory. Use it.").version(version);
 
 registerRegisterCommand(program);
 registerBuildCommand(program);

@@ -20,7 +20,7 @@ Everything is 100% local. No cloud. No open ports by default. No telemetry.
 ## Quick Start
 
 ```bash
-npm install -g @graphmind/cli
+npm install -g @graphmind/cli@latest
 
 graphmind register .          # register your project
 graphmind build               # build the code graph
