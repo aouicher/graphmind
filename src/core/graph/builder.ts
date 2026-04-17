@@ -14,6 +14,7 @@ const LANGUAGE_MAP: Record<string, string> = {
 	".py": "python",
 	".go": "go",
 	".rs": "rust",
+	".rb": "ruby",
 };
 
 const DEFAULT_EXCLUDE = [

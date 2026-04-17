@@ -194,7 +194,7 @@ Injects a section into your project's `CLAUDE.md` with graph stats, quick-refere
 | Python | `.py` | Stable |
 | Go | `.go` | Stable |
 | Rust | `.rs` | Stable |
-| Ruby | `.rb` | Planned |
+| Ruby | `.rb` | Classes, modules, methods, singleton methods, require/require_relative |
 
 ## Data Storage
 
@@ -218,7 +218,7 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 - [x] Phase 4: Watch mode, export (dot/mermaid/json/obsidian)
 - [x] Phase 5: Python, Go, Rust language support
 - [x] Phase 6: Git hooks, CI/CD, npm publish pipeline
-- [ ] Phase 7: Ruby support, incremental embeddings
+- [x] Phase 7: Ruby support, incremental embeddings
 
 ## Contributing
 

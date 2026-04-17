@@ -17,6 +17,7 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
         "python" => tree_sitter_python::LANGUAGE.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
         "rust" => tree_sitter_rust::LANGUAGE.into(),
+        "ruby" => tree_sitter_ruby::LANGUAGE.into(),
         _ => return Err(format!("Unsupported language: {language}")),
     };
 
@@ -50,6 +51,11 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
             languages::rust::extract_symbols(root, source),
             languages::rust::extract_call_sites(root, source),
             languages::rust::extract_imports(root, source, path),
+        ),
+        "ruby" => (
+            languages::ruby::extract_symbols(root, source),
+            languages::ruby::extract_call_sites(root, source),
+            languages::ruby::extract_imports(root, source, path),
         ),
         _ => unreachable!(),
     };

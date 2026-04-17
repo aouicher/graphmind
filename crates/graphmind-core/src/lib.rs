@@ -76,5 +76,6 @@ pub fn supported_languages() -> Vec<String> {
         "python".to_string(),
         "go".to_string(),
         "rust".to_string(),
+        "ruby".to_string(),
     ]
 }
