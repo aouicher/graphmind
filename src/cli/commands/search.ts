@@ -28,7 +28,11 @@ export function registerSearchCommand(program: Command): void {
 			}
 
 			const registry = new Registry();
-			const slug = opts.in ?? registry.findByPath(process.cwd())?.slug;
+			const projects = registry.list();
+			const slug =
+				opts.in ??
+				registry.findByPath(process.cwd())?.slug ??
+				(projects.length === 1 ? projects[0]?.slug : undefined);
 
 			if (!slug) {
 				log.error("Not in a registered project. Use --in <slug>.");
@@ -64,7 +68,11 @@ export function registerSearchCommand(program: Command): void {
 			}
 
 			const registry = new Registry();
-			const slug = slugArg ?? registry.findByPath(process.cwd())?.slug;
+			const projects = registry.list();
+			const slug =
+				slugArg ??
+				registry.findByPath(process.cwd())?.slug ??
+				(projects.length === 1 ? projects[0]?.slug : undefined);
 
 			if (!slug) {
 				log.error("Not in a registered project.");
@@ -138,7 +146,11 @@ function fallbackFtsSearch(
 	opts: { in?: string; kind?: string; limit: string },
 ): void {
 	const registry = new Registry();
-	const slug = opts.in ?? registry.findByPath(process.cwd())?.slug;
+	const projects = registry.list();
+	const slug =
+		opts.in ??
+		registry.findByPath(process.cwd())?.slug ??
+		(projects.length === 1 ? projects[0]?.slug : undefined);
 
 	if (!slug) {
 		log.error("Not in a registered project. Use --in <slug>.");

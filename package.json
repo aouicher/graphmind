@@ -1,6 +1,6 @@
 {
 	"name": "@graphmind/cli",
-	"version": "0.1.15",
+	"version": "0.1.16",
 	"description": "Your codebase has memory. Use it.",
 	"license": "MIT",
 	"repository": {
