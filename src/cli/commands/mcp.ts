@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Command } from "commander";
 import { log } from "../../utils/logger.js";
 
@@ -36,7 +37,9 @@ export function registerMcpCommand(program: Command): void {
 			const skillDir = join(homedir(), ".claude", "skills", "graphmind");
 			mkdirSync(skillDir, { recursive: true });
 
-			const sourcePath = join(__dirname, "..", "..", "skill", "SKILL.md");
+			const require = createRequire(import.meta.url);
+			const pkgRoot = dirname(require.resolve("../../package.json"));
+			const sourcePath = join(pkgRoot, "src", "skill", "SKILL.md");
 			const destPath = join(skillDir, "SKILL.md");
 
 			if (existsSync(sourcePath)) {
