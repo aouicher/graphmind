@@ -272,6 +272,16 @@ export class GraphBuilder {
 		this.db.close();
 	}
 
+	private parseGitignore(projectPath: string): string[] {
+		const gitignorePath = join(projectPath, ".gitignore");
+		if (!existsSync(gitignorePath)) return [];
+		const content = readFileSync(gitignorePath, "utf-8");
+		return content
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line && !line.startsWith("#") && !line.startsWith("!"));
+	}
+
 	private collectFiles(
 		dir: string,
 		exclude: string[],
@@ -281,11 +291,15 @@ export class GraphBuilder {
 		const pathExcludes: string[] = [];
 		const filePatterns: string[] = [];
 
-		for (const e of exclude) {
+		const gitignorePatterns = this.parseGitignore(dir);
+		const allExcludes = [...new Set([...exclude, ...gitignorePatterns])];
+
+		for (const e of allExcludes) {
 			const clean = e
 				.replace(/^(\*\*\/)?/, "")
 				.replace(/\/?\*\*$/, "")
-				.replace(/\/\*$/, "");
+				.replace(/\/\*$/, "")
+				.replace(/\/$/, "");
 			if (clean.startsWith("*.") || clean.startsWith(".")) {
 				filePatterns.push(clean);
 			} else if (clean.includes("/")) {
