@@ -16,6 +16,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.create.outputs.released }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,6 +49,7 @@ jobs:
           fi
 
       - name: Create tag and release
+        id: create
         if: steps.version.outputs.changed == 'true' && steps.tag.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,3 +58,10 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
           gh release create "$TAG" --generate-notes --title "$TAG"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
