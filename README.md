@@ -297,6 +297,20 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 - [x] Phase 6: Git hooks, CI/CD, npm publish pipeline
 - [x] Phase 7: Ruby support, incremental embeddings
 
+## Troubleshooting
+
+**`MODULE_VERSION mismatch` error with better-sqlite3:**
+This happens when better-sqlite3 was compiled for a different Node.js version. Fix:
+```bash
+npm rebuild better-sqlite3
+```
+
+**`graphmind build` scans too many files:**
+Check your excludes. By default, `node_modules`, `dist`, `build`, `vendor`, `target` and others are excluded. You can customize per-project in `~/.graphmind/config.json` under `exclude`.
+
+**`graphmind search` returns no results:**
+Run `graphmind clean && graphmind build --full` to reindex with content search (added in v0.1.14).
+
 ## Contributing
 
 MIT License. Contributions welcome.
