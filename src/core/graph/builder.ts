@@ -331,12 +331,13 @@ export class GraphBuilder {
 			const fullPath = join(dir, entry);
 			const stat = statSync(fullPath);
 
+			const relPath = fullPath.slice(rootDir.length + 1);
 			if (stat.isDirectory()) {
-				const relPath = fullPath.slice(rootDir.length + 1);
 				if (pathExcludes.some((p) => relPath === p || relPath.startsWith(`${p}/`))) continue;
 				this.walkDir(fullPath, rootDir, dirExcludes, pathExcludes, filePatterns, files);
 			} else {
 				if (filePatterns.some((p) => entry.endsWith(p.replace("*", "")))) continue;
+				if (pathExcludes.includes(relPath)) continue;
 				const ext = extname(entry);
 				const language = LANGUAGE_MAP[ext];
 				if (language) {
