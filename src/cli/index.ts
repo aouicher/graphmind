@@ -7,6 +7,7 @@ import { registerMemoryCommand } from "./commands/memory.js";
 import { registerQueryCommand } from "./commands/query.js";
 import { registerRegisterCommand } from "./commands/register.js";
 import { registerSessionCommand } from "./commands/session.js";
+import { registerSearchCommand } from "./commands/search.js";
 import { registerSyncCommand } from "./commands/sync.js";
 
 const program = new Command();
@@ -23,6 +24,7 @@ registerMemoryCommand(program);
 registerCrossCommand(program);
 registerSessionCommand(program);
 registerDiffImpactCommand(program);
+registerSearchCommand(program);
 registerSyncCommand(program);
 registerMcpCommand(program);
 
