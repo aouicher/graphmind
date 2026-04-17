@@ -21,11 +21,7 @@
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"files": [
-		"dist",
-		"src/native",
-		"src/skill/SKILL.md"
-	],
+	"files": ["dist", "src/native", "src/skill/SKILL.md"],
 	"scripts": {
 		"build": "tsup",
 		"build:rust": "cd crates/graphmind-core && napi build --release --platform",
