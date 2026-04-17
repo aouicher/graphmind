@@ -24,7 +24,9 @@ export class GraphQueries {
 	constructor(private db: DatabaseSync) {}
 
 	findSymbol(name: string): SymbolRow[] {
-		return this.db.prepare("SELECT * FROM symbols WHERE name = ?").all(name) as unknown as SymbolRow[];
+		return this.db
+			.prepare("SELECT * FROM symbols WHERE name = ?")
+			.all(name) as unknown as SymbolRow[];
 	}
 
 	searchSymbols(query: string, limit = 20): SymbolRow[] {
@@ -114,7 +116,9 @@ export class GraphQueries {
 	}
 
 	symbolsInFile(filePath: string): SymbolRow[] {
-		return this.db.prepare("SELECT * FROM symbols WHERE file = ?").all(filePath) as unknown as SymbolRow[];
+		return this.db
+			.prepare("SELECT * FROM symbols WHERE file = ?")
+			.all(filePath) as unknown as SymbolRow[];
 	}
 
 	topConnected(limit = 20): Array<{ file: string; connections: number }> {
@@ -149,9 +153,15 @@ export class GraphQueries {
 	}
 
 	stats(): { symbols: number; edges: number; files: number } {
-		const symbols = (this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as unknown as { c: number }).c;
-		const edges = (this.db.prepare("SELECT COUNT(*) as c FROM edges").get() as unknown as { c: number }).c;
-		const files = (this.db.prepare("SELECT COUNT(*) as c FROM files").get() as unknown as { c: number }).c;
+		const symbols = (
+			this.db.prepare("SELECT COUNT(*) as c FROM symbols").get() as unknown as { c: number }
+		).c;
+		const edges = (
+			this.db.prepare("SELECT COUNT(*) as c FROM edges").get() as unknown as { c: number }
+		).c;
+		const files = (
+			this.db.prepare("SELECT COUNT(*) as c FROM files").get() as unknown as { c: number }
+		).c;
 		return { symbols, edges, files };
 	}
 

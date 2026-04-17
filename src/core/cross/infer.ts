@@ -23,7 +23,9 @@ export function inferCrossLinks(): CrossLink[] {
 		if (!existsSync(dbPath)) continue;
 
 		const db = initDatabase(dbPath);
-		const symbols = db.prepare("SELECT DISTINCT name, kind FROM symbols").all() as unknown as Array<{
+		const symbols = db
+			.prepare("SELECT DISTINCT name, kind FROM symbols")
+			.all() as unknown as Array<{
 			name: string;
 			kind: string;
 		}>;

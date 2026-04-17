@@ -89,7 +89,9 @@ export function registerSearchCommand(program: Command): void {
 			}
 
 			const db = initDatabase(dbPath);
-			const symbols = db.prepare("SELECT name, kind, file, signature FROM symbols").all() as unknown as Array<{
+			const symbols = db
+				.prepare("SELECT name, kind, file, signature FROM symbols")
+				.all() as unknown as Array<{
 				name: string;
 				kind: string;
 				file: string;

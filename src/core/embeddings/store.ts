@@ -71,7 +71,9 @@ export class EmbeddingStore {
 	}
 
 	count(): number {
-		return (this.db.prepare("SELECT COUNT(*) as cnt FROM embeddings").get() as unknown as { cnt: number }).cnt;
+		return (
+			this.db.prepare("SELECT COUNT(*) as cnt FROM embeddings").get() as unknown as { cnt: number }
+		).cnt;
 	}
 
 	close(): void {
