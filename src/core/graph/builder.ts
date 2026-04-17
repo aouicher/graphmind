@@ -98,6 +98,9 @@ export class GraphBuilder {
 		log.info(`Found ${files.length} source files`);
 
 		const parser = await this.getParser();
+		log.info(
+			`Parser: ${this.nativeParser instanceof FallbackParser ? "fallback (Markdown only)" : "native (tree-sitter)"}`,
+		);
 
 		const insertFile = this.db.prepare(
 			"INSERT OR REPLACE INTO files (path, language, hash, last_parsed) VALUES (?, ?, ?, ?)",
@@ -253,28 +256,45 @@ export class GraphBuilder {
 		exclude: string[],
 	): Array<{ fullPath: string; language: string }> {
 		const files: Array<{ fullPath: string; language: string }> = [];
-		this.walkDir(dir, exclude, files);
+		const dirExcludes: string[] = [];
+		const filePatterns: string[] = [];
+
+		for (const e of exclude) {
+			const clean = e
+				.replace(/^(\*\*\/)?/, "")
+				.replace(/\/?\*\*$/, "")
+				.replace(/\/\*$/, "");
+			if (clean.startsWith("*.") || clean.startsWith(".")) {
+				filePatterns.push(clean);
+			} else {
+				dirExcludes.push(clean);
+			}
+		}
+
+		this.walkDir(dir, dirExcludes, filePatterns, files);
 		return files;
 	}
 
 	private walkDir(
 		dir: string,
-		exclude: string[],
+		dirExcludes: string[],
+		filePatterns: string[],
 		files: Array<{ fullPath: string; language: string }>,
 	): void {
 		if (!existsSync(dir)) return;
 		const entries = readdirSync(dir);
 
 		for (const entry of entries) {
-			if (exclude.includes(entry)) continue;
+			if (dirExcludes.includes(entry)) continue;
 			if (entry.startsWith(".")) continue;
 
 			const fullPath = join(dir, entry);
 			const stat = statSync(fullPath);
 
 			if (stat.isDirectory()) {
-				this.walkDir(fullPath, exclude, files);
+				this.walkDir(fullPath, dirExcludes, filePatterns, files);
 			} else {
+				if (filePatterns.some((p) => entry.endsWith(p.replace("*", "")))) continue;
 				const ext = extname(entry);
 				const language = LANGUAGE_MAP[ext];
 				if (language) {
