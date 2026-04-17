@@ -1,6 +1,6 @@
 {
 	"name": "@graphmind/cli",
-	"version": "0.1.20",
+	"version": "0.1.21",
 	"description": "Your codebase has memory. Use it.",
 	"license": "MIT",
 	"repository": {
@@ -32,7 +32,7 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit",
-		"postinstall": "npm rebuild better-sqlite3 || true",
+		"postinstall": "node -e \"try{require('better-sqlite3')}catch(e){if(e.message.includes('MODULE_VERSION')){require('child_process').execSync('npm rebuild better-sqlite3',{stdio:'inherit'})}}\"",
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
