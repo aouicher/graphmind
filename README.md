@@ -1,6 +1,9 @@
 # graphmind
 
 [![CI](https://github.com/aouicher/graphmind/actions/workflows/ci.yml/badge.svg)](https://github.com/aouicher/graphmind/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@graphmind/cli)](https://www.npmjs.com/package/@graphmind/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node](https://img.shields.io/node/v/@graphmind/cli)](https://www.npmjs.com/package/@graphmind/cli)
 
 > Your codebase has memory. Use it.
 
