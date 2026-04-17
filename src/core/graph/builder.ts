@@ -24,11 +24,17 @@ const DEFAULT_EXCLUDE = [
 	"node_modules",
 	"dist",
 	"build",
+	"out",
 	".git",
 	".next",
+	".nuxt",
+	".turbo",
 	"coverage",
 	"__pycache__",
 	".venv",
+	"venv",
+	"vendor",
+	"target",
 ];
 
 interface ParsedSymbol {

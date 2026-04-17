@@ -28,7 +28,22 @@ export function startWatcher(slug: string): void {
 		return;
 	}
 
-	const ignored = [/node_modules/, /\.git/, /dist/, /build/, /coverage/, /__pycache__/, /\.next/];
+	const ignored = [
+		/node_modules/,
+		/\.git/,
+		/dist/,
+		/build/,
+		/\/out\//,
+		/coverage/,
+		/__pycache__/,
+		/\.next/,
+		/\.nuxt/,
+		/\.turbo/,
+		/\.venv/,
+		/\/venv\//,
+		/\/vendor\//,
+		/\/target\//,
+	];
 
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	const pendingFiles = new Set<string>();
