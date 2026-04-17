@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS symbols (
   line_start INTEGER,
   line_end INTEGER,
   signature TEXT,
-  doc TEXT
+  doc TEXT,
+  content TEXT
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -37,19 +38,19 @@ CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 `;
 
 const FTS_SQL = `
-CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(name, signature, doc, content=symbols, content_rowid=id);
+CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(name, signature, doc, content_text, content=symbols, content_rowid=id);
 
 CREATE TRIGGER IF NOT EXISTS symbols_ai AFTER INSERT ON symbols BEGIN
-  INSERT INTO symbols_fts(rowid, name, signature, doc) VALUES (new.id, new.name, new.signature, new.doc);
+  INSERT INTO symbols_fts(rowid, name, signature, doc, content_text) VALUES (new.id, new.name, new.signature, new.doc, new.content);
 END;
 
 CREATE TRIGGER IF NOT EXISTS symbols_ad AFTER DELETE ON symbols BEGIN
-  INSERT INTO symbols_fts(symbols_fts, rowid, name, signature, doc) VALUES('delete', old.id, old.name, old.signature, old.doc);
+  INSERT INTO symbols_fts(symbols_fts, rowid, name, signature, doc, content_text) VALUES('delete', old.id, old.name, old.signature, old.doc, old.content);
 END;
 
 CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
-  INSERT INTO symbols_fts(symbols_fts, rowid, name, signature, doc) VALUES('delete', old.id, old.name, old.signature, old.doc);
-  INSERT INTO symbols_fts(rowid, name, signature, doc) VALUES (new.id, new.name, new.signature, new.doc);
+  INSERT INTO symbols_fts(symbols_fts, rowid, name, signature, doc, content_text) VALUES('delete', old.id, old.name, old.signature, old.doc, old.content);
+  INSERT INTO symbols_fts(rowid, name, signature, doc, content_text) VALUES (new.id, new.name, new.signature, new.doc, new.content);
 END;
 `;
 
@@ -58,6 +59,17 @@ export function initDatabase(dbPath: string): Database.Database {
 	db.pragma("journal_mode = WAL");
 	db.pragma("foreign_keys = ON");
 	db.exec(SCHEMA_SQL);
+
+	// Migrate: add content column if missing (pre-0.1.13 databases)
+	const cols = db.prepare("PRAGMA table_info(symbols)").all() as Array<{ name: string }>;
+	if (!cols.some((c) => c.name === "content")) {
+		db.exec("ALTER TABLE symbols ADD COLUMN content TEXT");
+		db.exec("DROP TABLE IF EXISTS symbols_fts");
+		db.exec("DROP TRIGGER IF EXISTS symbols_ai");
+		db.exec("DROP TRIGGER IF EXISTS symbols_ad");
+		db.exec("DROP TRIGGER IF EXISTS symbols_au");
+	}
+
 	db.exec(FTS_SQL);
 	return db;
 }

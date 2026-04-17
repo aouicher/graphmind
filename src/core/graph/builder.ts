@@ -112,7 +112,7 @@ export class GraphBuilder {
 			"INSERT OR REPLACE INTO files (path, language, hash, last_parsed) VALUES (?, ?, ?, ?)",
 		);
 		const insertSymbol = this.db.prepare(
-			"INSERT INTO symbols (name, kind, file, line_start, line_end, signature, doc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO symbols (name, kind, file, line_start, line_end, signature, doc, content) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		);
 		const insertEdge = this.db.prepare(
 			"INSERT INTO edges (from_id, to_id, kind, file) VALUES (?, ?, ?, ?)",
@@ -159,7 +159,10 @@ export class GraphBuilder {
 			const now = Math.floor(Date.now() / 1000);
 			insertFile.run(relPath, file.language, "", now);
 
+			const lines = content.split("\n");
 			for (const sym of parsed.symbols) {
+				const body = lines.slice(sym.lineStart - 1, sym.lineEnd).join("\n");
+				const truncated = body.length > 4000 ? body.slice(0, 4000) : body;
 				insertSymbol.run(
 					sym.name,
 					sym.kind,
@@ -168,6 +171,7 @@ export class GraphBuilder {
 					sym.lineEnd,
 					sym.signature ?? null,
 					sym.doc ?? null,
+					truncated,
 				);
 				totalSymbols++;
 			}

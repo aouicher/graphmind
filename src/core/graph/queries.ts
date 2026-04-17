@@ -33,6 +33,7 @@ export class GraphQueries {
 				`SELECT s.* FROM symbols_fts f
 				 JOIN symbols s ON s.id = f.rowid
 				 WHERE symbols_fts MATCH ?
+				 ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
 				 LIMIT ?`,
 			)
 			.all(query, limit) as SymbolRow[];
