@@ -57,9 +57,11 @@ export function registerBuildCommand(program: Command): void {
 
 					const builder = new GraphBuilder(project.slug);
 					try {
+						const globalExclude = registry.getConfig().globalExclude ?? [];
+						const exclude = [...new Set([...project.exclude, ...globalExclude])];
 						const result = await builder.build(project.path, {
 							full: opts.full,
-							exclude: project.exclude,
+							exclude,
 						});
 
 						registry.updateProject(project.slug, {

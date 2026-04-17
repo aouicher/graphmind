@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { Registry } from "../../core/registry.js";
+import { loadConfig, saveConfig } from "../../utils/config.js";
 import { log } from "../../utils/logger.js";
 import { resolveProjectSlug } from "../resolve.js";
 
@@ -10,10 +11,34 @@ export function registerExcludeCommand(program: Command): void {
 		.command("add <pattern...>")
 		.description("Add exclude patterns (e.g. grafana-data)")
 		.option("--in <slug>", "Project slug")
-		.action((patterns: string[], opts: { in?: string }) => {
+		.option("--global", "Apply to all projects")
+		.action((patterns: string[], opts: { in?: string; global?: boolean }) => {
+			const normalized = patterns.map((p) => (p.endsWith("/**") ? p : `${p}/**`));
+
+			if (opts.global) {
+				const config = loadConfig();
+				const current = config.globalExclude ?? [];
+				const added: string[] = [];
+				for (const p of normalized) {
+					if (!current.includes(p)) {
+						current.push(p);
+						added.push(p);
+					}
+				}
+				if (added.length === 0) {
+					log.dim("All patterns already in global excludes.");
+					return;
+				}
+				config.globalExclude = current;
+				saveConfig(config);
+				log.success(`Added global excludes: ${added.join(", ")}`);
+				log.dim("Run: graphmind clean --all && graphmind build --all --full");
+				return;
+			}
+
 			const resolved = resolveProjectSlug(opts.in);
 			if (!resolved) {
-				log.error("Not in a registered project. Use --in <slug>.");
+				log.error("Not in a registered project. Use --in <slug> or --global.");
 				process.exitCode = 1;
 				return;
 			}
@@ -28,11 +53,10 @@ export function registerExcludeCommand(program: Command): void {
 
 			const current = project.exclude ?? [];
 			const added: string[] = [];
-			for (const p of patterns) {
-				const normalized = p.endsWith("/**") ? p : `${p}/**`;
-				if (!current.includes(normalized)) {
-					current.push(normalized);
-					added.push(normalized);
+			for (const p of normalized) {
+				if (!current.includes(p)) {
+					current.push(p);
+					added.push(p);
 				}
 			}
 
@@ -50,10 +74,28 @@ export function registerExcludeCommand(program: Command): void {
 		.command("remove <pattern...>")
 		.description("Remove exclude patterns")
 		.option("--in <slug>", "Project slug")
-		.action((patterns: string[], opts: { in?: string }) => {
+		.option("--global", "Remove from global excludes")
+		.action((patterns: string[], opts: { in?: string; global?: boolean }) => {
+			const toRemove = new Set(patterns.flatMap((p) => [p, p.endsWith("/**") ? p : `${p}/**`]));
+
+			if (opts.global) {
+				const config = loadConfig();
+				const current = config.globalExclude ?? [];
+				const filtered = current.filter((e) => !toRemove.has(e));
+				const removed = current.length - filtered.length;
+				if (removed === 0) {
+					log.dim("No matching global patterns found.");
+					return;
+				}
+				config.globalExclude = filtered;
+				saveConfig(config);
+				log.success(`Removed ${removed} global pattern(s).`);
+				return;
+			}
+
 			const resolved = resolveProjectSlug(opts.in);
 			if (!resolved) {
-				log.error("Not in a registered project. Use --in <slug>.");
+				log.error("Not in a registered project. Use --in <slug> or --global.");
 				process.exitCode = 1;
 				return;
 			}
@@ -67,7 +109,6 @@ export function registerExcludeCommand(program: Command): void {
 			}
 
 			const current = project.exclude ?? [];
-			const toRemove = new Set(patterns.flatMap((p) => [p, p.endsWith("/**") ? p : `${p}/**`]));
 			const filtered = current.filter((e) => !toRemove.has(e));
 			const removed = current.length - filtered.length;
 
@@ -78,7 +119,6 @@ export function registerExcludeCommand(program: Command): void {
 
 			registry.updateProject(resolved, { exclude: filtered });
 			log.success(`Removed ${removed} pattern(s) from "${resolved}".`);
-			log.dim("Run: graphmind clean && graphmind build --full");
 		});
 
 	exclude
@@ -86,30 +126,33 @@ export function registerExcludeCommand(program: Command): void {
 		.description("Show current exclude patterns")
 		.option("--in <slug>", "Project slug")
 		.action((opts: { in?: string }) => {
+			const config = loadConfig();
+			const globalExclude = config.globalExclude ?? [];
+
+			if (globalExclude.length > 0) {
+				console.log("\n  Global excludes:");
+				for (const e of globalExclude) {
+					console.log(`    ${e}`);
+				}
+			}
+
 			const resolved = resolveProjectSlug(opts.in);
-			if (!resolved) {
-				log.error("Not in a registered project. Use --in <slug>.");
-				process.exitCode = 1;
-				return;
+			if (resolved) {
+				const registry = new Registry();
+				const project = registry.get(resolved);
+				if (project) {
+					const excludes = project.exclude ?? [];
+					if (excludes.length > 0) {
+						console.log(`\n  Project "${resolved}" excludes:`);
+						for (const e of excludes) {
+							console.log(`    ${e}`);
+						}
+					}
+				}
 			}
 
-			const registry = new Registry();
-			const project = registry.get(resolved);
-			if (!project) {
-				log.error(`Project "${resolved}" not found.`);
-				process.exitCode = 1;
-				return;
-			}
-
-			const excludes = project.exclude ?? [];
-			if (excludes.length === 0) {
+			if (globalExclude.length === 0 && !resolved) {
 				log.dim("No exclude patterns configured.");
-				return;
-			}
-
-			console.log(`\n  Exclude patterns for "${resolved}":\n`);
-			for (const e of excludes) {
-				console.log(`    ${e}`);
 			}
 			console.log();
 		});

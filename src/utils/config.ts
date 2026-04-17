@@ -21,6 +21,7 @@ export interface ProjectConfig {
 export interface GlobalConfig {
 	version: string;
 	projects: Record<string, ProjectConfig>;
+	globalExclude: string[];
 	defaults: {
 		embeddingModel: string;
 		watchDebounce: number;
@@ -37,6 +38,7 @@ export interface GlobalConfig {
 const DEFAULT_CONFIG: GlobalConfig = {
 	version: "1",
 	projects: {},
+	globalExclude: [],
 	defaults: {
 		embeddingModel: "minilm",
 		watchDebounce: 2000,

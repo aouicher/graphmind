@@ -162,6 +162,14 @@ graphmind clean [slug]        # remove graph cache (forces full rebuild)
 graphmind clean --all         # clean all projects
 ```
 
+### Exclude
+```bash
+graphmind exclude list                    # show all patterns
+graphmind exclude add grafana-data        # exclude from current project
+graphmind exclude add grafana-data --global  # exclude from all projects
+graphmind exclude remove grafana-data     # re-include
+```
+
 ### Query
 ```bash
 graphmind query <symbol>      # find symbol + connections
