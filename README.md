@@ -155,6 +155,8 @@ graphmind build [slug]        # incremental build
 graphmind build --all         # all projects
 graphmind build --full        # force full rebuild
 graphmind build --watch       # watch mode (debounced 2s)
+graphmind clean [slug]        # remove graph cache (forces full rebuild)
+graphmind clean --all         # clean all projects
 ```
 
 ### Query
