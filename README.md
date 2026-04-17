@@ -78,6 +78,7 @@ graphmind status              # health check
 graphmind build [slug]        # incremental build
 graphmind build --all         # all projects
 graphmind build --full        # force full rebuild
+graphmind build --watch       # watch mode (debounced 2s)
 ```
 
 ### Query
@@ -97,6 +98,22 @@ graphmind memory add "<fact>" [--project <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>
+```
+
+### Search
+```bash
+graphmind search "<query>"          # semantic search (requires embed)
+graphmind search "<q1>; <q2>"       # multi-query with RRF ranking
+graphmind search "<query>" --kind function
+graphmind embed [slug]              # build local embeddings (one-time)
+```
+
+### Export
+```bash
+graphmind export [slug] -f dot      # Graphviz dot format
+graphmind export [slug] -f mermaid  # Mermaid diagram
+graphmind export [slug] -f json     # JSON graph
+graphmind export --cross -f mermaid # cross-project diagram
 ```
 
 ### Cross-Project
@@ -189,9 +206,10 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 
 - [x] Phase 1: Core MVP (graph + memory + CLI + MCP)
 - [x] Phase 2: Cross-project, diff-impact, sessions
-- [ ] Phase 3: Semantic search (local embeddings)
-- [ ] Phase 4: Watch mode, export (dot/mermaid/json)
+- [x] Phase 3: Semantic search (local embeddings, RRF multi-query)
+- [x] Phase 4: Watch mode, export (dot/mermaid/json)
 - [ ] Phase 5: Python/Ruby/Go support
+- [ ] Phase 6: Obsidian vault export, git hooks
 
 ## Contributing
 
