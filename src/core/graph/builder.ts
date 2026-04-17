@@ -35,10 +35,10 @@ const DEFAULT_EXCLUDE = [
 	"venv",
 	"vendor",
 	"target",
-	"public/packs",
-	"public/assets",
 	"tmp",
 	"log",
+	"public/packs",
+	"public/assets",
 ];
 
 interface ParsedSymbol {
@@ -278,6 +278,7 @@ export class GraphBuilder {
 	): Array<{ fullPath: string; language: string }> {
 		const files: Array<{ fullPath: string; language: string }> = [];
 		const dirExcludes: string[] = [];
+		const pathExcludes: string[] = [];
 		const filePatterns: string[] = [];
 
 		for (const e of exclude) {
@@ -287,18 +288,22 @@ export class GraphBuilder {
 				.replace(/\/\*$/, "");
 			if (clean.startsWith("*.") || clean.startsWith(".")) {
 				filePatterns.push(clean);
+			} else if (clean.includes("/")) {
+				pathExcludes.push(clean);
 			} else {
 				dirExcludes.push(clean);
 			}
 		}
 
-		this.walkDir(dir, dirExcludes, filePatterns, files);
+		this.walkDir(dir, dir, dirExcludes, pathExcludes, filePatterns, files);
 		return files;
 	}
 
 	private walkDir(
 		dir: string,
+		rootDir: string,
 		dirExcludes: string[],
+		pathExcludes: string[],
 		filePatterns: string[],
 		files: Array<{ fullPath: string; language: string }>,
 	): void {
@@ -313,7 +318,9 @@ export class GraphBuilder {
 			const stat = statSync(fullPath);
 
 			if (stat.isDirectory()) {
-				this.walkDir(fullPath, dirExcludes, filePatterns, files);
+				const relPath = fullPath.slice(rootDir.length + 1);
+				if (pathExcludes.some((p) => relPath === p || relPath.startsWith(`${p}/`))) continue;
+				this.walkDir(fullPath, rootDir, dirExcludes, pathExcludes, filePatterns, files);
 			} else {
 				if (filePatterns.some((p) => entry.endsWith(p.replace("*", "")))) continue;
 				const ext = extname(entry);
