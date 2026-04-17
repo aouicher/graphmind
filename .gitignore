@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+*.db
+*.db-journal
+.DS_Store
+*.tgz
+.env
+.env.*
+.graphmindrc.json
+.omc/
+*.node

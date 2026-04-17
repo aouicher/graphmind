@@ -1,0 +1,22 @@
+[package]
+name = "graphmind-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Tree-sitter based code graph extraction core for graphmind"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi9", "serde-json"] }
+napi-derive = "2"
+tree-sitter = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
