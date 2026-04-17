@@ -32,7 +32,7 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit",
-		"postinstall": "npm rebuild better-sqlite3 2>/dev/null || true",
+		"postinstall": "npm rebuild better-sqlite3 || true",
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
