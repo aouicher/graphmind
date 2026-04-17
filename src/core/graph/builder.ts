@@ -11,6 +11,9 @@ const LANGUAGE_MAP: Record<string, string> = {
 	".js": "javascript",
 	".jsx": "javascript",
 	".mjs": "javascript",
+	".py": "python",
+	".go": "go",
+	".rs": "rust",
 };
 
 const DEFAULT_EXCLUDE = [

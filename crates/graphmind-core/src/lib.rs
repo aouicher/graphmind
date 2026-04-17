@@ -73,5 +73,8 @@ pub fn supported_languages() -> Vec<String> {
     vec![
         "typescript".to_string(),
         "javascript".to_string(),
+        "python".to_string(),
+        "go".to_string(),
+        "rust".to_string(),
     ]
 }
