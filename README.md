@@ -299,11 +299,8 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 
 ## Troubleshooting
 
-**`MODULE_VERSION mismatch` error with better-sqlite3:**
-This happens when better-sqlite3 was compiled for a different Node.js version. Fix:
-```bash
-npm rebuild better-sqlite3
-```
+**Requires Node.js 22.13+:**
+graphmind uses the built-in `node:sqlite` module (no native addons). Check your version with `node -v`.
 
 **`graphmind build` scans too many files:**
 Check your excludes. By default, `node_modules`, `dist`, `build`, `vendor`, `target` and others are excluded. You can customize per-project in `~/.graphmind/config.json` under `exclude`.

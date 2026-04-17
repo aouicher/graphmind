@@ -4,7 +4,7 @@ Local-first code intelligence CLI with MCP server.
 
 ## Tech Stack
 - **Rust core**: tree-sitter parsing via napi-rs (crates/graphmind-core/)
-- **TypeScript CLI**: commander + better-sqlite3 + @modelcontextprotocol/sdk
+- **TypeScript CLI**: commander + node:sqlite + @modelcontextprotocol/sdk
 - **Build**: tsup | **Test**: vitest | **Lint**: biome
 
 ## Commands
