@@ -18,12 +18,15 @@ export function registerSearchTools(): ToolDef[] {
 		{
 			name: "gm_search",
 			description:
-				"Semantic search across symbols. Supports multi-query with semicolons. Falls back to FTS if embeddings unavailable.",
+				"Search across symbols and source content. Supports multi-query with semicolons. Searches all projects if no slug specified.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					query: { type: "string", description: "Search query (use ; for multi-query RRF)" },
-					project: { type: "string", description: "Project slug (optional)" },
+					project: {
+						type: "string",
+						description: "Project slug (optional — searches all if omitted)",
+					},
 					kind: { type: "string", description: "Filter by symbol kind (function, class, method)" },
 					limit: { type: "number", description: "Max results (default 10)" },
 				},
@@ -31,38 +34,45 @@ export function registerSearchTools(): ToolDef[] {
 			},
 			handler: async (args, projectFilter) => {
 				const registry = new Registry();
+				const projects = registry.list();
 				const slug =
 					(args.project as string) ??
 					projectFilter?.[0] ??
 					registry.findByPath(process.cwd())?.slug;
 
-				if (!slug) return "Not in a registered project. Provide a project slug.";
-
-				const dbPath = graphDbPath(slug);
-				if (!existsSync(dbPath)) return `No graph for "${slug}". Run: graphmind build`;
-
 				const limit = (args.limit as number) ?? 10;
 				const kind = args.kind as string | undefined;
 				const query = args.query as string;
-
-				const available = await isAvailable();
-				if (available) {
-					const results = await semanticSearch(slug, query, { limit, kind });
-					if (results.length === 0) return "No results. Run: graphmind embed";
-					return results;
-				}
-
-				const db = initDatabase(dbPath);
-				const q = new GraphQueries(db);
 				const ftsQuery = query
 					.split(/\s+/)
 					.map((w) => `${w}*`)
 					.join(" ");
-				let results = q.searchSymbols(ftsQuery);
-				db.close();
 
-				if (kind) results = results.filter((r) => r.kind === kind);
-				return results.slice(0, limit);
+				const slugs = slug ? [slug] : projects.map((p) => p.slug);
+				if (slugs.length === 0) return "No projects registered. Run: graphmind register";
+
+				const allResults: Array<Record<string, unknown>> = [];
+				for (const s of slugs) {
+					const dbPath = graphDbPath(s);
+					if (!existsSync(dbPath)) continue;
+
+					const available = await isAvailable();
+					if (available) {
+						const results = await semanticSearch(s, query, { limit, kind });
+						for (const r of results) allResults.push({ project: s, ...r });
+						continue;
+					}
+
+					const db = initDatabase(dbPath);
+					const q = new GraphQueries(db);
+					let results = q.searchSymbols(ftsQuery);
+					db.close();
+					if (kind) results = results.filter((r) => r.kind === kind);
+					for (const r of results) allResults.push({ project: s, ...r });
+				}
+
+				if (allResults.length === 0) return "No results found.";
+				return allResults.slice(0, limit);
 			},
 		},
 	];

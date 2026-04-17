@@ -11,14 +11,42 @@ interface ToolDef {
 	handler: (args: Record<string, unknown>, projectFilter: string[] | null) => Promise<unknown>;
 }
 
-function getQueries(project?: string): { queries: GraphQueries; slug: string } | null {
+function resolveSlug(project?: string): string | undefined {
 	const registry = new Registry();
-	const slug = project ?? registry.findByPath(process.cwd())?.slug;
+	return (
+		project ??
+		registry.findByPath(process.cwd())?.slug ??
+		(registry.list().length === 1 ? registry.list()[0]?.slug : undefined)
+	);
+}
+
+function getQueries(project?: string): { queries: GraphQueries; slug: string } | null {
+	const slug = resolveSlug(project);
 	if (!slug) return null;
 	const dbPath = graphDbPath(slug);
 	if (!existsSync(dbPath)) return null;
 	const db = initDatabase(dbPath);
 	return { queries: new GraphQueries(db), slug };
+}
+
+function getAllQueries(): Array<{
+	queries: GraphQueries;
+	slug: string;
+	db: ReturnType<typeof initDatabase>;
+}> {
+	const registry = new Registry();
+	const results: Array<{
+		queries: GraphQueries;
+		slug: string;
+		db: ReturnType<typeof initDatabase>;
+	}> = [];
+	for (const p of registry.list()) {
+		const dbPath = graphDbPath(p.slug);
+		if (!existsSync(dbPath)) continue;
+		const db = initDatabase(dbPath);
+		results.push({ queries: new GraphQueries(db), slug: p.slug, db });
+	}
+	return results;
 }
 
 export function registerGraphTools(): ToolDef[] {
@@ -36,11 +64,29 @@ export function registerGraphTools(): ToolDef[] {
 			},
 			handler: async (args) => {
 				const ctx = getQueries(args.project as string | undefined);
-				if (!ctx) return "No graph available. Run: graphmind build";
-				const symbols = ctx.queries.findSymbol(args.symbol as string);
-				const callers = ctx.queries.callers(args.symbol as string);
-				const callees = ctx.queries.callees(args.symbol as string);
-				return { symbols, callers, callees };
+				if (ctx) {
+					return {
+						project: ctx.slug,
+						symbols: ctx.queries.findSymbol(args.symbol as string),
+						callers: ctx.queries.callers(args.symbol as string),
+						callees: ctx.queries.callees(args.symbol as string),
+					};
+				}
+				const all = getAllQueries();
+				if (all.length === 0) return "No graph available. Run: graphmind build";
+				const results = all
+					.map(({ queries, slug, db }) => {
+						const r = {
+							project: slug,
+							symbols: queries.findSymbol(args.symbol as string),
+							callers: queries.callers(args.symbol as string),
+							callees: queries.callees(args.symbol as string),
+						};
+						db.close();
+						return r;
+					})
+					.filter((r) => r.symbols.length > 0);
+				return results.length > 0 ? results : "Symbol not found in any project.";
 			},
 		},
 		{
@@ -56,12 +102,29 @@ export function registerGraphTools(): ToolDef[] {
 			},
 			handler: async (args) => {
 				const ctx = getQueries(args.project as string | undefined);
-				if (!ctx) return "No graph available.";
-				return {
-					symbol: ctx.queries.findSymbol(args.symbol as string),
-					callers: ctx.queries.callers(args.symbol as string),
-					callees: ctx.queries.callees(args.symbol as string),
-				};
+				if (ctx) {
+					return {
+						project: ctx.slug,
+						symbol: ctx.queries.findSymbol(args.symbol as string),
+						callers: ctx.queries.callers(args.symbol as string),
+						callees: ctx.queries.callees(args.symbol as string),
+					};
+				}
+				const all = getAllQueries();
+				if (all.length === 0) return "No graph available.";
+				const results = all
+					.map(({ queries, slug, db }) => {
+						const r = {
+							project: slug,
+							symbol: queries.findSymbol(args.symbol as string),
+							callers: queries.callers(args.symbol as string),
+							callees: queries.callees(args.symbol as string),
+						};
+						db.close();
+						return r;
+					})
+					.filter((r) => r.symbol.length > 0);
+				return results.length > 0 ? results : "Symbol not found.";
 			},
 		},
 		{

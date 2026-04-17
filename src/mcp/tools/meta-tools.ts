@@ -73,7 +73,11 @@ export function registerMetaTools(): ToolDef[] {
 			},
 			handler: async (args) => {
 				const registry = new Registry();
-				const slug = (args.project as string) ?? registry.findByPath(process.cwd())?.slug;
+				const projects = registry.list();
+				const slug =
+					(args.project as string) ??
+					registry.findByPath(process.cwd())?.slug ??
+					(projects.length === 1 ? projects[0]?.slug : undefined);
 
 				if (!slug) return "Not in a registered project.";
 
