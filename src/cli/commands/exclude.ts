@@ -13,7 +13,10 @@ export function registerExcludeCommand(program: Command): void {
 		.option("--in <slug>", "Project slug")
 		.option("--global", "Apply to all projects")
 		.action((patterns: string[], opts: { in?: string; global?: boolean }) => {
-			const normalized = patterns.map((p) => (p.endsWith("/**") ? p : `${p}/**`));
+			const normalized = patterns.map((p) => {
+				if (p.endsWith("/**") || /\.\w+$/.test(p)) return p;
+				return `${p}/**`;
+			});
 
 			if (opts.global) {
 				const config = loadConfig();
