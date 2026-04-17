@@ -36,9 +36,9 @@ export function startWatcher(slug: string): void {
 
 		const builder = new GraphBuilder(slug);
 		try {
-			const result = await builder.build(project?.path, {
+			const result = await builder.build(project!.path, {
 				full: false,
-				exclude: project?.exclude,
+				exclude: project!.exclude,
 			});
 
 			registry.updateProject(slug, {
