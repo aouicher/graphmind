@@ -46,6 +46,7 @@ Add to `~/.claude.json`:
 │  MCP Server (stdio)                          │
 │  gm_query · gm_fn · gm_deps · gm_impact    │
 │  gm_memory_search · gm_memory_add           │
+│  gm_cross_query · gm_diff_impact            │
 │  gm_status · gm_context                     │
 ├─────────────────────────────────────────────┤
 │  Layer 1: Structural Graph (SQLite)          │
@@ -98,6 +99,29 @@ graphmind memory list
 graphmind memory delete <id>
 ```
 
+### Cross-Project
+```bash
+graphmind cross-query <symbol>      # search across ALL projects
+graphmind cross-deps <slug>         # who depends on this project
+graphmind cross-links               # all cross-project relationships
+graphmind cross-link add <a> <b>    # manual link
+graphmind cross-link infer          # auto-detect shared symbols
+```
+
+### Diff Impact
+```bash
+graphmind diff-impact               # impact of current git changes
+graphmind diff-impact --staged      # staged changes only
+graphmind diff-impact --depth 3     # limit trace depth
+```
+
+### Sessions
+```bash
+graphmind session start [slug]      # log session start
+graphmind session save ["message"]  # save session summary
+graphmind session history [slug]    # recent sessions
+```
+
 ### Integration
 ```bash
 graphmind mcp                 # start MCP server (stdio)
@@ -111,6 +135,8 @@ graphmind install-skill       # install Claude Code skill
 graphmind exposes tools via MCP (Model Context Protocol) over stdio:
 - `gm_query` / `gm_fn` / `gm_deps` / `gm_impact` — graph queries
 - `gm_memory_search` / `gm_memory_add` — memory operations
+- `gm_cross_query` / `gm_cross_deps` / `gm_cross_links` — cross-project
+- `gm_diff_impact` — git change impact analysis
 - `gm_status` / `gm_context` — project metadata
 
 ### Skill
@@ -162,16 +188,17 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 ## Roadmap
 
 - [x] Phase 1: Core MVP (graph + memory + CLI + MCP)
-- [ ] Phase 2: Cross-project queries, Python/Ruby/Go support
+- [x] Phase 2: Cross-project, diff-impact, sessions
 - [ ] Phase 3: Semantic search (local embeddings)
-- [ ] Phase 4: Watch mode, git hooks, Obsidian export
+- [ ] Phase 4: Watch mode, export (dot/mermaid/json)
+- [ ] Phase 5: Python/Ruby/Go support
 
 ## Contributing
 
 MIT License. Contributions welcome.
 
 ```bash
-git clone https://github.com/<user>/graphmind
+git clone https://github.com/aouicher/graphmind
 cd graphmind
 npm install
 cargo build           # build Rust core

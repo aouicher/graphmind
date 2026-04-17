@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "Your codebase has memory. Use it.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aouicher/graphmind.git"
+  },
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "code-intelligence",
+    "knowledge-graph",
+    "tree-sitter",
+    "local-first"
+  ],
   "type": "module",
   "bin": {
     "graphmind": "./dist/cli/index.js"
