@@ -9,6 +9,7 @@ export interface SymbolRow {
 	line_end: number;
 	signature: string | null;
 	doc: string | null;
+	content: string | null;
 }
 
 export interface EdgeRow {
