@@ -37,6 +37,7 @@ const DEFAULT_EXCLUDE = [
 	"target",
 	"tmp",
 	"log",
+	"cdk.out",
 	"public/packs",
 	"public/assets",
 ];
