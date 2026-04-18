@@ -166,7 +166,6 @@ export class GraphBuilder {
 			const lines = content.split("\n");
 			for (const sym of parsed.symbols) {
 				const body = lines.slice(sym.lineStart - 1, sym.lineEnd).join("\n");
-				const truncated = body.length > 4000 ? body.slice(0, 4000) : body;
 				insertSymbol.run(
 					sym.name,
 					sym.kind,
@@ -175,7 +174,7 @@ export class GraphBuilder {
 					sym.lineEnd,
 					sym.signature ?? null,
 					sym.doc ?? null,
-					truncated,
+					body,
 				);
 				totalSymbols++;
 			}
