@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
 import { GraphQueries } from "../../core/graph/queries.js";
@@ -16,7 +16,8 @@ export function registerSyncCommand(program: Command): void {
 		.command("sync [slug]")
 		.description("Update CLAUDE.md with graph context")
 		.option("--all", "Sync all projects")
-		.action((slug: string | undefined, opts: { all?: boolean }) => {
+		.option("--dir <dir>", "Directory for CLAUDE.md (e.g. .claude)", "")
+		.action((slug: string | undefined, opts: { all?: boolean; dir?: string }) => {
 			const registry = new Registry();
 			const projects = opts.all
 				? registry.list()
@@ -32,7 +33,9 @@ export function registerSyncCommand(program: Command): void {
 
 			for (const project of projects) {
 				if (!project) continue;
-				const claudeMd = join(project.path, "CLAUDE.md");
+				const targetDir = opts.dir ? join(project.path, opts.dir) : project.path;
+				if (opts.dir) mkdirSync(targetDir, { recursive: true });
+				const claudeMd = join(targetDir, "CLAUDE.md");
 				const section = buildSection(project.slug);
 
 				if (!section) {
@@ -57,7 +60,7 @@ export function registerSyncCommand(program: Command): void {
 				}
 
 				writeFileSync(claudeMd, content);
-				log.success(`Synced CLAUDE.md for "${project.slug}"`);
+				log.success(`Synced ${claudeMd}`);
 			}
 		});
 }
