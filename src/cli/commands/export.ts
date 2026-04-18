@@ -221,6 +221,7 @@ interface SymbolRow {
 	line_start: number;
 	signature: string | null;
 	doc: string | null;
+	content: string | null;
 }
 
 interface EdgeRow {
@@ -255,7 +256,7 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 
 	const symbols = db
 		.prepare(
-			"SELECT name, kind, file, line_start, signature, doc FROM symbols ORDER BY file, line_start",
+			"SELECT name, kind, file, line_start, signature, doc, content FROM symbols ORDER BY file, line_start",
 		)
 		.all() as unknown as SymbolRow[];
 
@@ -296,6 +297,26 @@ function exportObsidian(slug: string | undefined, vaultPath: string): void {
 			lines.push("");
 			lines.push("## Documentation");
 			lines.push(sym.doc);
+		}
+
+		if (sym.content) {
+			const ext = sym.file.split(".").pop() ?? "";
+			const langMap: Record<string, string> = {
+				ts: "typescript",
+				tsx: "typescript",
+				js: "javascript",
+				jsx: "javascript",
+				mjs: "javascript",
+				py: "python",
+				go: "go",
+				rs: "rust",
+				rb: "ruby",
+			};
+			lines.push("");
+			lines.push("## Source");
+			lines.push(`\`\`\`${langMap[ext] ?? ext}`);
+			lines.push(sym.content);
+			lines.push("```");
 		}
 
 		const outgoing = edgeMap.get(sym.name) ?? [];
