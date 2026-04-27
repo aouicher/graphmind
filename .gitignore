@@ -1,6 +1,6 @@
+target/
 node_modules/
 dist/
-target/
 *.db
 *.db-journal
 .DS_Store

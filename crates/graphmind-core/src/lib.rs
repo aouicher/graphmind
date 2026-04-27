@@ -1,3 +1,4 @@
+#[cfg(feature = "napi")]
 use napi_derive::napi;
 
 mod extractor;
@@ -6,10 +7,11 @@ mod parser;
 mod resolver;
 
 pub use extractor::{CallSite, Symbol, SymbolKind};
-pub use parser::ParseResult;
+pub use parser::{parse, ParseResult};
 pub use resolver::ResolvedImport;
 
-#[napi(object)]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParsedFile {
     pub path: String,
     pub language: String,
@@ -18,6 +20,7 @@ pub struct ParsedFile {
     pub imports: Vec<ResolvedImport>,
 }
 
+#[cfg(feature = "napi")]
 #[napi]
 pub fn parse_file(path: String, source: String, language: String) -> napi::Result<ParsedFile> {
     let result = parser::parse(&path, &source, &language)
@@ -32,6 +35,7 @@ pub fn parse_file(path: String, source: String, language: String) -> napi::Resul
     })
 }
 
+#[cfg(feature = "napi")]
 #[napi]
 pub fn parse_files(files: Vec<FileInput>) -> napi::Result<Vec<ParsedFile>> {
     use rayon::prelude::*;
@@ -61,15 +65,51 @@ pub fn parse_files(files: Vec<FileInput>) -> napi::Result<Vec<ParsedFile>> {
     Ok(parsed)
 }
 
-#[napi(object)]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileInput {
     pub path: String,
     pub source: String,
     pub language: String,
 }
 
+pub fn parse_single(path: &str, source: &str, language: &str) -> Result<ParsedFile, String> {
+    let result = parser::parse(path, source, language)?;
+    Ok(ParsedFile {
+        path: path.to_string(),
+        language: language.to_string(),
+        symbols: result.symbols,
+        call_sites: result.call_sites,
+        imports: result.imports,
+    })
+}
+
+pub fn parse_batch(files: Vec<FileInput>) -> Vec<Result<ParsedFile, String>> {
+    use rayon::prelude::*;
+
+    files
+        .into_par_iter()
+        .map(|file| {
+            let result = parser::parse(&file.path, &file.source, &file.language)
+                .map_err(|e| format!("Error parsing {}: {e}", file.path))?;
+            Ok(ParsedFile {
+                path: file.path,
+                language: file.language,
+                symbols: result.symbols,
+                call_sites: result.call_sites,
+                imports: result.imports,
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "napi")]
 #[napi]
 pub fn supported_languages() -> Vec<String> {
+    languages_list()
+}
+
+pub fn languages_list() -> Vec<String> {
     vec![
         "typescript".to_string(),
         "javascript".to_string(),

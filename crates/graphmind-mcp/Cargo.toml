@@ -1,0 +1,15 @@
+[package]
+name = "graphmind-mcp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "MCP server for graphmind"
+
+[dependencies]
+graphmind-db = { path = "../graphmind-db" }
+graphmind-memory = { path = "../graphmind-memory" }
+rmcp = { version = "1.5", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+dirs = "5"
