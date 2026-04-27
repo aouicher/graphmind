@@ -158,3 +158,36 @@ fn unquote(s: &str) -> String {
 fn node_text(node: Node, source: &str) -> String {
     source[node.start_byte()..node.end_byte()].to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::parser;
+
+    #[test]
+    fn extracts_hcl_symbols() {
+        let source = r#"resource "aws_s3_bucket" "my_bucket" {
+  bucket = "my-bucket"
+}
+
+variable "region" {
+  description = "AWS region"
+  default     = "eu-west-1"
+}
+
+module "vpc" {
+  source = "./modules/vpc"
+}
+
+output "bucket_arn" {
+  description = "The ARN of the bucket"
+  value       = aws_s3_bucket.my_bucket.arn
+}
+"#;
+        let result = parser::parse("main.tf", source, "hcl").unwrap();
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"aws_s3_bucket.my_bucket"), "missing resource, got: {:?}", names);
+        assert!(names.contains(&"region"), "missing variable, got: {:?}", names);
+        assert!(names.contains(&"vpc"), "missing module, got: {:?}", names);
+        assert!(names.contains(&"bucket_arn"), "missing output, got: {:?}", names);
+    }
+}
