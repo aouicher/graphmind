@@ -49,7 +49,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
 
     let raw_results = q.search_symbols(&fts_query, limit * 5);
     let results: Vec<_> = if let Some(k) = kind {
-        raw_results.into_iter().filter(|r| r.kind == k).take(limit as usize).collect()
+        raw_results.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(limit as usize).collect()
     } else {
         raw_results.into_iter().take(limit as usize).collect()
     };
