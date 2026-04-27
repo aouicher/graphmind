@@ -4,7 +4,7 @@ use colored::Colorize;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 
-pub fn search(query: &str, slug: Option<&str>, limit: i64) {
+pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,
         None => {
@@ -47,7 +47,12 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64) {
         return;
     }
 
-    let results = q.search_symbols(&fts_query, limit);
+    let raw_results = q.search_symbols(&fts_query, limit * 5);
+    let results: Vec<_> = if let Some(k) = kind {
+        raw_results.into_iter().filter(|r| r.kind == k).take(limit as usize).collect()
+    } else {
+        raw_results.into_iter().take(limit as usize).collect()
+    };
 
     if results.is_empty() {
         println!("{} No results for: {}", "!".yellow(), query);

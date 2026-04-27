@@ -94,9 +94,23 @@ enum Commands {
         slug: Option<String>,
         #[arg(long, default_value = "20")]
         limit: i64,
+        #[arg(long)]
+        kind: Option<String>,
     },
     /// Generate embeddings (coming soon)
     Embed,
+    /// Session logging and context
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+    /// Manage git hooks
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+    /// Install Claude Code skill
+    InstallSkill,
     /// Memory operations
     Memory {
         #[command(subcommand)]
@@ -221,6 +235,38 @@ enum CrossLinkAction {
 }
 
 #[derive(clap::Subcommand)]
+enum SessionAction {
+    /// Log session start and show context
+    Start {
+        slug: Option<String>,
+    },
+    /// Save session summary
+    Save {
+        message: Option<String>,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+    },
+    /// Show recent session entries
+    History {
+        slug: Option<String>,
+        #[arg(short = 'n', long, default_value = "10")]
+        limit: usize,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum HooksAction {
+    /// Install git hooks (post-commit + pre-push)
+    Install {
+        slug: Option<String>,
+    },
+    /// Remove graphmind git hooks
+    Uninstall {
+        slug: Option<String>,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum ExcludeAction {
     /// Add exclude patterns
     Add {
@@ -303,11 +349,33 @@ fn main() {
         Commands::Cycles { slug } => {
             commands::query::cycles(slug.as_deref());
         }
-        Commands::Search { query, slug, limit } => {
-            commands::search::search(&query, slug.as_deref(), limit);
+        Commands::Search { query, slug, limit, kind } => {
+            commands::search::search(&query, slug.as_deref(), limit, kind.as_deref());
         }
         Commands::Embed => {
             commands::search::embed();
+        }
+        Commands::Session { action } => match action {
+            SessionAction::Start { slug } => {
+                commands::session::start(slug.as_deref());
+            }
+            SessionAction::Save { message, slug } => {
+                commands::session::save(message.as_deref(), slug.as_deref());
+            }
+            SessionAction::History { slug, limit } => {
+                commands::session::history(slug.as_deref(), limit);
+            }
+        },
+        Commands::Hooks { action } => match action {
+            HooksAction::Install { slug } => {
+                commands::hooks::install(slug.as_deref());
+            }
+            HooksAction::Uninstall { slug } => {
+                commands::hooks::uninstall(slug.as_deref());
+            }
+        },
+        Commands::InstallSkill => {
+            commands::install_skill::install_skill();
         }
         Commands::Memory { action } => match action {
             MemoryAction::Add {
