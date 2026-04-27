@@ -2,7 +2,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
@@ -17,6 +17,8 @@ permissions:
   contents: write
 
 jobs:
+  # --- CI: runs on every push and PR ---
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -30,11 +32,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/graphmind-core
 
       - run: npm ci
-      - run: cargo check
+      - run: cargo check --workspace
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
@@ -62,10 +62,52 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/graphmind-core
 
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  rust-build:
+    needs: rust-check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: graphmind-aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: graphmind-x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: graphmind-x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/graphmind dist/${{ matrix.binary }}
+          chmod +x dist/${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error
 
   # --- CD: only on push to main, after all CI jobs pass ---
 
@@ -75,6 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
+      tag: ${{ steps.version.outputs.current }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,7 +192,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/graphmind-core
+          key: ${{ matrix.target }}
 
       - run: npm ci
 
@@ -177,6 +220,26 @@ jobs:
           name: native-${{ matrix.target }}
           path: native-out/*.node
           if-no-files-found: error
+
+  release-rust:
+    needs: [release, rust-build]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload Rust binaries to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.release.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          for dir in artifacts/graphmind-*; do
+            binary=$(ls "$dir")
+            gh release upload "$TAG" "$dir/$binary" --repo "$REPO"
+          done
 
   publish:
     needs: [release, build-native]
