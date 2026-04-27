@@ -661,10 +661,20 @@ fn handle_diff_impact(args: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 fn handle_search(args: &Value) -> Value {
-    let query = match args.get("query").and_then(|v| v.as_str()) {
+    let raw_query = match args.get("query").and_then(|v| v.as_str()) {
         Some(q) => q,
         None => return err_text("Missing required parameter: query"),
     };
+    let fts_query: String = raw_query
+        .split(';')
+        .flat_map(|part| part.split_whitespace())
+        .filter(|w| w.len() > 1)
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    if fts_query.is_empty() {
+        return err_text("Empty search query after filtering");
+    }
+    let query = &fts_query;
     let limit = args
         .get("limit")
         .and_then(|v| v.as_i64())
@@ -702,7 +712,7 @@ fn handle_search(args: &Value) -> Value {
     }
 
     json_text(&json!({
-        "query": query,
+        "query": raw_query,
         "results": all_results,
         "projects_searched": slugs.len(),
         "total_found": total_found,
