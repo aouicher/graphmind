@@ -295,7 +295,7 @@ fn handle_impact(args: &Value) -> Value {
     let depth = args
         .get("depth")
         .and_then(|v| v.as_u64())
-        .unwrap_or(3) as usize;
+        .unwrap_or(5) as usize;
     with_graph(args, |gq, _proj| {
         let impacted = gq.impact(file, depth);
         json_text(&json!({
@@ -361,7 +361,7 @@ fn handle_memory_search(args: &Value) -> Value {
     let limit = args
         .get("limit")
         .and_then(|v| v.as_u64())
-        .unwrap_or(10) as usize;
+        .unwrap_or(20) as usize;
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     let store = MemoryStore::new(&memory_dir());
@@ -508,7 +508,7 @@ fn handle_context(args: &Value) -> Value {
 
     // Recent memory
     let store = MemoryStore::new(&memory_dir());
-    let recent_memory: Vec<_> = store.list(Some(&proj.slug)).into_iter().take(5).collect();
+    let recent_memory: Vec<_> = store.list(Some(&proj.slug)).into_iter().take(10).collect();
 
     // Cross links
     let cl_store = CrossLinkStore::new(&cross_links_path());
@@ -590,6 +590,7 @@ fn handle_cross_links(_args: &Value) -> Value {
 }
 
 fn handle_diff_impact(args: &Value) -> Value {
+    let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
         Some(p) => p,
@@ -635,7 +636,7 @@ fn handle_diff_impact(args: &Value) -> Value {
     let mut file_impacts: Vec<Value> = Vec::new();
 
     for file in &changed_files {
-        let impacted = gq.impact(file, 2);
+        let impacted = gq.impact(file, depth);
         for f in &impacted {
             all_impacted.insert(f.clone());
         }

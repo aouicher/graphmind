@@ -53,7 +53,7 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
-                "depth": { "type": "integer", "description": "Max traversal depth (default 3)" },
+                "depth": { "type": "integer", "description": "Max traversal depth (default 5)" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["file"]
@@ -143,7 +143,8 @@ fn tool_defs() -> Vec<Tool> {
         make_tool("gm_diff_impact", "Analyze git diff impact on the code graph", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug (optional)" },
+                "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
         make_tool("gm_search", "Full-text search across symbols in one or all projects. Supports natural language queries and semicolons for multi-query.", json!({
