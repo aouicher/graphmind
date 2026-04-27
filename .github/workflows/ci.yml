@@ -140,23 +140,28 @@ jobs:
         with:
           path: artifacts
 
-      - name: Compute SHA256 checksums
-        id: sha
-        run: |
-          echo "arm64=$(shasum -a 256 artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "x64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-      - name: Update Homebrew formula
+      - name: Publish binaries to homebrew-tap and update formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
-          SHA_ARM64: ${{ steps.sha.outputs.arm64 }}
-          SHA_X64: ${{ steps.sha.outputs.x64 }}
-          SHA_LINUX: ${{ steps.sha.outputs.linux }}
         run: |
           VERSION="${TAG#v}"
-          cat > /tmp/graphmind.rb << FORMULA
+          TAP_REPO="aouicher/homebrew-tap"
+
+          # Create release on homebrew-tap and upload binaries
+          gh release create "$TAG" --repo "$TAP_REPO" --title "graphmind $TAG" --notes "graphmind $TAG binaries" 2>/dev/null || true
+          for dir in artifacts/graphmind-*; do
+            binary=$(ls "$dir")
+            gh release upload "$TAG" "$dir/$binary" --repo "$TAP_REPO" --clobber
+          done
+
+          # Compute SHA256
+          SHA_ARM64=$(shasum -a 256 artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin | cut -d' ' -f1)
+          SHA_X64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)
+          SHA_LINUX=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)
+
+          # Generate formula pointing to homebrew-tap releases
+          cat > /tmp/graphmind.rb << RUBY
           class Graphmind < Formula
             desc "Local-first code intelligence CLI with MCP server"
             homepage "https://github.com/aouicher/graphmind"
@@ -165,16 +170,16 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+                url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
                 sha256 "${SHA_ARM64}"
               else
-                url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+                url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
                 sha256 "${SHA_X64}"
               end
             end
 
             on_linux do
-              url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+              url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
               sha256 "${SHA_LINUX}"
             end
 
@@ -187,12 +192,11 @@ jobs:
               assert_match "graphmind", shell_output("#{bin}/graphmind --help")
             end
           end
-          FORMULA
-
-          # Remove leading whitespace from heredoc
+          RUBY
           sed -i 's/^          //' /tmp/graphmind.rb
 
-          gh repo clone aouicher/homebrew-tap /tmp/homebrew-tap
+          # Update formula in tap repo
+          gh repo clone "$TAP_REPO" /tmp/homebrew-tap
           cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
           cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
