@@ -669,8 +669,9 @@ fn handle_search(args: &Value) -> Value {
         .split(';')
         .flat_map(|part| part.split_whitespace())
         .filter(|w| w.len() > 1)
+        .map(|w| format!("{w}*"))
         .collect::<Vec<_>>()
-        .join(" OR ");
+        .join(" ");
     if fts_query.is_empty() {
         return err_text("Empty search query after filtering");
     }
@@ -678,7 +679,8 @@ fn handle_search(args: &Value) -> Value {
     let limit = args
         .get("limit")
         .and_then(|v| v.as_i64())
-        .unwrap_or(20);
+        .unwrap_or(10);
+    let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     let slugs = if let Some(slug) = project_slug {
@@ -701,7 +703,12 @@ fn handle_search(args: &Value) -> Value {
             Err(_) => continue,
         };
         let gq = GraphQueries::new(&conn);
-        let results = gq.search_symbols(query, limit);
+        let raw_results = gq.search_symbols(query, limit * 5);
+        let results: Vec<_> = if let Some(k) = kind_filter {
+            raw_results.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(limit as usize).collect()
+        } else {
+            raw_results.into_iter().take(limit as usize).collect()
+        };
         if !results.is_empty() {
             total_found += results.len();
             let compact: Vec<Value> = results.iter().map(|s| json!({

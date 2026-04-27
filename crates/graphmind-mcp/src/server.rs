@@ -146,11 +146,12 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_search", "Full-text search across symbols in one or all projects", json!({
+        make_tool("gm_search", "Full-text search across symbols in one or all projects. Supports natural language queries and semicolons for multi-query.", json!({
             "type": "object",
             "properties": {
-                "query": { "type": "string", "description": "Search query (FTS5 syntax)" },
-                "limit": { "type": "integer", "description": "Max results (default 20)" },
+                "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
+                "limit": { "type": "integer", "description": "Max results (default 10)" },
+                "kind": { "type": "string", "description": "Filter by symbol kind: function, class, method, interface, type" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["query"]
