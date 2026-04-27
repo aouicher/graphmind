@@ -9,7 +9,7 @@ pub fn export(
     slug: Option<&str>,
     format: &str,
     cross: bool,
-    obsidian: bool,
+    obsidian: Option<&str>,
 ) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,
@@ -38,8 +38,8 @@ pub fn export(
         std::process::exit(1);
     });
 
-    if obsidian {
-        export_obsidian(&db, &slug);
+    if let Some(vault_path) = obsidian {
+        export_obsidian(&db, &slug, vault_path);
         return;
     }
 
@@ -281,8 +281,16 @@ fn export_json(db: &rusqlite::Connection, cross: bool, slug: &str) {
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
 }
 
-fn export_obsidian(db: &rusqlite::Connection, _slug: &str) {
-    // Query all symbols and edges, output as markdown-compatible format
+fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
+    use std::io::Write;
+
+    let vault = std::path::Path::new(vault_path);
+    let graphmind_dir = vault.join("graphmind").join(slug);
+    std::fs::create_dir_all(&graphmind_dir).unwrap_or_else(|e| {
+        eprintln!("{} Failed to create vault directory: {}", "Error:".red().bold(), e);
+        std::process::exit(1);
+    });
+
     let mut stmt = db
         .prepare("SELECT id, name, kind, file, line_start FROM symbols")
         .unwrap();
@@ -317,7 +325,6 @@ fn export_obsidian(db: &rusqlite::Connection, _slug: &str) {
         .filter_map(|r| r.ok())
         .collect();
 
-    // Group symbols by file
     let mut by_file: std::collections::HashMap<String, Vec<(i64, String, String, i64)>> =
         std::collections::HashMap::new();
     for (id, name, kind, file, line) in &symbols {
@@ -327,21 +334,40 @@ fn export_obsidian(db: &rusqlite::Connection, _slug: &str) {
             .push((*id, name.clone(), kind.clone(), *line));
     }
 
+    let mut file_count = 0;
     for (file, syms) in &by_file {
-        println!("# {file}\n");
+        let safe_name = file.replace('/', "_").replace('\\', "_");
+        let md_path = graphmind_dir.join(format!("{safe_name}.md"));
+
+        let mut content = String::new();
+        content.push_str(&format!("# {file}\n\n"));
+
         for (id, name, kind, line) in syms {
-            println!("## {name} ({kind}) L{line}");
-            // Find related edges
+            content.push_str(&format!("## {name} ({kind}) L{line}\n"));
             let related: Vec<_> = edges
                 .iter()
                 .filter(|(from_id, _, to_id, _, _)| from_id == id || to_id == id)
                 .collect();
             for (_, from_name, _, to_name, edge_kind) in &related {
-                println!("- [[{from_name}]] --{edge_kind}--> [[{to_name}]]");
+                content.push_str(&format!("- [[{from_name}]] --{edge_kind}--> [[{to_name}]]\n"));
             }
-            println!();
+            content.push('\n');
         }
+
+        let mut f = std::fs::File::create(&md_path).unwrap_or_else(|e| {
+            eprintln!("{} Failed to write {}: {}", "Error:".red().bold(), md_path.display(), e);
+            std::process::exit(1);
+        });
+        f.write_all(content.as_bytes()).ok();
+        file_count += 1;
     }
+
+    println!(
+        "{} Exported {} files to {}",
+        "OK".green().bold(),
+        file_count,
+        graphmind_dir.display()
+    );
 }
 
 fn print_cross_links_dot(slug: &str) {

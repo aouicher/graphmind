@@ -157,7 +157,7 @@ enum Commands {
         #[arg(long)]
         cross: bool,
         #[arg(long)]
-        obsidian: bool,
+        obsidian: Option<String>,
     },
     /// Start MCP server
     Mcp,
@@ -459,7 +459,7 @@ fn main() {
             cross,
             obsidian,
         } => {
-            commands::export::export(slug.as_deref(), &format, cross, obsidian);
+            commands::export::export(slug.as_deref(), &format, cross, obsidian.as_deref());
         }
         Commands::Mcp => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
