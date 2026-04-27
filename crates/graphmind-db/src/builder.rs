@@ -138,11 +138,15 @@ impl GraphBuilder {
                 continue;
             }
 
-            self.db.execute(
+            if let Err(e) = self.db.execute(
                 "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
                 params![rel_path],
-            ).ok();
-            self.db.execute("DELETE FROM symbols WHERE file = ?1", params![rel_path]).ok();
+            ) {
+                eprintln!("warn: failed to clean edges for {}: {}", rel_path, e);
+            }
+            if let Err(e) = self.db.execute("DELETE FROM symbols WHERE file = ?1", params![rel_path]) {
+                eprintln!("warn: failed to clean symbols for {}: {}", rel_path, e);
+            }
 
             let parsed = if file.language == "markdown" {
                 let md = parse_markdown(file.full_path.to_str().unwrap_or(""), &content);
@@ -182,10 +186,12 @@ impl GraphBuilder {
                 .unwrap_or_default()
                 .as_secs() as i64;
 
-            self.db.execute(
+            if let Err(e) = self.db.execute(
                 "INSERT OR REPLACE INTO files (path, language, hash, last_parsed) VALUES (?1, ?2, ?3, ?4)",
                 params![rel_path, file.language, "", now],
-            ).ok();
+            ) {
+                eprintln!("warn: failed to insert file {}: {}", rel_path, e);
+            }
 
             let lines: Vec<&str> = content.split('\n').collect();
             for sym in &parsed.symbols {
@@ -201,10 +207,13 @@ impl GraphBuilder {
                     graphmind_core::SymbolKind::Type => "Type",
                 };
 
-                self.db.execute(
+                if let Err(e) = self.db.execute(
                     "INSERT INTO symbols (name, kind, file, line_start, line_end, signature, doc, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![sym.name, kind_str, rel_path, sym.line_start, sym.line_end, sym.signature, sym.doc, body],
-                ).ok();
+                ) {
+                    eprintln!("warn: failed to insert symbol {} in {}: {}", sym.name, rel_path, e);
+                    continue;
+                }
                 total_symbols += 1;
             }
 
@@ -233,7 +242,9 @@ impl GraphBuilder {
         }
 
         // Pass 2: Resolve cross-file edges
-        self.db.execute_batch("BEGIN TRANSACTION").ok();
+        if let Err(e) = self.db.execute_batch("BEGIN TRANSACTION") {
+            eprintln!("warn: failed to begin transaction: {}", e);
+        }
 
         for (rel_path, call_sites) in &pending_calls {
             for cs in call_sites {
@@ -258,11 +269,14 @@ impl GraphBuilder {
                 });
 
                 if let Some(callee_id) = callee_id {
-                    self.db.execute(
+                    if let Err(e) = self.db.execute(
                         "INSERT INTO edges (from_id, to_id, kind, file) VALUES (?1, ?2, ?3, ?4)",
                         params![caller_id, callee_id, "calls", rel_path],
-                    ).ok();
-                    total_edges += 1;
+                    ) {
+                        eprintln!("warn: failed to insert call edge in {}: {}", rel_path, e);
+                    } else {
+                        total_edges += 1;
+                    }
                 }
             }
         }
@@ -299,17 +313,22 @@ impl GraphBuilder {
                     ).ok();
 
                     if let Some(source_id) = source_id {
-                        self.db.execute(
+                        if let Err(e) = self.db.execute(
                             "INSERT INTO edges (from_id, to_id, kind, file) VALUES (?1, ?2, ?3, ?4)",
                             params![source_id, target_id, "imports", rel_path],
-                        ).ok();
-                        total_edges += 1;
+                        ) {
+                            eprintln!("warn: failed to insert import edge in {}: {}", rel_path, e);
+                        } else {
+                            total_edges += 1;
+                        }
                     }
                 }
             }
         }
 
-        self.db.execute_batch("COMMIT").ok();
+        if let Err(e) = self.db.execute_batch("COMMIT") {
+            eprintln!("warn: failed to commit transaction: {}", e);
+        }
         self.cache.save();
 
         BuildResult {
