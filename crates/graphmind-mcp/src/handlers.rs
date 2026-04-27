@@ -1,0 +1,643 @@
+use graphmind_db::queries::GraphQueries;
+use graphmind_db::schema::init_database;
+use graphmind_memory::cross_links::CrossLinkStore;
+use graphmind_memory::search::search as memory_search;
+use graphmind_memory::store::{AddOptions, MemoryStore, MemoryType};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+// ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
+
+fn graphmind_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".graphmind")
+}
+
+fn config_path() -> PathBuf {
+    graphmind_dir().join("config.json")
+}
+
+fn graphs_dir() -> PathBuf {
+    graphmind_dir().join("graphs")
+}
+
+fn graph_db_path(slug: &str) -> PathBuf {
+    graphs_dir().join(slug).join("graph.db")
+}
+
+fn memory_dir() -> PathBuf {
+    graphmind_dir().join("memory")
+}
+
+fn cross_links_path() -> PathBuf {
+    graphmind_dir()
+        .join("cross-links")
+        .join("links.jsonl")
+}
+
+fn meta_path(slug: &str) -> PathBuf {
+    graphs_dir().join(slug).join("meta.json")
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProjectConfig {
+    path: String,
+    slug: String,
+    last_build: Option<String>,
+    #[serde(default)]
+    languages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GlobalConfig {
+    #[serde(default)]
+    projects: HashMap<String, ProjectConfig>,
+}
+
+fn load_config() -> GlobalConfig {
+    let path = config_path();
+    if !path.exists() {
+        return GlobalConfig {
+            projects: HashMap::new(),
+        };
+    }
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    serde_json::from_str(&content).unwrap_or(GlobalConfig {
+        projects: HashMap::new(),
+    })
+}
+
+fn resolve_project(explicit: Option<&str>) -> Option<ProjectConfig> {
+    let config = load_config();
+    if let Some(slug) = explicit {
+        return config.projects.get(slug).cloned();
+    }
+    config.projects.values().next().cloned()
+}
+
+fn all_project_slugs() -> Vec<String> {
+    load_config().projects.keys().cloned().collect()
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for building text responses
+// ---------------------------------------------------------------------------
+
+fn text_content(text: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": text }]
+    })
+}
+
+fn json_text(v: &Value) -> Value {
+    let pretty = serde_json::to_string_pretty(v).unwrap_or_default();
+    text_content(&pretty)
+}
+
+fn err_text(msg: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": msg }],
+        "isError": true
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
+pub fn dispatch_tool(name: &str, args: &Value) -> Value {
+    match name {
+        // Graph
+        "gm_query" => handle_query(args),
+        "gm_fn" => handle_fn(args),
+        "gm_deps" => handle_deps(args),
+        "gm_impact" => handle_impact(args),
+        "gm_fn_impact" => handle_fn_impact(args),
+        "gm_map" => handle_map(args),
+        "gm_cycles" => handle_cycles(args),
+        // Memory
+        "gm_memory_search" => handle_memory_search(args),
+        "gm_memory_add" => handle_memory_add(args),
+        "gm_memory_list" => handle_memory_list(args),
+        // Meta
+        "gm_list_projects" => handle_list_projects(args),
+        "gm_status" => handle_status(args),
+        "gm_context" => handle_context(args),
+        // Cross
+        "gm_cross_query" => handle_cross_query(args),
+        "gm_cross_deps" => handle_cross_deps(args),
+        "gm_cross_links" => handle_cross_links(args),
+        "gm_diff_impact" => handle_diff_impact(args),
+        // Search
+        "gm_search" => handle_search(args),
+        _ => err_text(&format!("Unknown tool: {name}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Graph tool handlers
+// ---------------------------------------------------------------------------
+
+fn with_graph<F>(args: &Value, f: F) -> Value
+where
+    F: FnOnce(&GraphQueries, &ProjectConfig) -> Value,
+{
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let proj = match resolve_project(project_slug) {
+        Some(p) => p,
+        None => return err_text("No project found. Register one with `graphmind init`."),
+    };
+    let db_path = graph_db_path(&proj.slug);
+    if !db_path.exists() {
+        return err_text(&format!(
+            "No graph database for project '{}'. Run `graphmind build` first.",
+            proj.slug
+        ));
+    }
+    let db_path_str = db_path.to_string_lossy().to_string();
+    let conn = match init_database(&db_path_str) {
+        Ok(c) => c,
+        Err(e) => return err_text(&format!("Failed to open graph db: {e}")),
+    };
+    let gq = GraphQueries::new(&conn);
+    f(&gq, &proj)
+}
+
+fn handle_query(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+    with_graph(args, |gq, _proj| {
+        let symbols = gq.find_symbol(symbol);
+        let callers = gq.callers(symbol);
+        let callees = gq.callees(symbol);
+        json_text(&json!({
+            "symbol": symbol,
+            "definitions": symbols,
+            "callers": callers,
+            "callees": callees
+        }))
+    })
+}
+
+fn handle_fn(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+    with_graph(args, |gq, _proj| {
+        let definitions = gq.find_symbol(symbol);
+        let callers = gq.callers(symbol);
+        let callees = gq.callees(symbol);
+        json_text(&json!({
+            "function": symbol,
+            "definitions": definitions,
+            "callers": callers,
+            "callees": callees,
+            "caller_count": callers.len(),
+            "callee_count": callees.len()
+        }))
+    })
+}
+
+fn handle_deps(args: &Value) -> Value {
+    let file = match args.get("file").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: file"),
+    };
+    with_graph(args, |gq, _proj| {
+        let deps = gq.file_deps(file);
+        let reverse = gq.file_reverse_deps(file);
+        let symbols = gq.symbols_in_file(file);
+        json_text(&json!({
+            "file": file,
+            "dependencies": deps,
+            "dependents": reverse,
+            "symbols": symbols
+        }))
+    })
+}
+
+fn handle_impact(args: &Value) -> Value {
+    let file = match args.get("file").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: file"),
+    };
+    let depth = args
+        .get("depth")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3) as usize;
+    with_graph(args, |gq, _proj| {
+        let impacted = gq.impact(file, depth);
+        json_text(&json!({
+            "file": file,
+            "depth": depth,
+            "impacted_files": impacted,
+            "count": impacted.len()
+        }))
+    })
+}
+
+fn handle_fn_impact(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+    with_graph(args, |gq, _proj| {
+        let callers = gq.callers(symbol);
+        let files: Vec<&str> = callers.iter().map(|c| c.file.as_str()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+        json_text(&json!({
+            "symbol": symbol,
+            "callers": callers,
+            "affected_files": files,
+            "caller_count": callers.len(),
+            "file_count": files.len()
+        }))
+    })
+}
+
+fn handle_map(args: &Value) -> Value {
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(20);
+    with_graph(args, |gq, _proj| {
+        let top = gq.top_connected(limit);
+        json_text(&json!({
+            "top_connected_files": top,
+            "count": top.len()
+        }))
+    })
+}
+
+fn handle_cycles(args: &Value) -> Value {
+    with_graph(args, |gq, _proj| {
+        let cycles = gq.detect_cycles();
+        json_text(&json!({
+            "cycles": cycles,
+            "count": cycles.len()
+        }))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Memory tool handlers
+// ---------------------------------------------------------------------------
+
+fn handle_memory_search(args: &Value) -> Value {
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) => q,
+        None => return err_text("Missing required parameter: query"),
+    };
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as usize;
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+
+    let store = MemoryStore::new(&memory_dir());
+    let entries = store.list(project_slug);
+    let results = memory_search(&entries, query, limit);
+    json_text(&json!({
+        "query": query,
+        "results": results,
+        "count": results.len()
+    }))
+}
+
+fn handle_memory_add(args: &Value) -> Value {
+    let content = match args.get("content").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return err_text("Missing required parameter: content"),
+    };
+    let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
+    let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+    let tags: Vec<String> = args
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let entry_type = match args.get("type").and_then(|v| v.as_str()) {
+        Some("decision") => MemoryType::Decision,
+        Some("pattern") => MemoryType::Pattern,
+        Some("convention") => MemoryType::Convention,
+        Some("bug") => MemoryType::Bug,
+        Some("session") => MemoryType::Session,
+        _ => MemoryType::Context,
+    };
+
+    let store = MemoryStore::new(&memory_dir());
+    let entry = store.add(
+        content,
+        AddOptions {
+            project,
+            global,
+            entry_type,
+            tags,
+        },
+    );
+    json_text(&json!({
+        "added": true,
+        "entry": entry
+    }))
+}
+
+fn handle_memory_list(args: &Value) -> Value {
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20) as usize;
+
+    let store = MemoryStore::new(&memory_dir());
+    let entries = store.list(project_slug);
+    let truncated: Vec<_> = entries.into_iter().take(limit).collect();
+    json_text(&json!({
+        "entries": truncated,
+        "count": truncated.len()
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Meta tool handlers
+// ---------------------------------------------------------------------------
+
+fn handle_list_projects(_args: &Value) -> Value {
+    let config = load_config();
+    let projects: Vec<Value> = config
+        .projects
+        .values()
+        .map(|p| {
+            json!({
+                "slug": p.slug,
+                "path": p.path,
+                "last_build": p.last_build,
+                "languages": p.languages
+            })
+        })
+        .collect();
+    json_text(&json!({
+        "projects": projects,
+        "count": projects.len()
+    }))
+}
+
+fn handle_status(args: &Value) -> Value {
+    with_graph(args, |gq, proj| {
+        let stats = gq.stats();
+        let langs = gq.language_breakdown();
+
+        let meta: Value = if meta_path(&proj.slug).exists() {
+            std::fs::read_to_string(meta_path(&proj.slug))
+                .ok()
+                .and_then(|c| serde_json::from_str(&c).ok())
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+
+        json_text(&json!({
+            "project": proj.slug,
+            "path": proj.path,
+            "stats": stats,
+            "languages": langs,
+            "last_build": proj.last_build,
+            "meta": meta
+        }))
+    })
+}
+
+fn handle_context(args: &Value) -> Value {
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let proj = match resolve_project(project_slug) {
+        Some(p) => p,
+        None => return err_text("No project found."),
+    };
+
+    // Graph stats
+    let graph_info = {
+        let db_path = graph_db_path(&proj.slug);
+        if db_path.exists() {
+            let db_path_str = db_path.to_string_lossy().to_string();
+            if let Ok(conn) = init_database(&db_path_str) {
+                let gq = GraphQueries::new(&conn);
+                let stats = gq.stats();
+                let langs = gq.language_breakdown();
+                json!({ "stats": stats, "languages": langs })
+            } else {
+                json!({ "error": "Failed to open graph db" })
+            }
+        } else {
+            json!({ "error": "No graph database" })
+        }
+    };
+
+    // Recent memory
+    let store = MemoryStore::new(&memory_dir());
+    let recent_memory: Vec<_> = store.list(Some(&proj.slug)).into_iter().take(5).collect();
+
+    // Cross links
+    let cl_store = CrossLinkStore::new(&cross_links_path());
+    let cross_links = cl_store.find_by_project(&proj.slug);
+
+    json_text(&json!({
+        "project": proj.slug,
+        "path": proj.path,
+        "graph": graph_info,
+        "recent_memory": recent_memory,
+        "cross_links": cross_links
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Cross-project tool handlers
+// ---------------------------------------------------------------------------
+
+fn handle_cross_query(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+
+    let slugs = all_project_slugs();
+    let mut results: Vec<Value> = Vec::new();
+
+    for slug in &slugs {
+        let db_path = graph_db_path(slug);
+        if !db_path.exists() {
+            continue;
+        }
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = match init_database(&db_path_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let gq = GraphQueries::new(&conn);
+        let found = gq.find_symbol(symbol);
+        if !found.is_empty() {
+            results.push(json!({
+                "project": slug,
+                "symbols": found
+            }));
+        }
+    }
+
+    json_text(&json!({
+        "symbol": symbol,
+        "results": results,
+        "projects_searched": slugs.len()
+    }))
+}
+
+fn handle_cross_deps(args: &Value) -> Value {
+    let project = match args.get("project").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return err_text("Missing required parameter: project"),
+    };
+
+    let cl_store = CrossLinkStore::new(&cross_links_path());
+    let links = cl_store.find_by_project(project);
+
+    json_text(&json!({
+        "project": project,
+        "cross_dependencies": links,
+        "count": links.len()
+    }))
+}
+
+fn handle_cross_links(_args: &Value) -> Value {
+    let cl_store = CrossLinkStore::new(&cross_links_path());
+    let links = cl_store.list();
+
+    json_text(&json!({
+        "links": links,
+        "count": links.len()
+    }))
+}
+
+fn handle_diff_impact(args: &Value) -> Value {
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let proj = match resolve_project(project_slug) {
+        Some(p) => p,
+        None => return err_text("No project found."),
+    };
+
+    // Get changed files from git
+    let project_path = Path::new(&proj.path);
+    let output = match Command::new("git")
+        .args(["diff", "--name-only", "HEAD"])
+        .current_dir(project_path)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => return err_text(&format!("Failed to run git diff: {e}")),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let changed_files: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+
+    if changed_files.is_empty() {
+        return json_text(&json!({
+            "project": proj.slug,
+            "changed_files": [],
+            "impacted_files": [],
+            "message": "No uncommitted changes detected"
+        }));
+    }
+
+    // For each changed file, find its impact
+    let db_path = graph_db_path(&proj.slug);
+    if !db_path.exists() {
+        return err_text("No graph database. Run `graphmind build` first.");
+    }
+    let db_path_str = db_path.to_string_lossy().to_string();
+    let conn = match init_database(&db_path_str) {
+        Ok(c) => c,
+        Err(e) => return err_text(&format!("Failed to open graph db: {e}")),
+    };
+    let gq = GraphQueries::new(&conn);
+
+    let mut all_impacted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut file_impacts: Vec<Value> = Vec::new();
+
+    for file in &changed_files {
+        let impacted = gq.impact(file, 2);
+        for f in &impacted {
+            all_impacted.insert(f.clone());
+        }
+        if !impacted.is_empty() {
+            file_impacts.push(json!({
+                "file": file,
+                "impacted": impacted
+            }));
+        }
+    }
+
+    json_text(&json!({
+        "project": proj.slug,
+        "changed_files": changed_files,
+        "file_impacts": file_impacts,
+        "total_impacted": all_impacted.len(),
+        "all_impacted_files": all_impacted.into_iter().collect::<Vec<_>>()
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Search tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_search(args: &Value) -> Value {
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) => q,
+        None => return err_text("Missing required parameter: query"),
+    };
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(20);
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+
+    let slugs = if let Some(slug) = project_slug {
+        vec![slug.to_string()]
+    } else {
+        all_project_slugs()
+    };
+
+    let mut all_results: Vec<Value> = Vec::new();
+
+    for slug in &slugs {
+        let db_path = graph_db_path(slug);
+        if !db_path.exists() {
+            continue;
+        }
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = match init_database(&db_path_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let gq = GraphQueries::new(&conn);
+        let results = gq.search_symbols(query, limit);
+        if !results.is_empty() {
+            all_results.push(json!({
+                "project": slug,
+                "symbols": results
+            }));
+        }
+    }
+
+    json_text(&json!({
+        "query": query,
+        "results": all_results,
+        "projects_searched": slugs.len()
+    }))
+}

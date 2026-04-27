@@ -394,7 +394,11 @@ fn main() {
             commands::export::export(slug.as_deref(), &format, cross, obsidian);
         }
         Commands::Mcp => {
-            println!("MCP server coming soon");
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            if let Err(e) = rt.block_on(graphmind_mcp::server::run_mcp_server()) {
+                eprintln!("MCP server error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }
