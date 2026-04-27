@@ -202,7 +202,13 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
 
     if node.kind() == "call_expression" {
         if let Some(func) = node.child_by_field_name("function") {
-            let callee = node_text(func, source);
+            let callee = if func.kind() == "member_expression" {
+                func.child_by_field_name("property")
+                    .map(|p| node_text(p, source))
+                    .unwrap_or_else(|| node_text(func, source))
+            } else {
+                node_text(func, source)
+            };
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
