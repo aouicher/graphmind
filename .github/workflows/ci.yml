@@ -10,47 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 permissions:
   contents: write
 
 jobs:
   # --- CI: runs on every push and PR ---
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - run: npm ci
-      - run: cargo check --workspace
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-      - run: npm run lint
 
   rust-check:
     runs-on: ubuntu-latest
@@ -109,39 +73,26 @@ jobs:
           path: dist/${{ matrix.binary }}
           if-no-files-found: error
 
-  # --- CD: only on push to main, after all CI jobs pass ---
+  # --- CD: only on push to main, after CI passes ---
 
   release:
-    needs: [test, lint, rust-check]
+    needs: [rust-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
-      tag: ${{ steps.version.outputs.current }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Check version change
+      - name: Check version bump
         id: version
         run: |
-          CURRENT=$(node -p "require('./package.json').version")
-          git show HEAD~1:package.json > /tmp/prev-package.json 2>/dev/null || echo '{"version":"0.0.0"}' > /tmp/prev-package.json
-          PREVIOUS=$(node -p "require('/tmp/prev-package.json').version")
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check tag exists
-        if: steps.version.outputs.changed == 'true'
-        id: tag
-        run: |
-          TAG="v${{ steps.version.outputs.current }}"
+          CURRENT=$(grep '^version' crates/graphmind-cli/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          TAG="v${CURRENT}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -150,76 +101,15 @@ jobs:
 
       - name: Create tag and release
         id: create
-        if: steps.version.outputs.changed == 'true' && steps.tag.outputs.exists == 'false'
+        if: steps.version.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ steps.version.outputs.current }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           git tag "$TAG"
           git push origin "$TAG"
           gh release create "$TAG" --generate-notes --title "$TAG"
           echo "released=true" >> "$GITHUB_OUTPUT"
-
-  build-native:
-    needs: release
-    if: needs.release.outputs.released == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            node_name: index.darwin-arm64.node
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            node_name: index.darwin-x64.node
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            node_name: index.linux-x64.node
-
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - run: npm ci
-
-      - name: Build native addon
-        env:
-          NODE_NAME: ${{ matrix.node_name }}
-        run: |
-          npx napi build --platform --release --manifest-path crates/graphmind-core/Cargo.toml --js false --target ${{ matrix.target }}
-          echo "Built files:"
-          find . -name "*.node" -not -path "*/node_modules/*"
-          mkdir -p native-out
-          BUILT=$(find . -maxdepth 1 -name "*.node" | head -1)
-          if [ -n "$BUILT" ]; then
-            cp "$BUILT" "native-out/$NODE_NAME"
-          else
-            BUILT=$(find crates -name "*.node" | head -1)
-            if [ -n "$BUILT" ]; then
-              cp "$BUILT" "native-out/$NODE_NAME"
-            fi
-          fi
-          ls -la native-out/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-${{ matrix.target }}
-          path: native-out/*.node
-          if-no-files-found: error
 
   release-rust:
     needs: [release, rust-build]
@@ -230,51 +120,13 @@ jobs:
         with:
           path: artifacts
 
-      - name: Upload Rust binaries to release
+      - name: Upload binaries to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.release.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           for dir in artifacts/graphmind-*; do
             binary=$(ls "$dir")
             gh release upload "$TAG" "$dir/$binary" --repo "$REPO"
           done
-
-  publish:
-    needs: [release, build-native]
-    if: needs.release.outputs.released == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Move native binaries
-        run: |
-          mkdir -p src/native
-          find artifacts -name "*.node" -exec cp {} src/native/ \;
-          echo "Native binaries:"
-          ls -la src/native/
-          COUNT=$(find src/native -name "*.node" | wc -l | tr -d ' ')
-          echo "Total: $COUNT binaries"
-          if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: No native binaries found"
-            exit 1
-          fi
-
-      - run: npm ci
-      - run: npm run build
-
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
