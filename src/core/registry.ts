@@ -53,7 +53,9 @@ export class Registry {
 
 	findByPath(path: string): ProjectConfig | undefined {
 		const resolved = resolve(path);
-		return Object.values(this.config.projects).find((p) => resolved.startsWith(p.path));
+		return Object.values(this.config.projects)
+			.filter((p) => resolved === p.path || resolved.startsWith(`${p.path}/`))
+			.sort((a, b) => b.path.length - a.path.length)[0];
 	}
 
 	reload(): void {
