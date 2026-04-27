@@ -33,8 +33,11 @@ curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/ins
 ```
 
 <!-- graphmind:start -->
+
 ## graphmind
 
+Last build: 2026-04-27 | 478 symbols | 426 edges | 53 files
+Languages: rust (50), markdown (3)
 MCP: `graphmind mcp` (stdio)
 
 ### Before editing anything
@@ -45,5 +48,5 @@ MCP: `graphmind mcp` (stdio)
 
 ### Rebuild when
 Structural changes, new modules, after merge.
-Command: `graphmind build --incremental`
+Command: `graphmind build`
 <!-- graphmind:end -->

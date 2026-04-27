@@ -314,16 +314,14 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         .collect();
 
     let mut stmt = db
-        .prepare("SELECT e.from_id, s1.name, e.to_id, s2.name, e.kind FROM edges e JOIN symbols s1 ON s1.id = e.from_id JOIN symbols s2 ON s2.id = e.to_id")
+        .prepare("SELECT from_id, to_id, kind FROM edges")
         .unwrap();
-    let edges: Vec<(i64, String, i64, String, String)> = stmt
+    let edges: Vec<(i64, i64, String)> = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
             ))
         })
         .unwrap()
@@ -344,10 +342,37 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         }
     };
 
+    let sanitize = |s: &str| -> String {
+        s.replace(['/', '\\', ':', '<', '>', '|', '?', '*', '"', '`'], "_")
+            .trim_matches('_')
+            .to_string()
+    };
+
+    let mut name_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (_, name, _, _, _, _, _, _) in &symbols {
+        *name_counts.entry(name.clone()).or_default() += 1;
+    }
+
+    let page_name = |name: &str, file: &str| -> String {
+        let safe = sanitize(name);
+        if name_counts.get(name).copied().unwrap_or(1) > 1 {
+            let filename = file.rsplit('/').next().unwrap_or(file);
+            let stem = filename.split('.').next().unwrap_or(filename);
+            format!("{safe} ({})", sanitize(stem))
+        } else {
+            safe
+        }
+    };
+
+    let id_to_page: std::collections::HashMap<i64, String> = symbols
+        .iter()
+        .map(|(id, name, _, file, _, _, _, _)| (*id, page_name(name, file)))
+        .collect();
+
     let mut symbol_count = 0;
     for (id, name, kind, file, line_start, line_end, sig, body) in &symbols {
-        let safe_name = name.replace(['/', '\\', ':', '<', '>', '|', '?', '*', '"'], "_");
-        let md_path = graphmind_dir.join(format!("{safe_name}.md"));
+        let md_name = page_name(name, file);
+        let md_path = graphmind_dir.join(format!("{md_name}.md"));
         let lang = lang_for_ext(file);
 
         let mut content = String::new();
@@ -380,39 +405,47 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         }
 
         // Edges
-        let calls: Vec<_> = edges.iter().filter(|(fid, _, _, _, k)| fid == id && k == "calls").collect();
-        let called_by: Vec<_> = edges.iter().filter(|(_, _, tid, _, k)| tid == id && k == "calls").collect();
-        let imports: Vec<_> = edges.iter().filter(|(fid, _, _, _, k)| fid == id && k == "imports").collect();
-        let imported_by: Vec<_> = edges.iter().filter(|(_, _, tid, _, k)| tid == id && k == "imports").collect();
+        let calls: Vec<_> = edges.iter().filter(|(fid, _, k)| fid == id && k == "calls").collect();
+        let called_by: Vec<_> = edges.iter().filter(|(_, tid, k)| tid == id && k == "calls").collect();
+        let imports: Vec<_> = edges.iter().filter(|(fid, _, k)| fid == id && k == "imports").collect();
+        let imported_by: Vec<_> = edges.iter().filter(|(_, tid, k)| tid == id && k == "imports").collect();
 
         if !calls.is_empty() || !called_by.is_empty() || !imports.is_empty() || !imported_by.is_empty() {
             content.push_str("## Connections\n\n");
 
             if !calls.is_empty() {
                 content.push_str("**Calls:**\n");
-                for (_, _, _, to_name, _) in &calls {
-                    content.push_str(&format!("- [[{to_name}]]\n"));
+                for (_, to_id, _) in &calls {
+                    if let Some(pg) = id_to_page.get(to_id) {
+                        content.push_str(&format!("- [[{pg}]]\n"));
+                    }
                 }
                 content.push('\n');
             }
             if !called_by.is_empty() {
                 content.push_str("**Called by:**\n");
-                for (_, from_name, _, _, _) in &called_by {
-                    content.push_str(&format!("- [[{from_name}]]\n"));
+                for (from_id, _, _) in &called_by {
+                    if let Some(pg) = id_to_page.get(from_id) {
+                        content.push_str(&format!("- [[{pg}]]\n"));
+                    }
                 }
                 content.push('\n');
             }
             if !imports.is_empty() {
                 content.push_str("**Imports:**\n");
-                for (_, _, _, to_name, _) in &imports {
-                    content.push_str(&format!("- [[{to_name}]]\n"));
+                for (_, to_id, _) in &imports {
+                    if let Some(pg) = id_to_page.get(to_id) {
+                        content.push_str(&format!("- [[{pg}]]\n"));
+                    }
                 }
                 content.push('\n');
             }
             if !imported_by.is_empty() {
                 content.push_str("**Imported by:**\n");
-                for (_, from_name, _, _, _) in &imported_by {
-                    content.push_str(&format!("- [[{from_name}]]\n"));
+                for (from_id, _, _) in &imported_by {
+                    if let Some(pg) = id_to_page.get(from_id) {
+                        content.push_str(&format!("- [[{pg}]]\n"));
+                    }
                 }
                 content.push('\n');
             }
