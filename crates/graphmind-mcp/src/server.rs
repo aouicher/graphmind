@@ -24,7 +24,9 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug (optional)" },
+                "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
+                "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
             "required": ["symbol"]
         })),
@@ -32,7 +34,9 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug (optional)" },
+                "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
+                "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
             "required": ["symbol"]
         })),
@@ -40,7 +44,8 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug (optional)" },
+                "limit": { "type": "integer", "description": "Max symbols to return (default 100)" }
             },
             "required": ["file"]
         })),

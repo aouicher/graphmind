@@ -87,6 +87,8 @@ fn all_project_slugs() -> Vec<String> {
 // Helpers for building text responses
 // ---------------------------------------------------------------------------
 
+const MAX_RESPONSE_BYTES: usize = 800_000;
+
 fn text_content(text: &str) -> Value {
     json!({
         "content": [{ "type": "text", "text": text }]
@@ -95,7 +97,51 @@ fn text_content(text: &str) -> Value {
 
 fn json_text(v: &Value) -> Value {
     let pretty = serde_json::to_string_pretty(v).unwrap_or_default();
-    text_content(&pretty)
+    if pretty.len() <= MAX_RESPONSE_BYTES {
+        return text_content(&pretty);
+    }
+    truncate_response(v)
+}
+
+fn truncate_response(v: &Value) -> Value {
+    let obj = match v.as_object() {
+        Some(o) => o,
+        None => {
+            let s = serde_json::to_string_pretty(v).unwrap_or_default();
+            let truncated = &s[..s.len().min(MAX_RESPONSE_BYTES)];
+            return text_content(&format!("{truncated}\n\n⚠ Response truncated. Use limit/offset parameters to paginate."));
+        }
+    };
+
+    let mut shrunk = serde_json::Map::new();
+    for (key, val) in obj {
+        if let Some(arr) = val.as_array() {
+            if serde_json::to_string(val).unwrap_or_default().len() > MAX_RESPONSE_BYTES / 2 {
+                let take = (arr.len() / 4).max(10).min(arr.len());
+                let truncated: Vec<Value> = arr.iter().take(take).cloned().collect();
+                shrunk.insert(key.clone(), json!(truncated));
+                shrunk.insert(
+                    format!("{key}_truncated"),
+                    json!({
+                        "shown": take,
+                        "total": arr.len(),
+                        "message": "Use limit/offset parameters to paginate"
+                    }),
+                );
+                continue;
+            }
+        }
+        shrunk.insert(key.clone(), val.clone());
+    }
+
+    let result = Value::Object(shrunk);
+    let pretty = serde_json::to_string_pretty(&result).unwrap_or_default();
+    if pretty.len() > MAX_RESPONSE_BYTES {
+        let truncated = &pretty[..MAX_RESPONSE_BYTES];
+        text_content(&format!("{truncated}\n\n⚠ Response truncated. Use limit/offset parameters to paginate."))
+    } else {
+        text_content(&pretty)
+    }
 }
 
 fn err_text(msg: &str) -> Value {
@@ -172,15 +218,23 @@ fn handle_query(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     with_graph(args, |gq, _proj| {
         let symbols = gq.find_symbol(symbol);
-        let callers = gq.callers(symbol);
-        let callees = gq.callees(symbol);
+        let all_callers = gq.callers(symbol);
+        let all_callees = gq.callees(symbol);
+        let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
+        let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
         json_text(&json!({
             "symbol": symbol,
             "definitions": symbols,
             "callers": callers,
-            "callees": callees
+            "callees": callees,
+            "total_callers": all_callers.len(),
+            "total_callees": all_callees.len(),
+            "limit": limit,
+            "offset": offset
         }))
     })
 }
@@ -190,17 +244,23 @@ fn handle_fn(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     with_graph(args, |gq, _proj| {
         let definitions = gq.find_symbol(symbol);
-        let callers = gq.callers(symbol);
-        let callees = gq.callees(symbol);
+        let all_callers = gq.callers(symbol);
+        let all_callees = gq.callees(symbol);
+        let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
+        let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
         json_text(&json!({
             "function": symbol,
             "definitions": definitions,
             "callers": callers,
             "callees": callees,
-            "caller_count": callers.len(),
-            "callee_count": callees.len()
+            "total_callers": all_callers.len(),
+            "total_callees": all_callees.len(),
+            "limit": limit,
+            "offset": offset
         }))
     })
 }
@@ -210,15 +270,19 @@ fn handle_deps(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: file"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
     with_graph(args, |gq, _proj| {
         let deps = gq.file_deps(file);
         let reverse = gq.file_reverse_deps(file);
-        let symbols = gq.symbols_in_file(file);
+        let all_symbols = gq.symbols_in_file(file);
+        let symbols: Vec<_> = all_symbols.iter().take(limit).collect();
         json_text(&json!({
             "file": file,
             "dependencies": deps,
             "dependents": reverse,
-            "symbols": symbols
+            "symbols": symbols,
+            "total_symbols": all_symbols.len(),
+            "limit": limit
         }))
     })
 }
@@ -614,6 +678,7 @@ fn handle_search(args: &Value) -> Value {
     };
 
     let mut all_results: Vec<Value> = Vec::new();
+    let mut total_found = 0;
 
     for slug in &slugs {
         let db_path = graph_db_path(slug);
@@ -628,6 +693,7 @@ fn handle_search(args: &Value) -> Value {
         let gq = GraphQueries::new(&conn);
         let results = gq.search_symbols(query, limit);
         if !results.is_empty() {
+            total_found += results.len();
             all_results.push(json!({
                 "project": slug,
                 "symbols": results
@@ -638,6 +704,8 @@ fn handle_search(args: &Value) -> Value {
     json_text(&json!({
         "query": query,
         "results": all_results,
-        "projects_searched": slugs.len()
+        "projects_searched": slugs.len(),
+        "total_found": total_found,
+        "limit": limit
     }))
 }
