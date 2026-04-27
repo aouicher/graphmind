@@ -1,9 +1,7 @@
 # graphmind
 
 [![CI](https://github.com/aouicher/graphmind/actions/workflows/ci.yml/badge.svg)](https://github.com/aouicher/graphmind/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@graphmind/cli)](https://www.npmjs.com/package/@graphmind/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Node](https://img.shields.io/node/v/@graphmind/cli)](https://www.npmjs.com/package/@graphmind/cli)
 
 > Your codebase has memory. Use it.
 
@@ -20,11 +18,38 @@ Every new Claude Code session starts from zero. Claude re-reads your entire code
 
 Everything is 100% local. No cloud. No open ports by default. No telemetry.
 
+## Install
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install aouicher/tap/graphmind
+```
+
+### Cargo
+
+```bash
+cargo install --git https://github.com/aouicher/graphmind graphmind-cli
+```
+
+### Shell script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/install.sh | bash
+```
+
+### From source
+
+```bash
+git clone https://github.com/aouicher/graphmind
+cd graphmind
+cargo build --release -p graphmind-cli
+cp target/release/graphmind ~/.local/bin/
+```
+
 ## Quick Start
 
 ```bash
-npm install -g @graphmind/cli@latest
-
 graphmind register .          # register your project
 graphmind build               # build the code graph
 graphmind sync                # inject graph context into CLAUDE.md
@@ -122,14 +147,14 @@ graphmind sync --all
 ┌─────────────────────────────────────────────┐
 │  Claude Code / MCP Client                    │
 ├─────────────────────────────────────────────┤
-│  MCP Server (stdio)                          │
+│  MCP Server (rmcp SDK, stdio)                │
 │  gm_query · gm_fn · gm_deps · gm_impact    │
 │  gm_memory_search · gm_memory_add           │
 │  gm_cross_query · gm_diff_impact            │
 │  gm_status · gm_context                     │
 ├─────────────────────────────────────────────┤
-│  Layer 1: Structural Graph (SQLite)          │
-│  Symbols · Edges · Call sites · FTS5         │
+│  Layer 1: Structural Graph (SQLite + FTS5)   │
+│  Symbols · Edges · Call sites                │
 ├─────────────────────────────────────────────┤
 │  Layer 2: Semantic Memory (JSONL)            │
 │  Decisions · Patterns · Conventions          │
@@ -191,10 +216,9 @@ graphmind memory delete <id>
 
 ### Search
 ```bash
-graphmind search "<query>"          # semantic search (requires embed)
+graphmind search "<query>"          # FTS search across symbols
 graphmind search "<q1>; <q2>"       # multi-query with RRF ranking
 graphmind search "<query>" --kind function
-graphmind embed [slug]              # build local embeddings (one-time)
 ```
 
 ### Export
@@ -249,23 +273,22 @@ graphmind exposes 18 tools via MCP (Model Context Protocol):
 | `gm_diff_impact` | Impact of current git changes |
 | `gm_map` | Most-connected files |
 | `gm_cycles` | Circular dependency detection |
-| `gm_search` | Semantic + FTS search |
+| `gm_search` | Full-text search across symbols |
 | `gm_memory_search` | Search stored decisions/patterns |
 | `gm_memory_add` | Store a fact (requires confirmation) |
+| `gm_memory_list` | List memory entries |
 | `gm_cross_query` | Symbol search across all projects |
 | `gm_cross_deps` | Cross-project dependency graph |
 | `gm_cross_links` | List all cross-project links |
-| `gm_cross_infer` | Auto-detect shared symbols |
 | `gm_status` | Project health and stats |
 | `gm_context` | Full project context for session start |
 | `gm_list_projects` | All registered projects |
 
 ## Security
 
-- **No open ports by default** — MCP uses stdio. HTTP transport binds to `127.0.0.1` only.
-- **No API keys in config** — optional LLM uses `apiKeyCommand` (shell out to Keychain).
+- **No open ports by default** — MCP uses stdio.
 - **Path traversal protection** — all file ops restricted to registered paths + `~/.graphmind/`.
-- **No network calls in core** — only `graphmind embed` (one-time model download) touches the network.
+- **No network calls** — everything runs locally.
 - **Atomic writes** — memory JSONL writes use tmp+rename to prevent corruption.
 - **MCP write confirmation** — `gm_memory_add` requires explicit confirmation.
 
@@ -297,28 +320,6 @@ All data lives in `~/.graphmind/`:
 
 Everything is plaintext or SQLite — fully inspectable with standard tools.
 
-## Roadmap
-
-- [x] Phase 1: Core MVP (graph + memory + CLI + MCP)
-- [x] Phase 2: Cross-project, diff-impact, sessions
-- [x] Phase 3: Semantic search (local embeddings, RRF multi-query)
-- [x] Phase 4: Watch mode, export (dot/mermaid/json/obsidian)
-- [x] Phase 5: Python, Go, Rust language support
-- [x] Phase 6: Git hooks, CI/CD, npm publish pipeline
-- [x] Phase 7: Ruby support, incremental embeddings
-- [x] Phase 8: Terraform (HCL) and YAML support
-
-## Troubleshooting
-
-**Requires Node.js 22.13+:**
-graphmind uses the built-in `node:sqlite` module (no native addons). Check your version with `node -v`.
-
-**`graphmind build` scans too many files:**
-Check your excludes. By default, `node_modules`, `dist`, `build`, `vendor`, `target` and others are excluded. You can customize per-project in `~/.graphmind/config.json` under `exclude`.
-
-**`graphmind search` returns no results:**
-Run `graphmind clean && graphmind build --full` to reindex with content search (added in v0.1.14).
-
 ## Contributing
 
 MIT License. Contributions welcome.
@@ -326,8 +327,7 @@ MIT License. Contributions welcome.
 ```bash
 git clone https://github.com/aouicher/graphmind
 cd graphmind
-npm install
-cargo build           # build Rust core
-npm run build         # build TypeScript
-npm test              # run tests
+cargo build --release -p graphmind-cli
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 ```
