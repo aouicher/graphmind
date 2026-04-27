@@ -79,8 +79,9 @@ pub fn remove(patterns: &[String], in_slug: Option<&str>, global: bool) {
 }
 
 pub fn list(in_slug: Option<&str>, global: bool) {
+    let config = load_config();
+
     if global {
-        let config = load_config();
         if config.global_exclude.is_empty() {
             println!("{}", "No global exclude patterns.".dimmed());
         } else {
@@ -89,33 +90,41 @@ pub fn list(in_slug: Option<&str>, global: bool) {
                 println!("  {p}");
             }
         }
+        return;
+    }
+
+    let slug = match resolve_project_slug(&[in_slug]) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "{} No project specified and none could be resolved",
+                "Error:".red().bold()
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let project = match Registry::get(&slug) {
+        Some(p) => p,
+        None => {
+            eprintln!("{} Project {} not found", "Error:".red().bold(), slug);
+            std::process::exit(1);
+        }
+    };
+
+    if project.exclude.is_empty() {
+        println!("{} No exclude patterns for {}", "!".yellow(), slug);
     } else {
-        let slug = match resolve_project_slug(&[in_slug]) {
-            Some(s) => s,
-            None => {
-                eprintln!(
-                    "{} No project specified and none could be resolved",
-                    "Error:".red().bold()
-                );
-                std::process::exit(1);
-            }
-        };
+        println!("{} Exclude patterns for {}:", ">>".cyan().bold(), slug.cyan());
+        for p in &project.exclude {
+            println!("  {p}");
+        }
+    }
 
-        let project = match Registry::get(&slug) {
-            Some(p) => p,
-            None => {
-                eprintln!("{} Project {} not found", "Error:".red().bold(), slug);
-                std::process::exit(1);
-            }
-        };
-
-        if project.exclude.is_empty() {
-            println!("{} No exclude patterns for {}", "!".yellow(), slug);
-        } else {
-            println!("{} Exclude patterns for {}:", ">>".cyan().bold(), slug.cyan());
-            for p in &project.exclude {
-                println!("  {p}");
-            }
+    if !config.global_exclude.is_empty() {
+        println!("\n{} Global exclude patterns (also applied):", ">>".cyan().bold());
+        for p in &config.global_exclude {
+            println!("  {p}");
         }
     }
 }

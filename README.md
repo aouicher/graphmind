@@ -105,7 +105,7 @@ MCP: `graphmind mcp` (stdio)
 
 ### Rebuild when
 Structural changes, new modules, after merge.
-Command: `graphmind build --incremental`
+Command: `graphmind build`
 <!-- graphmind:end -->
 ```
 

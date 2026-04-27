@@ -22,7 +22,16 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
     let project = if global {
         None
     } else {
-        resolve_project_slug(&[slug])
+        match resolve_project_slug(&[slug]) {
+            Some(s) => Some(s),
+            None => {
+                eprintln!(
+                    "{} No project specified and none could be resolved. Use --global for unscoped memory.",
+                    "Error:".red().bold()
+                );
+                std::process::exit(1);
+            }
+        }
     };
 
     let entry = store.add(
@@ -67,7 +76,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: usize) {
             .to_string();
         println!(
             "  {} [{}] {}",
-            e.id[..8].dimmed(),
+            e.id.get(..8).unwrap_or(&e.id).dimmed(),
             type_str.yellow(),
             e.content
         );
@@ -102,7 +111,7 @@ pub fn list(slug: Option<&str>, limit: usize) {
             .to_string();
         println!(
             "  {} [{}] {}",
-            e.id[..8].dimmed(),
+            e.id.get(..8).unwrap_or(&e.id).dimmed(),
             type_str.yellow(),
             e.content
         );

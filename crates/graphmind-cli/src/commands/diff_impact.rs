@@ -5,8 +5,8 @@ use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use std::process::Command;
 
-pub fn diff_impact(slug: Option<&str>, in_slug: Option<&str>, staged: bool, depth: usize) {
-    let slug = match resolve_project_slug(&[slug, in_slug]) {
+pub fn diff_impact(slug: Option<&str>, staged: bool, depth: usize) {
+    let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,
         None => {
             eprintln!(

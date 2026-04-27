@@ -1,4 +1,5 @@
 use crate::paths;
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -100,7 +101,9 @@ pub fn load_config() -> GlobalConfig {
 pub fn save_config(config: &GlobalConfig) {
     ensure_dirs();
     let json = serde_json::to_string_pretty(config).unwrap_or_default();
-    fs::write(paths::config_path(), json).ok();
+    if let Err(e) = fs::write(paths::config_path(), json) {
+        eprintln!("{} Failed to write config: {}", "Warning:".yellow().bold(), e);
+    }
 }
 
 pub fn slugify(input: &str) -> String {

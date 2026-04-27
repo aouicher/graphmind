@@ -336,7 +336,7 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
 
     let mut file_count = 0;
     for (file, syms) in &by_file {
-        let safe_name = file.replace('/', "_").replace('\\', "_");
+        let safe_name = file.replace(['/', '\\'], "_");
         let md_path = graphmind_dir.join(format!("{safe_name}.md"));
 
         let mut content = String::new();

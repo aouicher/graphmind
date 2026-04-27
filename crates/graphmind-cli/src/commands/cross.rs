@@ -10,45 +10,60 @@ fn get_store() -> CrossLinkStore {
     CrossLinkStore::new(&path)
 }
 
-pub fn cross_query(slug: Option<&str>) {
-    let slug = match resolve_project_slug(&[slug]) {
-        Some(s) => s,
-        None => {
-            eprintln!(
-                "{} No project specified and none could be resolved",
-                "Error:".red().bold()
-            );
-            std::process::exit(1);
-        }
-    };
-
-    let store = get_store();
-    let links = store.find_by_project(&slug);
-
-    if links.is_empty() {
-        println!("{} No cross-links found for {}", "!".yellow(), slug);
+pub fn cross_query(symbol: &str) {
+    let projects = Registry::list();
+    if projects.is_empty() {
+        println!("{} No projects registered.", "!".yellow());
         return;
     }
 
-    println!(
-        "{} {} cross-link(s) for {}:\n",
-        ">>".cyan().bold(),
-        links.len().to_string().green(),
-        slug.cyan()
-    );
+    let mut total_found = 0;
+    for p in &projects {
+        let db_path = paths::graph_db_path(&p.slug);
+        if !db_path.exists() {
+            continue;
+        }
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = match graphmind_db::schema::init_database(&db_path_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let q = graphmind_db::queries::GraphQueries::new(&conn);
+        let found = q.find_symbol(symbol);
+        if !found.is_empty() {
+            println!(
+                "\n{} {} — {} match(es):",
+                ">>".cyan().bold(),
+                p.slug.cyan().bold(),
+                found.len().to_string().green()
+            );
+            for s in &found {
+                println!(
+                    "  {} [{}] {}:{}",
+                    s.name.bold(),
+                    s.kind.yellow(),
+                    s.file.dimmed(),
+                    s.line_start
+                );
+            }
+            total_found += found.len();
+        }
+    }
 
-    for l in &links {
-        let type_str = serde_json::to_string(&l.link_type)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .to_string();
+    if total_found == 0 {
         println!(
-            "  {} -> {} [{}]",
-            l.from.cyan(),
-            l.to.cyan(),
-            type_str.yellow()
+            "{} No results for \"{}\" across {} project(s)",
+            "!".yellow(),
+            symbol,
+            projects.len()
         );
-        println!("    {}", l.reason.dimmed());
+    } else {
+        println!(
+            "\n{} {} total result(s) across {} project(s)",
+            "OK".green().bold(),
+            total_found.to_string().green(),
+            projects.len()
+        );
     }
 }
 

@@ -18,7 +18,12 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
             println!("  {}: already installed", name.dimmed());
             return false;
         }
-        fs::write(&hook_path, format!("{existing}\n{content}")).ok();
+        let stripped: String = content
+            .lines()
+            .filter(|l| !l.starts_with("#!"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&hook_path, format!("{existing}\n{stripped}")).ok();
     } else {
         fs::write(&hook_path, content).ok();
     }

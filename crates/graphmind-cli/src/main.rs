@@ -202,9 +202,9 @@ enum MemoryAction {
 
 #[derive(clap::Subcommand)]
 enum CrossAction {
-    /// Query cross-links for a project
+    /// Search a symbol across ALL projects
     Query {
-        slug: Option<String>,
+        symbol: String,
     },
     /// Show cross-project dependencies
     Deps {
@@ -398,8 +398,8 @@ fn main() {
             }
         },
         Commands::Cross { action } => match action {
-            CrossAction::Query { slug } => {
-                commands::cross::cross_query(slug.as_deref());
+            CrossAction::Query { symbol } => {
+                commands::cross::cross_query(&symbol);
             }
             CrossAction::Deps { slug } => {
                 commands::cross::cross_deps(slug.as_deref());
@@ -432,7 +432,7 @@ fn main() {
             staged,
             depth,
         } => {
-            commands::diff_impact::diff_impact(None, slug.as_deref(), staged, depth);
+            commands::diff_impact::diff_impact(slug.as_deref(), staged, depth);
         }
         Commands::Exclude { action } => match action {
             ExcludeAction::Add {

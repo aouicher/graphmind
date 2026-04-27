@@ -71,7 +71,15 @@ fn sync_single(slug: &str, dir: Option<&str>) {
         format!("{existing}\n{section}")
     };
 
-    std::fs::write(&claude_md_path, new_content).ok();
+    if let Err(e) = std::fs::write(&claude_md_path, new_content) {
+        eprintln!(
+            "{} Failed to write CLAUDE.md for {}: {}",
+            "Error:".red().bold(),
+            slug,
+            e
+        );
+        return;
+    }
     println!(
         "{} Synced CLAUDE.md for {} at {}",
         "OK".green().bold(),
@@ -118,7 +126,7 @@ fn build_section(slug: &str) -> String {
             lines.push(String::new());
             lines.push("### Rebuild when".to_string());
             lines.push("Structural changes, new modules, after merge.".to_string());
-            lines.push("Command: `graphmind build --incremental`".to_string());
+            lines.push("Command: `graphmind build`".to_string());
         } else {
             lines.push("Graph not built yet. Run `graphmind build`.".to_string());
         }
