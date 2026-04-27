@@ -137,7 +137,7 @@ cd ~/projects/web && graphmind register .
 cd ~/projects/shared-lib && graphmind register .
 
 graphmind build --all
-graphmind cross-link infer    # auto-detect shared symbols
+graphmind cross link infer    # auto-detect shared symbols
 graphmind sync --all
 ```
 
@@ -232,11 +232,11 @@ graphmind export --obsidian ~/vault/      # Obsidian vault with [[wikilinks]]
 
 ### Cross-Project
 ```bash
-graphmind cross-query <symbol>      # search across ALL projects
-graphmind cross-deps <slug>         # who depends on this project
-graphmind cross-links               # all cross-project relationships
-graphmind cross-link add <a> <b>    # manual link
-graphmind cross-link infer          # auto-detect shared symbols
+graphmind cross query <symbol>      # search across ALL projects
+graphmind cross deps <slug>         # who depends on this project
+graphmind cross links               # all cross-project relationships
+graphmind cross link add <a> <b>    # manual link
+graphmind cross link infer          # auto-detect shared symbols
 ```
 
 ### Diff Impact
