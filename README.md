@@ -23,7 +23,7 @@ Everything is 100% local. No cloud. No open ports by default. No telemetry.
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install aouicher/tap/graphmind
+brew install aouicher/graphmind/graphmind
 ```
 
 ### Cargo

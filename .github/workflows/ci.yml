@@ -140,15 +140,15 @@ jobs:
         with:
           path: artifacts
 
-      - name: Publish binaries to homebrew-tap and update formula
+      - name: Publish binaries to homebrew-graphmind and update formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           VERSION="${TAG#v}"
-          TAP_REPO="aouicher/homebrew-tap"
+          TAP_REPO="aouicher/homebrew-graphmind"
 
-          # Create release on homebrew-tap and upload binaries
+          # Create release on homebrew-graphmind and upload binaries
           gh release create "$TAG" --repo "$TAP_REPO" --title "graphmind $TAG" --notes "graphmind $TAG binaries" 2>/dev/null || true
           for dir in artifacts/graphmind-*; do
             binary=$(ls "$dir")
@@ -160,7 +160,7 @@ jobs:
           SHA_X64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)
           SHA_LINUX=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)
 
-          # Generate formula pointing to homebrew-tap releases
+          # Generate formula pointing to homebrew-graphmind releases
           cat > /tmp/graphmind.rb << RUBY
           class Graphmind < Formula
             desc "Local-first code intelligence CLI with MCP server"
@@ -196,9 +196,9 @@ jobs:
           sed -i 's/^          //' /tmp/graphmind.rb
 
           # Update formula in tap repo
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-tap
-          cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
-          cd /tmp/homebrew-tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-graphmind
+          cp /tmp/graphmind.rb /tmp/homebrew-graphmind/Formula/graphmind.rb
+          cd /tmp/homebrew-graphmind
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/graphmind.rb
