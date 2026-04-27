@@ -18,6 +18,8 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
         "go" => tree_sitter_go::LANGUAGE.into(),
         "rust" => tree_sitter_rust::LANGUAGE.into(),
         "ruby" => tree_sitter_ruby::LANGUAGE.into(),
+        "hcl" | "terraform" => tree_sitter_hcl::LANGUAGE.into(),
+        "yaml" => tree_sitter_yaml::LANGUAGE.into(),
         _ => return Err(format!("Unsupported language: {language}")),
     };
 
@@ -56,6 +58,16 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
             languages::ruby::extract_symbols(root, source),
             languages::ruby::extract_call_sites(root, source),
             languages::ruby::extract_imports(root, source, path),
+        ),
+        "hcl" | "terraform" => (
+            languages::hcl::extract_symbols(root, source),
+            languages::hcl::extract_call_sites(root, source),
+            languages::hcl::extract_imports(root, source, path),
+        ),
+        "yaml" => (
+            languages::yaml::extract_symbols(root, source),
+            languages::yaml::extract_call_sites(root, source),
+            languages::yaml::extract_imports(root, source, path),
         ),
         _ => unreachable!(),
     };

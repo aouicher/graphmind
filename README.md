@@ -138,7 +138,7 @@ graphmind sync --all
 │  Shared symbols · Inferred relationships     │
 ├─────────────────────────────────────────────┤
 │  Rust Core (tree-sitter + napi-rs)           │
-│  TS/JS parsing · Symbol extraction · Rayon   │
+│  Multi-language parsing · Symbol extraction  │
 └─────────────────────────────────────────────┘
 ```
 
@@ -279,6 +279,8 @@ graphmind exposes 18 tools via MCP (Model Context Protocol):
 | Go | `.go` | Stable |
 | Rust | `.rs` | Stable |
 | Ruby | `.rb` | Stable |
+| Terraform (HCL) | `.tf`, `.tfvars` | Stable |
+| YAML | `.yml`, `.yaml` | Stable |
 | Markdown | `.md` | Stable |
 
 ## Data Storage
@@ -304,6 +306,7 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 - [x] Phase 5: Python, Go, Rust language support
 - [x] Phase 6: Git hooks, CI/CD, npm publish pipeline
 - [x] Phase 7: Ruby support, incremental embeddings
+- [x] Phase 8: Terraform (HCL) and YAML support
 
 ## Troubleshooting
 

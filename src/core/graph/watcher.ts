@@ -15,6 +15,10 @@ const SUPPORTED_EXTENSIONS = [
 	".go",
 	".rs",
 	".rb",
+	".tf",
+	".tfvars",
+	".yml",
+	".yaml",
 	".md",
 ];
 const DEBOUNCE_MS = 2000;

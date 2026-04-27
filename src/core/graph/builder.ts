@@ -17,6 +17,10 @@ const LANGUAGE_MAP: Record<string, string> = {
 	".go": "go",
 	".rs": "rust",
 	".rb": "ruby",
+	".tf": "hcl",
+	".tfvars": "hcl",
+	".yml": "yaml",
+	".yaml": "yaml",
 	".md": "markdown",
 };
 
