@@ -39,8 +39,9 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
         .split(';')
         .flat_map(|part| part.split_whitespace())
         .filter(|w| w.len() > 1)
+        .map(|w| format!("{w}*"))
         .collect::<Vec<_>>()
-        .join(" OR ");
+        .join(" ");
 
     if fts_query.is_empty() {
         println!("{} Empty search query", "!".yellow());
