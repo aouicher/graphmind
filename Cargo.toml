@@ -8,3 +8,6 @@ members = [
     "crates/graphmind-cli",
 ]
 resolver = "2"
+
+[workspace.metadata]
+repository = "https://github.com/aouicher/graphmind"

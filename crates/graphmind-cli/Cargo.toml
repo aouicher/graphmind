@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Local-first code intelligence CLI"
+repository = "https://github.com/aouicher/graphmind"
+homepage = "https://github.com/aouicher/graphmind"
+readme = "../../README.md"
+keywords = ["code-intelligence", "mcp", "knowledge-graph", "tree-sitter"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "graphmind"
