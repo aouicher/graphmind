@@ -78,6 +78,43 @@ Or manually in `~/.claude/settings.json`:
 }
 ```
 
+### Setup with Claude Desktop
+
+Claude Desktop does not inherit your shell PATH. You **must** use the full path to the binary:
+
+```json
+{
+  "mcpServers": {
+    "graphmind": {
+      "command": "/opt/homebrew/bin/graphmind",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Config file location:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+> **Tip**: Run `which graphmind` to find the correct path on your system.
+
+### Per-project `.mcp.json` (optional)
+
+You can also add graphmind per-project by creating a `.mcp.json` at the root of your repo:
+```json
+{
+  "mcpServers": {
+    "graphmind": {
+      "command": "graphmind",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+This is picked up automatically by Claude Code when you open the project.
+
 ### 2. Per-project CLAUDE.md (recommended)
 
 `graphmind sync` injects a section into your project's `CLAUDE.md` with graph stats and quick-reference commands. Claude reads this automatically at the start of every session.
