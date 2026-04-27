@@ -281,6 +281,8 @@ fn export_json(db: &rusqlite::Connection, cross: bool, slug: &str) {
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
 }
 
+type ObsidianSymbol = (i64, String, String, String, i64, i64, Option<String>, Option<String>);
+
 fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
     use std::io::Write;
 
@@ -292,9 +294,9 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
     });
 
     let mut stmt = db
-        .prepare("SELECT id, name, kind, file, line_start FROM symbols")
+        .prepare("SELECT id, name, kind, file, line_start, line_end, signature, content FROM symbols")
         .unwrap();
-    let symbols: Vec<(i64, String, String, String, i64)> = stmt
+    let symbols: Vec<ObsidianSymbol> = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -302,6 +304,9 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })
         .unwrap()
@@ -325,33 +330,92 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         .filter_map(|r| r.ok())
         .collect();
 
-    let mut by_file: std::collections::HashMap<String, Vec<(i64, String, String, i64)>> =
-        std::collections::HashMap::new();
-    for (id, name, kind, file, line) in &symbols {
-        by_file
-            .entry(file.clone())
-            .or_default()
-            .push((*id, name.clone(), kind.clone(), *line));
-    }
+    let lang_for_ext = |file: &str| -> &str {
+        match file.rsplit('.').next().unwrap_or("") {
+            "rs" => "rust",
+            "ts" | "tsx" => "typescript",
+            "js" | "jsx" | "mjs" => "javascript",
+            "py" => "python",
+            "go" => "go",
+            "rb" => "ruby",
+            "tf" | "tfvars" => "hcl",
+            "yml" | "yaml" => "yaml",
+            _ => "",
+        }
+    };
 
-    let mut file_count = 0;
-    for (file, syms) in &by_file {
-        let safe_name = file.replace(['/', '\\'], "_");
+    let mut symbol_count = 0;
+    for (id, name, kind, file, line_start, line_end, sig, body) in &symbols {
+        let safe_name = name.replace(['/', '\\', ':', '<', '>', '|', '?', '*', '"'], "_");
         let md_path = graphmind_dir.join(format!("{safe_name}.md"));
+        let lang = lang_for_ext(file);
 
         let mut content = String::new();
-        content.push_str(&format!("# {file}\n\n"));
 
-        for (id, name, kind, line) in syms {
-            content.push_str(&format!("## {name} ({kind}) L{line}\n"));
-            let related: Vec<_> = edges
-                .iter()
-                .filter(|(from_id, _, to_id, _, _)| from_id == id || to_id == id)
-                .collect();
-            for (_, from_name, _, to_name, edge_kind) in &related {
-                content.push_str(&format!("- [[{from_name}]] --{edge_kind}--> [[{to_name}]]\n"));
+        // YAML frontmatter for Obsidian metadata
+        content.push_str("---\n");
+        content.push_str(&format!("kind: {kind}\n"));
+        content.push_str(&format!("file: {file}\n"));
+        content.push_str(&format!("lines: {line_start}-{line_end}\n"));
+        content.push_str(&format!("tags:\n  - {}\n  - graphmind\n", kind.to_lowercase()));
+        content.push_str("---\n\n");
+
+        // Title
+        content.push_str(&format!("# {name}\n\n"));
+        content.push_str(&format!("**{kind}** in `{file}` L{line_start}-{line_end}\n\n"));
+
+        // Signature
+        if let Some(s) = sig {
+            if !s.is_empty() {
+                content.push_str(&format!("```{lang}\n{s}\n```\n\n"));
             }
-            content.push('\n');
+        }
+
+        // Source code
+        if let Some(b) = body {
+            if !b.is_empty() {
+                content.push_str("## Source\n\n");
+                content.push_str(&format!("```{lang}\n{b}\n```\n\n"));
+            }
+        }
+
+        // Edges
+        let calls: Vec<_> = edges.iter().filter(|(fid, _, _, _, k)| fid == id && k == "calls").collect();
+        let called_by: Vec<_> = edges.iter().filter(|(_, _, tid, _, k)| tid == id && k == "calls").collect();
+        let imports: Vec<_> = edges.iter().filter(|(fid, _, _, _, k)| fid == id && k == "imports").collect();
+        let imported_by: Vec<_> = edges.iter().filter(|(_, _, tid, _, k)| tid == id && k == "imports").collect();
+
+        if !calls.is_empty() || !called_by.is_empty() || !imports.is_empty() || !imported_by.is_empty() {
+            content.push_str("## Connections\n\n");
+
+            if !calls.is_empty() {
+                content.push_str("**Calls:**\n");
+                for (_, _, _, to_name, _) in &calls {
+                    content.push_str(&format!("- [[{to_name}]]\n"));
+                }
+                content.push('\n');
+            }
+            if !called_by.is_empty() {
+                content.push_str("**Called by:**\n");
+                for (_, from_name, _, _, _) in &called_by {
+                    content.push_str(&format!("- [[{from_name}]]\n"));
+                }
+                content.push('\n');
+            }
+            if !imports.is_empty() {
+                content.push_str("**Imports:**\n");
+                for (_, _, _, to_name, _) in &imports {
+                    content.push_str(&format!("- [[{to_name}]]\n"));
+                }
+                content.push('\n');
+            }
+            if !imported_by.is_empty() {
+                content.push_str("**Imported by:**\n");
+                for (_, from_name, _, _, _) in &imported_by {
+                    content.push_str(&format!("- [[{from_name}]]\n"));
+                }
+                content.push('\n');
+            }
         }
 
         let mut f = std::fs::File::create(&md_path).unwrap_or_else(|e| {
@@ -359,13 +423,13 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
             std::process::exit(1);
         });
         f.write_all(content.as_bytes()).ok();
-        file_count += 1;
+        symbol_count += 1;
     }
 
     println!(
-        "{} Exported {} files to {}",
+        "{} Exported {} symbols to {}",
         "OK".green().bold(),
-        file_count,
+        symbol_count,
         graphmind_dir.display()
     );
 }
