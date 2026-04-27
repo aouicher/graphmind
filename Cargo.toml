@@ -1,3 +1,10 @@
 [workspace]
-members = ["crates/graphmind-core"]
+members = [
+    "crates/graphmind-core",
+    "crates/graphmind-db",
+    "crates/graphmind-memory",
+    "crates/graphmind-embeddings",
+    "crates/graphmind-mcp",
+    "crates/graphmind-cli",
+]
 resolver = "2"

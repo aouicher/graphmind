@@ -1,8 +1,10 @@
+#[cfg(feature = "napi")]
 use napi_derive::napi;
+
 use tree_sitter::Node;
 
-#[napi(object)]
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedImport {
     pub source: String,
     pub specifiers: Vec<String>,

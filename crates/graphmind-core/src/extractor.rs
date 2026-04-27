@@ -1,8 +1,10 @@
+#[cfg(feature = "napi")]
 use napi_derive::napi;
+
 use tree_sitter::Node;
 
-#[napi(string_enum)]
-#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "napi", napi(string_enum))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SymbolKind {
     Function,
     Class,
@@ -11,8 +13,8 @@ pub enum SymbolKind {
     Type,
 }
 
-#[napi(object)]
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -22,8 +24,8 @@ pub struct Symbol {
     pub doc: Option<String>,
 }
 
-#[napi(object)]
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallSite {
     pub caller: String,
     pub callee: String,
