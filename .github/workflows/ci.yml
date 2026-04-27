@@ -196,7 +196,7 @@ jobs:
           sed -i 's/^          //' /tmp/graphmind.rb
 
           # Update formula in tap repo
-          gh repo clone "$TAP_REPO" /tmp/homebrew-tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-tap
           cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
           cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
