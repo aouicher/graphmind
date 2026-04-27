@@ -711,17 +711,9 @@ fn handle_search(args: &Value) -> Value {
         };
         if !results.is_empty() {
             total_found += results.len();
-            let compact: Vec<Value> = results.iter().map(|s| json!({
-                "name": s.name,
-                "kind": s.kind,
-                "file": s.file,
-                "line_start": s.line_start,
-                "line_end": s.line_end,
-                "signature": s.signature,
-            })).collect();
             all_results.push(json!({
                 "project": slug,
-                "symbols": compact
+                "symbols": results
             }));
         }
     }
