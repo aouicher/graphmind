@@ -178,7 +178,8 @@ impl Registry {
         config
             .projects
             .values()
-            .find(|p| abs_path.starts_with(&p.path))
+            .filter(|p| abs_path == p.path || abs_path.starts_with(&format!("{}/", p.path)))
+            .max_by_key(|p| p.path.len())
             .cloned()
     }
 
