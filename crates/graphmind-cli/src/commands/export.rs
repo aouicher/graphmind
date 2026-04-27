@@ -459,6 +459,30 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         symbol_count += 1;
     }
 
+    // Generate index.md grouped by file
+    let mut by_file: std::collections::BTreeMap<String, Vec<(String, String, String)>> = std::collections::BTreeMap::new();
+    for (_, name, kind, file, _, _, _, _) in &symbols {
+        by_file.entry(file.clone()).or_default().push((
+            kind.clone(),
+            name.clone(),
+            page_name(name, file),
+        ));
+    }
+
+    let mut index = format!("# {slug} — Code Graph\n\n");
+    for (file, syms) in &by_file {
+        index.push_str(&format!("## {file}\n"));
+        for (kind, _name, pg) in syms {
+            index.push_str(&format!("- {kind} [[{pg}]]\n"));
+        }
+        index.push('\n');
+    }
+
+    let index_path = graphmind_dir.join("index.md");
+    std::fs::write(&index_path, index).unwrap_or_else(|e| {
+        eprintln!("{} Failed to write index: {}", "Error:".red().bold(), e);
+    });
+
     println!(
         "{} Exported {} symbols to {}",
         "OK".green().bold(),
