@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.1.0"
+version = "0.2.9"
 dependencies = [
  "napi",
  "napi-build",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.1.0"
+version = "0.2.9"
 dependencies = [
  "graphmind-core",
  "rayon",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.1.0"
+version = "0.2.9"
 dependencies = [
  "rusqlite",
  "serde",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.1.0"
+version = "0.2.9"
 dependencies = [
  "dirs",
  "graphmind-db",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.1.0"
+version = "0.2.9"
 dependencies = [
  "chrono",
  "graphmind-db",
