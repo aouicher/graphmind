@@ -130,3 +130,73 @@ jobs:
             binary=$(ls "$dir")
             gh release upload "$TAG" "$dir/$binary" --repo "$REPO"
           done
+
+  update-homebrew:
+    needs: [release, release-rust]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute SHA256 checksums
+        id: sha
+        run: |
+          echo "arm64=$(shasum -a 256 artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "x64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          SHA_ARM64: ${{ steps.sha.outputs.arm64 }}
+          SHA_X64: ${{ steps.sha.outputs.x64 }}
+          SHA_LINUX: ${{ steps.sha.outputs.linux }}
+        run: |
+          VERSION="${TAG#v}"
+          cat > /tmp/graphmind.rb << FORMULA
+          class Graphmind < Formula
+            desc "Local-first code intelligence CLI with MCP server"
+            homepage "https://github.com/aouicher/graphmind"
+            license "MIT"
+            version "${VERSION}"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+                sha256 "${SHA_ARM64}"
+              else
+                url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+                sha256 "${SHA_X64}"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/aouicher/graphmind/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+              sha256 "${SHA_LINUX}"
+            end
+
+            def install
+              binary = Dir["graphmind-*"].first || "graphmind"
+              bin.install binary => "graphmind"
+            end
+
+            test do
+              assert_match "graphmind", shell_output("#{bin}/graphmind --help")
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' /tmp/graphmind.rb
+
+          gh repo clone aouicher/homebrew-tap /tmp/homebrew-tap
+          cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/graphmind.rb
+          git commit -m "Update graphmind to ${TAG}"
+          git push
