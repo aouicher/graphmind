@@ -85,8 +85,11 @@ download() {
     fi
 }
 
+TMP_DIR=""
+cleanup() { [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"; }
+
 main() {
-    local platform version asset_name download_url tmp
+    local platform version asset_name download_url
 
     platform="$(detect_platform)"
     info "Detected platform: ${platform}"
@@ -105,16 +108,16 @@ main() {
     asset_name="${BINARY}-${platform}"
     download_url="https://github.com/${REPO}/releases/download/${version}/${asset_name}"
 
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
+    TMP_DIR="$(mktemp -d)"
+    trap cleanup EXIT
 
     info "Downloading ${download_url}"
-    download "$download_url" "${tmp}/${BINARY}" || error "Download failed. Check that release ${version} has a binary for ${platform}"
+    download "$download_url" "${TMP_DIR}/${BINARY}" || error "Download failed. Check that release ${version} has a binary for ${platform}"
 
-    chmod +x "${tmp}/${BINARY}"
+    chmod +x "${TMP_DIR}/${BINARY}"
 
     mkdir -p "$INSTALL_DIR"
-    mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+    mv "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 
     info "Installed to ${INSTALL_DIR}/${BINARY}"
 
