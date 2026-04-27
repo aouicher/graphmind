@@ -121,11 +121,12 @@ fn truncate_response(v: &Value) -> Value {
                 let truncated: Vec<Value> = arr.iter().take(take).cloned().collect();
                 shrunk.insert(key.clone(), json!(truncated));
                 shrunk.insert(
-                    format!("{key}_truncated"),
+                    format!("{key}_pagination"),
                     json!({
                         "shown": take,
                         "total": arr.len(),
-                        "message": "Use limit/offset parameters to paginate"
+                        "next_offset": take,
+                        "hint": format!("Use offset={} and limit={} to fetch the next page", take, take)
                     }),
                 );
                 continue;
@@ -220,23 +221,80 @@ fn handle_query(args: &Value) -> Value {
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    with_graph(args, |gq, _proj| {
-        let symbols = gq.find_symbol(symbol);
-        let all_callers = gq.callers(symbol);
-        let all_callees = gq.callees(symbol);
-        let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
-        let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
-        json_text(&json!({
-            "symbol": symbol,
-            "definitions": symbols,
-            "callers": callers,
-            "callees": callees,
-            "total_callers": all_callers.len(),
-            "total_callees": all_callees.len(),
-            "limit": limit,
-            "offset": offset
-        }))
-    })
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+
+    if project_slug.is_some() {
+        return with_graph(args, |gq, proj| {
+            query_symbol_in_project(gq, &proj.slug, symbol, limit, offset)
+        });
+    }
+
+    // No project specified: try resolved project first, then all projects
+    if let Some(proj) = resolve_project(None) {
+        let db_path = graph_db_path(&proj.slug);
+        if db_path.exists() {
+            if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
+                let gq = GraphQueries::new(&conn);
+                let symbols = gq.find_symbol(symbol);
+                if !symbols.is_empty() {
+                    return query_symbol_in_project(&gq, &proj.slug, symbol, limit, offset);
+                }
+            }
+        }
+    }
+
+    // Search all projects
+    let slugs = all_project_slugs();
+    let mut results: Vec<Value> = Vec::new();
+    for slug in &slugs {
+        let db_path = graph_db_path(slug);
+        if !db_path.exists() { continue; }
+        let conn = match init_database(&db_path.to_string_lossy()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let gq = GraphQueries::new(&conn);
+        let found = gq.find_symbol(symbol);
+        if !found.is_empty() {
+            let callers = gq.callers(symbol);
+            let callees = gq.callees(symbol);
+            results.push(json!({
+                "project": slug,
+                "definitions": found,
+                "callers": callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "callees": callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "total_callers": callers.len(),
+                "total_callees": callees.len(),
+            }));
+        }
+    }
+    if results.is_empty() {
+        return json_text(&json!({ "symbol": symbol, "message": "Symbol not found in any project." }));
+    }
+    json_text(&json!({
+        "symbol": symbol,
+        "results": results,
+        "projects_searched": slugs.len()
+    }))
+}
+
+fn query_symbol_in_project(gq: &GraphQueries, slug: &str, symbol: &str, limit: usize, offset: usize) -> Value {
+    let symbols = gq.find_symbol(symbol);
+    let all_callers = gq.callers(symbol);
+    let all_callees = gq.callees(symbol);
+    let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
+    let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
+    json_text(&json!({
+        "project": slug,
+        "symbol": symbol,
+        "definitions": symbols,
+        "callers": callers,
+        "callees": callees,
+        "total_callers": all_callers.len(),
+        "total_callees": all_callees.len(),
+        "limit": limit,
+        "offset": offset
+    }))
 }
 
 fn handle_fn(args: &Value) -> Value {
@@ -246,23 +304,59 @@ fn handle_fn(args: &Value) -> Value {
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    with_graph(args, |gq, _proj| {
-        let definitions = gq.find_symbol(symbol);
-        let all_callers = gq.callers(symbol);
-        let all_callees = gq.callees(symbol);
-        let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
-        let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
-        json_text(&json!({
-            "function": symbol,
-            "definitions": definitions,
-            "callers": callers,
-            "callees": callees,
-            "total_callers": all_callers.len(),
-            "total_callees": all_callees.len(),
-            "limit": limit,
-            "offset": offset
-        }))
-    })
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+
+    if project_slug.is_some() {
+        return with_graph(args, |gq, proj| {
+            query_symbol_in_project(gq, &proj.slug, symbol, limit, offset)
+        });
+    }
+
+    if let Some(proj) = resolve_project(None) {
+        let db_path = graph_db_path(&proj.slug);
+        if db_path.exists() {
+            if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
+                let gq = GraphQueries::new(&conn);
+                let symbols = gq.find_symbol(symbol);
+                if !symbols.is_empty() {
+                    return query_symbol_in_project(&gq, &proj.slug, symbol, limit, offset);
+                }
+            }
+        }
+    }
+
+    let slugs = all_project_slugs();
+    let mut results: Vec<Value> = Vec::new();
+    for slug in &slugs {
+        let db_path = graph_db_path(slug);
+        if !db_path.exists() { continue; }
+        let conn = match init_database(&db_path.to_string_lossy()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let gq = GraphQueries::new(&conn);
+        let found = gq.find_symbol(symbol);
+        if !found.is_empty() {
+            let callers = gq.callers(symbol);
+            let callees = gq.callees(symbol);
+            results.push(json!({
+                "project": slug,
+                "definitions": found,
+                "callers": callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "callees": callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "total_callers": callers.len(),
+                "total_callees": callees.len(),
+            }));
+        }
+    }
+    if results.is_empty() {
+        return json_text(&json!({ "symbol": symbol, "message": "Symbol not found in any project." }));
+    }
+    json_text(&json!({
+        "symbol": symbol,
+        "results": results,
+        "projects_searched": slugs.len()
+    }))
 }
 
 fn handle_deps(args: &Value) -> Value {
@@ -379,6 +473,7 @@ fn handle_memory_add(args: &Value) -> Value {
         Some(c) => c,
         None => return err_text("Missing required parameter: content"),
     };
+    let confirmed = args.get("confirmed").and_then(|v| v.as_bool()).unwrap_or(false);
     let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
     let tags: Vec<String> = args
@@ -391,14 +486,29 @@ fn handle_memory_add(args: &Value) -> Value {
         })
         .unwrap_or_default();
 
-    let entry_type = match args.get("type").and_then(|v| v.as_str()) {
-        Some("decision") => MemoryType::Decision,
-        Some("pattern") => MemoryType::Pattern,
-        Some("convention") => MemoryType::Convention,
-        Some("bug") => MemoryType::Bug,
-        Some("session") => MemoryType::Session,
+    let entry_type_str = args.get("type").and_then(|v| v.as_str()).unwrap_or("context");
+    let entry_type = match entry_type_str {
+        "decision" => MemoryType::Decision,
+        "pattern" => MemoryType::Pattern,
+        "convention" => MemoryType::Convention,
+        "bug" => MemoryType::Bug,
+        "session" => MemoryType::Session,
         _ => MemoryType::Context,
     };
+
+    if !confirmed {
+        return json_text(&json!({
+            "confirmation_required": true,
+            "preview": {
+                "content": content,
+                "project": project,
+                "global": global,
+                "type": entry_type_str,
+                "tags": tags,
+            },
+            "message": "Call gm_memory_add again with confirmed: true to save."
+        }));
+    }
 
     let store = MemoryStore::new(&memory_dir());
     let entry = store.add(
@@ -411,8 +521,9 @@ fn handle_memory_add(args: &Value) -> Value {
         },
     );
     json_text(&json!({
-        "added": true,
-        "entry": entry
+        "saved": true,
+        "id": entry.id,
+        "created": entry.created
     }))
 }
 

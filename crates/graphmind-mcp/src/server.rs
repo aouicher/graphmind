@@ -88,14 +88,15 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["query"]
         })),
-        make_tool("gm_memory_add", "Add a memory entry", json!({
+        make_tool("gm_memory_add", "Add a fact to memory (requires confirmation). Returns preview before saving.", json!({
             "type": "object",
             "properties": {
-                "content": { "type": "string", "description": "Memory content" },
+                "content": { "type": "string", "description": "The fact/decision/pattern to remember" },
                 "type": { "type": "string", "description": "Memory type: decision, pattern, convention, bug, context, session" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags" },
                 "project": { "type": "string", "description": "Project slug (optional)" },
-                "global": { "type": "boolean", "description": "Store as global memory (default false)" }
+                "global": { "type": "boolean", "description": "Store as global memory (default false)" },
+                "confirmed": { "type": "boolean", "description": "Set to true to confirm the write" }
             },
             "required": ["content"]
         })),
