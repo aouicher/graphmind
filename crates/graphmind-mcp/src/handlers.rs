@@ -181,6 +181,7 @@ pub fn dispatch_tool(name: &str, args: &Value) -> Value {
         "gm_diff_impact" => handle_diff_impact(args),
         // Search
         "gm_search" => handle_search(args),
+        "gm_listeners" => handle_listeners(args),
         _ => err_text(&format!("Unknown tool: {name}")),
     }
 }
@@ -221,29 +222,29 @@ fn handle_query(args: &Value) -> Value {
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let file_filter = args.get("file").and_then(|v| v.as_str());
+    let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_in_project(gq, &proj.slug, symbol, limit, offset)
+            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset)
         });
     }
 
-    // No project specified: try resolved project first, then all projects
     if let Some(proj) = resolve_project(None) {
         let db_path = graph_db_path(&proj.slug);
         if db_path.exists() {
             if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
                 let gq = GraphQueries::new(&conn);
-                let symbols = gq.find_symbol(symbol);
+                let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_in_project(&gq, &proj.slug, symbol, limit, offset);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset);
                 }
             }
         }
     }
 
-    // Search all projects
     let slugs = all_project_slugs();
     let mut results: Vec<Value> = Vec::new();
     for slug in &slugs {
@@ -254,17 +255,19 @@ fn handle_query(args: &Value) -> Value {
             Err(_) => continue,
         };
         let gq = GraphQueries::new(&conn);
-        let found = gq.find_symbol(symbol);
+        let found = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
         if !found.is_empty() {
-            let callers = gq.callers(symbol);
-            let callees = gq.callees(symbol);
+            let callers = gq.callers_filtered(symbol, file_filter);
+            let callees = gq.callees_filtered(symbol, file_filter);
+            let compact_callers = compact_edges(&gq, &callers);
+            let compact_callees = compact_edges(&gq, &callees);
             results.push(json!({
                 "project": slug,
                 "definitions": found,
-                "callers": callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "callees": callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "total_callers": callers.len(),
-                "total_callees": callees.len(),
+                "callers": compact_callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "callees": compact_callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "total_callers": compact_callers.len(),
+                "total_callees": compact_callees.len(),
             }));
         }
     }
@@ -278,20 +281,65 @@ fn handle_query(args: &Value) -> Value {
     }))
 }
 
-fn query_symbol_in_project(gq: &GraphQueries, slug: &str, symbol: &str, limit: usize, offset: usize) -> Value {
-    let symbols = gq.find_symbol(symbol);
-    let all_callers = gq.callers(symbol);
-    let all_callees = gq.callees(symbol);
-    let callers: Vec<_> = all_callers.iter().skip(offset).take(limit).collect();
-    let callees: Vec<_> = all_callees.iter().skip(offset).take(limit).collect();
+fn compact_edges(gq: &GraphQueries, edges: &[graphmind_db::queries::SymbolWithEdge]) -> Vec<Value> {
+    edges.iter().map(|e| {
+        let snippet = e.content.as_deref().map(|c| {
+            c.lines().take(5).collect::<Vec<_>>().join("\n")
+        });
+        let as_row = graphmind_db::queries::SymbolRow {
+            id: e.id, name: e.name.clone(), kind: e.kind.clone(),
+            file: e.file.clone(), line_start: e.line_start, line_end: e.line_end,
+            signature: e.signature.clone(), doc: e.doc.clone(), content: e.content.clone(),
+        };
+        let qualified = gq.resolve_qualified_name(&as_row);
+        json!({
+            "name": e.name,
+            "qualified_name": qualified,
+            "kind": e.kind,
+            "file": e.file,
+            "line_start": e.line_start,
+            "signature": e.signature,
+            "edge_kind": e.edge_kind,
+            "snippet": snippet,
+        })
+    }).collect()
+}
+
+fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::SymbolRow]) -> Vec<Value> {
+    symbols.iter().map(|s| {
+        let qualified = gq.resolve_qualified_name(s);
+        json!({
+            "id": s.id,
+            "name": s.name,
+            "qualified_name": qualified,
+            "kind": s.kind,
+            "file": s.file,
+            "line_start": s.line_start,
+            "line_end": s.line_end,
+            "signature": s.signature,
+            "doc": s.doc,
+            "content": s.content,
+        })
+    }).collect()
+}
+
+fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize) -> Value {
+    let symbols = gq.find_symbol_filtered(symbol, file, kind);
+    let definitions = qualify_definitions(gq, &symbols);
+    let all_callers = gq.callers_filtered(symbol, file);
+    let all_callees = gq.callees_filtered(symbol, file);
+    let compact_callers = compact_edges(gq, &all_callers);
+    let compact_callees = compact_edges(gq, &all_callees);
+    let callers: Vec<_> = compact_callers.iter().skip(offset).take(limit).collect();
+    let callees: Vec<_> = compact_callees.iter().skip(offset).take(limit).collect();
     json_text(&json!({
         "project": slug,
         "symbol": symbol,
-        "definitions": symbols,
+        "definitions": definitions,
         "callers": callers,
         "callees": callees,
-        "total_callers": all_callers.len(),
-        "total_callees": all_callees.len(),
+        "total_callers": compact_callers.len(),
+        "total_callees": compact_callees.len(),
         "limit": limit,
         "offset": offset
     }))
@@ -304,11 +352,13 @@ fn handle_fn(args: &Value) -> Value {
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let file_filter = args.get("file").and_then(|v| v.as_str());
+    let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_in_project(gq, &proj.slug, symbol, limit, offset)
+            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset)
         });
     }
 
@@ -317,9 +367,9 @@ fn handle_fn(args: &Value) -> Value {
         if db_path.exists() {
             if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
                 let gq = GraphQueries::new(&conn);
-                let symbols = gq.find_symbol(symbol);
+                let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_in_project(&gq, &proj.slug, symbol, limit, offset);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset);
                 }
             }
         }
@@ -335,17 +385,19 @@ fn handle_fn(args: &Value) -> Value {
             Err(_) => continue,
         };
         let gq = GraphQueries::new(&conn);
-        let found = gq.find_symbol(symbol);
+        let found = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
         if !found.is_empty() {
-            let callers = gq.callers(symbol);
-            let callees = gq.callees(symbol);
+            let callers = gq.callers_filtered(symbol, file_filter);
+            let callees = gq.callees_filtered(symbol, file_filter);
+            let compact_callers = compact_edges(&gq, &callers);
+            let compact_callees = compact_edges(&gq, &callees);
             results.push(json!({
                 "project": slug,
                 "definitions": found,
-                "callers": callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "callees": callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "total_callers": callers.len(),
-                "total_callees": callees.len(),
+                "callers": compact_callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "callees": compact_callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+                "total_callers": compact_callers.len(),
+                "total_callees": compact_callees.len(),
             }));
         }
     }
@@ -855,5 +907,68 @@ fn handle_search(args: &Value) -> Value {
         "projects_searched": slugs.len(),
         "total_found": total_found,
         "limit": limit
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Listeners tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_listeners(args: &Value) -> Value {
+    let event = match args.get("event").and_then(|v| v.as_str()) {
+        Some(e) => e,
+        None => return err_text("Missing required parameter: event"),
+    };
+    let project_slug = args.get("project").and_then(|v| v.as_str());
+
+    let slugs = if let Some(slug) = project_slug {
+        vec![slug.to_string()]
+    } else {
+        all_project_slugs()
+    };
+
+    let mut all_results: Vec<Value> = Vec::new();
+    let mut total_found = 0;
+
+    for slug in &slugs {
+        let db_path = graph_db_path(slug);
+        if !db_path.exists() { continue; }
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = match init_database(&db_path_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let gq = GraphQueries::new(&conn);
+        let listeners = gq.find_listeners(event);
+        if !listeners.is_empty() {
+            total_found += listeners.len();
+            let compact: Vec<Value> = listeners.iter().map(|s| {
+                let qualified = gq.resolve_qualified_name(s);
+                let snippet = s.content.as_deref().map(|c| {
+                    c.lines().take(5).collect::<Vec<_>>().join("\n")
+                });
+                json!({
+                    "name": s.name,
+                    "qualified_name": qualified,
+                    "kind": s.kind,
+                    "file": s.file,
+                    "line_start": s.line_start,
+                    "line_end": s.line_end,
+                    "signature": s.signature,
+                    "snippet": snippet,
+                })
+            }).collect();
+            all_results.push(json!({
+                "project": slug,
+                "listeners": compact
+            }));
+        }
+    }
+
+    json_text(&json!({
+        "event": event,
+        "results": all_results,
+        "projects_searched": slugs.len(),
+        "total_found": total_found
     }))
 }

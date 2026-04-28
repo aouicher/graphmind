@@ -70,8 +70,29 @@ impl<'a> GraphQueries<'a> {
     }
 
     pub fn find_symbol(&self, name: &str) -> Vec<SymbolRow> {
-        let mut stmt = self.db.prepare("SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE name = ?1").unwrap();
-        stmt.query_map(params![name], |row| {
+        self.find_symbol_filtered(name, None, None)
+    }
+
+    pub fn find_symbol_filtered(&self, name: &str, file: Option<&str>, kind: Option<&str>) -> Vec<SymbolRow> {
+        let mut sql = String::from("SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE name = ?1");
+        let mut param_idx = 2;
+        if file.is_some() {
+            sql.push_str(&format!(" AND file = ?{param_idx}"));
+            param_idx += 1;
+        }
+        if kind.is_some() {
+            sql.push_str(&format!(" AND kind = ?{param_idx} COLLATE NOCASE"));
+        }
+        let mut stmt = self.db.prepare(&sql).unwrap();
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(name.to_string())];
+        if let Some(f) = file {
+            params_vec.push(Box::new(f.to_string()));
+        }
+        if let Some(k) = kind {
+            params_vec.push(Box::new(k.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        stmt.query_map(param_refs.as_slice(), |row| {
             Ok(SymbolRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -117,14 +138,25 @@ impl<'a> GraphQueries<'a> {
     }
 
     pub fn callers(&self, symbol_name: &str) -> Vec<SymbolWithEdge> {
-        let mut stmt = self.db.prepare(
+        self.callers_filtered(symbol_name, None)
+    }
+
+    pub fn callers_filtered(&self, symbol_name: &str, file: Option<&str>) -> Vec<SymbolWithEdge> {
+        let sql = if file.is_some() {
+            "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content, e.kind as edge_kind
+             FROM edges e
+             JOIN symbols s ON s.id = e.from_id
+             JOIN symbols target ON target.id = e.to_id
+             WHERE target.name = ?1 AND target.file = ?2"
+        } else {
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content, e.kind as edge_kind
              FROM edges e
              JOIN symbols s ON s.id = e.from_id
              JOIN symbols target ON target.id = e.to_id
              WHERE target.name = ?1"
-        ).unwrap();
-        stmt.query_map(params![symbol_name], |row| {
+        };
+        let mut stmt = self.db.prepare(sql).unwrap();
+        let map_row = |row: &rusqlite::Row| {
             Ok(SymbolWithEdge {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -137,21 +169,37 @@ impl<'a> GraphQueries<'a> {
                 content: row.get(8)?,
                 edge_kind: row.get(9)?,
             })
-        })
+        };
+        if let Some(f) = file {
+            stmt.query_map(params![symbol_name, f], map_row)
+        } else {
+            stmt.query_map(params![symbol_name], map_row)
+        }
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
     }
 
     pub fn callees(&self, symbol_name: &str) -> Vec<SymbolWithEdge> {
-        let mut stmt = self.db.prepare(
+        self.callees_filtered(symbol_name, None)
+    }
+
+    pub fn callees_filtered(&self, symbol_name: &str, file: Option<&str>) -> Vec<SymbolWithEdge> {
+        let sql = if file.is_some() {
+            "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content, e.kind as edge_kind
+             FROM edges e
+             JOIN symbols s ON s.id = e.to_id
+             JOIN symbols source ON source.id = e.from_id
+             WHERE source.name = ?1 AND source.file = ?2"
+        } else {
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content, e.kind as edge_kind
              FROM edges e
              JOIN symbols s ON s.id = e.to_id
              JOIN symbols source ON source.id = e.from_id
              WHERE source.name = ?1"
-        ).unwrap();
-        stmt.query_map(params![symbol_name], |row| {
+        };
+        let mut stmt = self.db.prepare(sql).unwrap();
+        let map_row = |row: &rusqlite::Row| {
             Ok(SymbolWithEdge {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -163,6 +211,59 @@ impl<'a> GraphQueries<'a> {
                 doc: row.get(7)?,
                 content: row.get(8)?,
                 edge_kind: row.get(9)?,
+            })
+        };
+        if let Some(f) = file {
+            stmt.query_map(params![symbol_name, f], map_row)
+        } else {
+            stmt.query_map(params![symbol_name], map_row)
+        }
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn resolve_qualified_name(&self, sym: &SymbolRow) -> String {
+        let mut stmt = self.db.prepare(
+            "SELECT name, kind FROM symbols
+             WHERE file = ?1
+             AND kind IN ('Class', 'Interface', 'Module')
+             AND line_start < ?2
+             AND line_end > ?3
+             AND id != ?4
+             ORDER BY line_start ASC"
+        ).unwrap();
+        let parents: Vec<String> = stmt.query_map(
+            params![sym.file, sym.line_start, sym.line_end, sym.id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+        if parents.is_empty() {
+            return sym.name.clone();
+        }
+        let sep = if sym.kind == "Method" || sym.kind == "Function" { "#" } else { "::" };
+        format!("{}{}{}",parents.join("::"), sep, sym.name)
+    }
+
+    pub fn find_listeners(&self, event_name: &str) -> Vec<SymbolRow> {
+        let mut stmt = self.db.prepare(
+            "SELECT id, name, kind, file, line_start, line_end, signature, doc, content
+             FROM symbols
+             WHERE name = ?1 AND kind IN ('Function', 'Method')"
+        ).unwrap();
+        stmt.query_map(params![event_name], |row| {
+            Ok(SymbolRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                kind: row.get(2)?,
+                file: row.get(3)?,
+                line_start: row.get(4)?,
+                line_end: row.get(5)?,
+                signature: row.get(6)?,
+                doc: row.get(7)?,
+                content: row.get(8)?,
             })
         })
         .unwrap()

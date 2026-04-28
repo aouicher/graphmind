@@ -20,20 +20,24 @@ fn make_tool(name: &'static str, description: &'static str, schema: serde_json::
 
 fn tool_defs() -> Vec<Tool> {
     vec![
-        make_tool("gm_query", "Find a symbol and its callers/callees. Searches all projects if no project specified.", json!({
+        make_tool("gm_query", "Find a symbol and its callers/callees. Use file and kind to disambiguate common names (e.g. create, resolve). Callers/callees return compact snippets (5 lines) instead of full source.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
+                "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
+                "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class, Interface, Type" },
                 "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_fn", "Get full function detail with source code, callers and callees. Searches all projects if no project specified.", json!({
+        make_tool("gm_fn", "Get full function detail with source code, callers and callees. Use file and kind to disambiguate common names (e.g. create, resolve). Callers/callees return compact snippets (5 lines) instead of full source.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
+                "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
+                "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class, Interface, Type" },
                 "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
@@ -158,6 +162,14 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["query"]
+        })),
+        make_tool("gm_listeners", "Find all functions/methods that listen to a domain event. Returns qualified names (e.g. Payments::BankCardPaymentListener#buy_order_created).", json!({
+            "type": "object",
+            "properties": {
+                "event": { "type": "string", "description": "Event name (e.g. buy_order_created, order_created)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["event"]
         })),
     ]
 }
