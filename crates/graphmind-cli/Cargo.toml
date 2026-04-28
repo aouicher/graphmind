@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-cli"
-version = "0.2.20"
+version = "0.2.21"
 edition = "2021"
 license = "MIT"
 description = "Local-first code intelligence CLI"
@@ -27,3 +27,5 @@ dirs = "5"
 chrono = "0.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
+notify = "7"
+notify-debouncer-mini = "0.5"

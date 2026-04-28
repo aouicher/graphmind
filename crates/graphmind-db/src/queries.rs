@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SymbolRow {
@@ -58,6 +58,49 @@ pub struct Stats {
 pub struct LanguageCount {
     pub language: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutlineNode {
+    pub id: i64,
+    pub name: String,
+    pub qualified_name: String,
+    pub kind: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub signature: Option<String>,
+    pub children: Vec<OutlineNode>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CallerChainNode {
+    pub name: String,
+    pub qualified_name: String,
+    pub kind: String,
+    pub file: String,
+    pub line_start: i64,
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EdgeRow {
+    pub from_id: i64,
+    pub from_name: String,
+    pub to_id: i64,
+    pub to_name: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SimilarResult {
+    pub id: i64,
+    pub name: String,
+    pub qualified_name: String,
+    pub kind: String,
+    pub file: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub score: f64,
 }
 
 pub struct GraphQueries<'a> {
@@ -423,5 +466,347 @@ impl<'a> GraphQueries<'a> {
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+    }
+
+    // --- Feature 1: Outline ---
+
+    pub fn outline(&self, file_path: &str) -> Vec<OutlineNode> {
+        let symbols = self.symbols_in_file(file_path);
+        let mut sorted = symbols.clone();
+        sorted.sort_by_key(|s| (s.line_start, -(s.line_end as i128) as i64));
+
+        let mut roots: Vec<OutlineNode> = Vec::new();
+        let mut stack: Vec<OutlineNode> = Vec::new();
+
+        for sym in &sorted {
+            let qualified = self.resolve_qualified_name(sym);
+            let node = OutlineNode {
+                id: sym.id,
+                name: sym.name.clone(),
+                qualified_name: qualified,
+                kind: sym.kind.clone(),
+                line_start: sym.line_start,
+                line_end: sym.line_end,
+                signature: sym.signature.clone(),
+                children: Vec::new(),
+            };
+
+            while let Some(top) = stack.last() {
+                if top.line_end >= sym.line_end {
+                    break;
+                }
+                let popped = stack.pop().unwrap();
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(popped);
+                } else {
+                    roots.push(popped);
+                }
+            }
+
+            stack.push(node);
+        }
+
+        while let Some(popped) = stack.pop() {
+            if let Some(parent) = stack.last_mut() {
+                parent.children.push(popped);
+            } else {
+                roots.push(popped);
+            }
+        }
+
+        roots
+    }
+
+    // --- Feature 2: Who calls chain ---
+
+    pub fn who_calls_chain(&self, symbol_name: &str, max_depth: usize) -> (Vec<CallerChainNode>, bool) {
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<(String, Option<String>, usize)> = VecDeque::new();
+        let mut result: Vec<CallerChainNode> = Vec::new();
+        let mut max_reached = false;
+
+        let initial_symbols = self.find_symbol(symbol_name);
+        for s in &initial_symbols {
+            let key = format!("{}:{}", s.file, s.name);
+            visited.insert(key);
+        }
+        queue.push_back((symbol_name.to_string(), None, 0));
+
+        while let Some((name, file, depth)) = queue.pop_front() {
+            if depth >= max_depth {
+                max_reached = true;
+                continue;
+            }
+            let callers = self.callers_filtered(&name, file.as_deref());
+            for c in &callers {
+                let key = format!("{}:{}", c.file, c.name);
+                if visited.contains(&key) {
+                    continue;
+                }
+                visited.insert(key);
+                let as_row = SymbolRow {
+                    id: c.id, name: c.name.clone(), kind: c.kind.clone(),
+                    file: c.file.clone(), line_start: c.line_start, line_end: c.line_end,
+                    signature: c.signature.clone(), doc: c.doc.clone(), content: c.content.clone(),
+                };
+                let qualified = self.resolve_qualified_name(&as_row);
+                result.push(CallerChainNode {
+                    name: c.name.clone(),
+                    qualified_name: qualified,
+                    kind: c.kind.clone(),
+                    file: c.file.clone(),
+                    line_start: c.line_start,
+                    depth: depth + 1,
+                });
+                queue.push_back((c.name.clone(), Some(c.file.clone()), depth + 1));
+                if result.len() >= 200 {
+                    return (result, true);
+                }
+            }
+        }
+
+        (result, max_reached)
+    }
+
+    // --- Feature 4: Dead code ---
+
+    pub fn dead_code(&self, kind_filter: Option<&str>, limit: i64) -> Vec<SymbolRow> {
+        let (sql, use_kind) = if let Some(k) = kind_filter {
+            (
+                "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
+                 FROM symbols s
+                 LEFT JOIN edges e ON e.to_id = s.id
+                 WHERE e.to_id IS NULL AND s.kind = ?1 COLLATE NOCASE
+                 ORDER BY s.file, s.line_start
+                 LIMIT ?2".to_string()
+            , Some(k.to_string()))
+        } else {
+            (
+                "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
+                 FROM symbols s
+                 LEFT JOIN edges e ON e.to_id = s.id
+                 WHERE e.to_id IS NULL AND s.kind IN ('Function', 'Method')
+                 ORDER BY s.file, s.line_start
+                 LIMIT ?1".to_string()
+            , None)
+        };
+        let mut stmt = self.db.prepare(&sql).unwrap();
+        if let Some(k) = use_kind {
+            stmt.query_map(params![k, limit], |row| {
+                Ok(SymbolRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind: row.get(2)?,
+                    file: row.get(3)?,
+                    line_start: row.get(4)?,
+                    line_end: row.get(5)?,
+                    signature: row.get(6)?,
+                    doc: row.get(7)?,
+                    content: row.get(8)?,
+                })
+            }).unwrap().filter_map(|r| r.ok()).collect()
+        } else {
+            stmt.query_map(params![limit], |row| {
+                Ok(SymbolRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind: row.get(2)?,
+                    file: row.get(3)?,
+                    line_start: row.get(4)?,
+                    line_end: row.get(5)?,
+                    signature: row.get(6)?,
+                    doc: row.get(7)?,
+                    content: row.get(8)?,
+                })
+            }).unwrap().filter_map(|r| r.ok()).collect()
+        }
+    }
+
+    // --- Feature 6: Export neighborhood ---
+
+    pub fn neighborhood(&self, symbol_id: i64, depth: usize) -> (Vec<SymbolRow>, Vec<EdgeRow>) {
+        let mut visited_ids: HashSet<i64> = HashSet::new();
+        let mut edges: Vec<EdgeRow> = Vec::new();
+        let mut queue: VecDeque<(i64, usize)> = VecDeque::new();
+
+        visited_ids.insert(symbol_id);
+        queue.push_back((symbol_id, 0));
+
+        while let Some((sid, d)) = queue.pop_front() {
+            if d >= depth { continue; }
+            let mut stmt = self.db.prepare(
+                "SELECT e.from_id, s1.name, e.to_id, s2.name, e.kind
+                 FROM edges e
+                 JOIN symbols s1 ON s1.id = e.from_id
+                 JOIN symbols s2 ON s2.id = e.to_id
+                 WHERE e.from_id = ?1 OR e.to_id = ?1"
+            ).unwrap();
+            let found: Vec<EdgeRow> = stmt.query_map(params![sid], |row| {
+                Ok(EdgeRow {
+                    from_id: row.get(0)?,
+                    from_name: row.get(1)?,
+                    to_id: row.get(2)?,
+                    to_name: row.get(3)?,
+                    kind: row.get(4)?,
+                })
+            }).unwrap().filter_map(|r| r.ok()).collect();
+
+            for edge in found {
+                let other = if edge.from_id == sid { edge.to_id } else { edge.from_id };
+                edges.push(edge);
+                if visited_ids.insert(other) {
+                    queue.push_back((other, d + 1));
+                }
+            }
+        }
+
+        let symbols: Vec<SymbolRow> = visited_ids.iter().filter_map(|id| {
+            self.db.query_row(
+                "SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE id = ?1",
+                params![id],
+                |row| Ok(SymbolRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind: row.get(2)?,
+                    file: row.get(3)?,
+                    line_start: row.get(4)?,
+                    line_end: row.get(5)?,
+                    signature: row.get(6)?,
+                    doc: row.get(7)?,
+                    content: row.get(8)?,
+                })
+            ).ok()
+        }).collect();
+
+        (symbols, edges)
+    }
+
+    pub fn file_subgraph(&self, file_path: &str) -> (Vec<SymbolRow>, Vec<EdgeRow>) {
+        let symbols = self.symbols_in_file(file_path);
+        let ids: HashSet<i64> = symbols.iter().map(|s| s.id).collect();
+        let mut edges: Vec<EdgeRow> = Vec::new();
+
+        let mut stmt = self.db.prepare(
+            "SELECT e.from_id, s1.name, e.to_id, s2.name, e.kind
+             FROM edges e
+             JOIN symbols s1 ON s1.id = e.from_id
+             JOIN symbols s2 ON s2.id = e.to_id
+             WHERE s1.file = ?1 OR s2.file = ?1"
+        ).unwrap();
+        let found: Vec<EdgeRow> = stmt.query_map(params![file_path], |row| {
+            Ok(EdgeRow {
+                from_id: row.get(0)?,
+                from_name: row.get(1)?,
+                to_id: row.get(2)?,
+                to_name: row.get(3)?,
+                kind: row.get(4)?,
+            })
+        }).unwrap().filter_map(|r| r.ok()).collect();
+
+        // Include external symbols referenced by edges
+        let mut all_symbols = symbols;
+        let mut seen_ids = ids;
+        for edge in &found {
+            for id in [edge.from_id, edge.to_id] {
+                if seen_ids.insert(id) {
+                    if let Ok(sym) = self.db.query_row(
+                        "SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE id = ?1",
+                        params![id],
+                        |row| Ok(SymbolRow {
+                            id: row.get(0)?,
+                            name: row.get(1)?,
+                            kind: row.get(2)?,
+                            file: row.get(3)?,
+                            line_start: row.get(4)?,
+                            line_end: row.get(5)?,
+                            signature: row.get(6)?,
+                            doc: row.get(7)?,
+                            content: row.get(8)?,
+                        })
+                    ) {
+                        all_symbols.push(sym);
+                    }
+                }
+            }
+        }
+        edges.extend(found);
+
+        (all_symbols, edges)
+    }
+
+    // --- Feature 7: Similar symbols ---
+
+    pub fn similar_symbols(&self, symbol_id: i64, limit: i64) -> Vec<SimilarResult> {
+        let target = match self.db.query_row(
+            "SELECT id, name, kind, file, line_start, line_end FROM symbols WHERE id = ?1",
+            params![symbol_id],
+            |row| Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        ) {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        };
+        let (_id, _name, target_kind, _file, target_start, target_end) = target;
+        let target_lines = target_end - target_start;
+
+        let target_callees: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM edges WHERE from_id = ?1",
+            params![symbol_id],
+            |r| r.get(0),
+        ).unwrap_or(0);
+
+        let mut stmt = self.db.prepare(
+            "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end,
+                    (SELECT COUNT(*) FROM edges WHERE from_id = s.id) as callee_count
+             FROM symbols s
+             WHERE s.kind = ?1 COLLATE NOCASE AND s.id != ?2
+             ORDER BY ABS((s.line_end - s.line_start) - ?3)
+             LIMIT ?4"
+        ).unwrap();
+
+        let candidates: Vec<(i64, String, String, String, i64, i64, i64)> = stmt.query_map(
+            params![target_kind, symbol_id, target_lines, limit * 3],
+            |row| Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+            ))
+        ).unwrap().filter_map(|r| r.ok()).collect();
+
+        let mut results: Vec<SimilarResult> = candidates.iter().map(|(id, name, kind, file, ls, le, cc)| {
+            let line_diff = ((le - ls) - target_lines).unsigned_abs() as f64;
+            let callee_diff = (*cc - target_callees).unsigned_abs() as f64;
+            let score = 1.0 / (1.0 + line_diff + callee_diff * 2.0);
+            let sym = SymbolRow {
+                id: *id, name: name.clone(), kind: kind.clone(),
+                file: file.clone(), line_start: *ls, line_end: *le,
+                signature: None, doc: None, content: None,
+            };
+            let qualified = self.resolve_qualified_name(&sym);
+            SimilarResult {
+                id: *id,
+                name: name.clone(),
+                qualified_name: qualified,
+                kind: kind.clone(),
+                file: file.clone(),
+                line_start: *ls,
+                line_end: *le,
+                score,
+            }
+        }).collect();
+
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit as usize);
+        results
     }
 }

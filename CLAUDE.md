@@ -24,7 +24,7 @@ cargo test --workspace        # run tests
 - `crates/graphmind-db/` — SQLite graph (schema, builder, queries, FTS5, cache)
 - `crates/graphmind-memory/` — JSONL memory store + cross-project links
 - `crates/graphmind-embeddings/` — embedding store, cosine search, RRF fusion
-- `crates/graphmind-mcp/` — MCP server (rmcp SDK, 18 tools)
+- `crates/graphmind-mcp/` — MCP server (rmcp SDK, 24 tools)
 - `crates/graphmind-cli/` — CLI (clap, all commands)
 
 ## Installation

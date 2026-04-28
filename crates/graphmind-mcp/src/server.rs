@@ -171,6 +171,50 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["event"]
         })),
+        make_tool("gm_outline", "Get hierarchical file structure (Class > Methods, Module > Functions) with qualified names. Best for understanding a file before editing.", json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "File path (relative to project root)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["file"]
+        })),
+        make_tool("gm_who_calls_chain", "Trace transitive callers of a symbol up to N depth (BFS). Answers 'how do we reach this function?' across the call graph.", json!({
+            "type": "object",
+            "properties": {
+                "symbol": { "type": "string", "description": "Symbol name to trace callers for" },
+                "depth": { "type": "integer", "description": "Max traversal depth (default 3)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["symbol"]
+        })),
+        make_tool("gm_dead_code", "Find symbols (functions/methods) with no incoming edges — likely dead code candidates.", json!({
+            "type": "object",
+            "properties": {
+                "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class (default: Function+Method)" },
+                "limit": { "type": "integer", "description": "Max results (default 50)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            }
+        })),
+        make_tool("gm_export", "Export a file or symbol neighborhood as Mermaid flowchart or DOT graph text.", json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "File path (exports file subgraph)" },
+                "symbol": { "type": "string", "description": "Symbol name (exports neighborhood)" },
+                "format": { "type": "string", "description": "Output format: mermaid (default) or dot" },
+                "depth": { "type": "integer", "description": "Neighborhood depth for symbol mode (default 2)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            }
+        })),
+        make_tool("gm_similar", "Find structurally similar symbols (same kind, similar size and callee count). Useful for detecting duplication.", json!({
+            "type": "object",
+            "properties": {
+                "symbol": { "type": "string", "description": "Symbol name to find similar matches for" },
+                "limit": { "type": "integer", "description": "Max results (default 10)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["symbol"]
+        })),
     ]
 }
 

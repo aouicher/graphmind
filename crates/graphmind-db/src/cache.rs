@@ -34,6 +34,10 @@ impl FileHashCache {
         self.cache.remove(file_path);
     }
 
+    pub fn known_files(&self) -> Vec<String> {
+        self.cache.keys().cloned().collect()
+    }
+
     pub fn save(&self) {
         fs::create_dir_all(&self.cache_dir).ok();
         let json = serde_json::to_string(&self.cache).unwrap_or_default();

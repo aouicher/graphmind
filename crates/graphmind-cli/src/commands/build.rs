@@ -4,11 +4,22 @@ use crate::resolve::resolve_project_slug;
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
+use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde_json::json;
+use std::path::Path;
+use std::sync::mpsc;
+use std::time::Duration;
 
 pub fn build(slug: Option<&str>, all: bool, full: bool, watch: bool) {
     if watch {
-        println!("{}", "Watch mode coming soon".yellow());
+        let slug = match resolve_project_slug(&[slug]) {
+            Some(s) => s,
+            None => {
+                eprintln!("{} No project specified", "Error:".red().bold());
+                std::process::exit(1);
+            }
+        };
+        watch_project(&slug);
         return;
     }
 
@@ -112,6 +123,7 @@ fn build_single(slug: &str, full: bool) {
             "symbols_found": result.symbols_found,
             "edges_created": result.edges_created,
             "skipped": result.skipped,
+            "deleted": result.deleted,
             "duration_ms": result.duration_ms,
         }
     });
@@ -119,13 +131,72 @@ fn build_single(slug: &str, full: bool) {
     std::fs::write(meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()).ok();
 
     println!(
-        "{} {} | {} symbols | {} edges | {} files processed | {} skipped | {}ms",
+        "{} {} | {} symbols | {} edges | {} files processed | {} skipped | {} deleted | {}ms",
         "OK".green().bold(),
         slug.cyan(),
         result.symbols_found.to_string().green(),
         result.edges_created.to_string().green(),
         result.files_processed.to_string().green(),
         result.skipped.to_string().yellow(),
+        result.deleted.to_string().red(),
         result.duration_ms
     );
+}
+
+fn watch_project(slug: &str) {
+    let project = match Registry::get(slug) {
+        Some(p) => p,
+        None => {
+            eprintln!("{} Project {} not found", "Error:".red().bold(), slug);
+            std::process::exit(1);
+        }
+    };
+
+    println!(
+        "{} Watching {} at {}",
+        ">>".cyan().bold(),
+        slug.cyan(),
+        project.path.dimmed()
+    );
+
+    // Initial build
+    build_single(slug, false);
+
+    let (tx, rx) = mpsc::channel();
+    let mut debouncer = new_debouncer(Duration::from_secs(2), tx)
+        .expect("Failed to create file watcher");
+
+    debouncer
+        .watcher()
+        .watch(Path::new(&project.path), notify::RecursiveMode::Recursive)
+        .expect("Failed to watch project directory");
+
+    println!("{} Watching for changes... (Ctrl+C to stop)", ">>".cyan().bold());
+
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                let dominated_exts = [
+                    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb", ".tf", ".yml", ".yaml",
+                ];
+                let has_relevant = events.iter().any(|e| {
+                    if e.kind != DebouncedEventKind::Any { return false; }
+                    let path_str = e.path.to_string_lossy();
+                    dominated_exts.iter().any(|ext| path_str.ends_with(ext))
+                });
+                if has_relevant {
+                    println!("\n{} Change detected, rebuilding...", ">>".cyan().bold());
+                    build_single(slug, false);
+                    println!("{} Watching for changes...", ">>".cyan().bold());
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("{} Watch error: {:?}", "Error:".red().bold(), e);
+            }
+            Err(e) => {
+                eprintln!("{} Channel error: {}", "Error:".red().bold(), e);
+                break;
+            }
+        }
+    }
 }

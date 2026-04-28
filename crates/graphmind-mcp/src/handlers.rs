@@ -182,6 +182,12 @@ pub fn dispatch_tool(name: &str, args: &Value) -> Value {
         // Search
         "gm_search" => handle_search(args),
         "gm_listeners" => handle_listeners(args),
+        // New tools
+        "gm_outline" => handle_outline(args),
+        "gm_who_calls_chain" => handle_who_calls_chain(args),
+        "gm_dead_code" => handle_dead_code(args),
+        "gm_export" => handle_export(args),
+        "gm_similar" => handle_similar(args),
         _ => err_text(&format!("Unknown tool: {name}")),
     }
 }
@@ -971,4 +977,162 @@ fn handle_listeners(args: &Value) -> Value {
         "projects_searched": slugs.len(),
         "total_found": total_found
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Outline tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_outline(args: &Value) -> Value {
+    let file = match args.get("file").and_then(|v| v.as_str()) {
+        Some(f) => f,
+        None => return err_text("Missing required parameter: file"),
+    };
+    with_graph(args, |gq, _proj| {
+        let outline = gq.outline(file);
+        json_text(&json!({
+            "file": file,
+            "outline": outline
+        }))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Who calls chain tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_who_calls_chain(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+    let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+
+    with_graph(args, |gq, proj| {
+        let (chain, max_reached) = gq.who_calls_chain(symbol, depth);
+        json_text(&json!({
+            "project": proj.slug,
+            "symbol": symbol,
+            "chain": chain,
+            "total_callers": chain.len(),
+            "max_depth": depth,
+            "max_depth_reached": max_reached
+        }))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Dead code tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_dead_code(args: &Value) -> Value {
+    let kind = args.get("kind").and_then(|v| v.as_str());
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+
+    with_graph(args, |gq, proj| {
+        let dead = gq.dead_code(kind, limit);
+        let qualified = qualify_definitions(gq, &dead);
+        json_text(&json!({
+            "project": proj.slug,
+            "dead_symbols": qualified,
+            "count": qualified.len(),
+            "kind_filter": kind,
+            "limit": limit
+        }))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Export tool handler (Mermaid / DOT)
+// ---------------------------------------------------------------------------
+
+fn handle_export(args: &Value) -> Value {
+    let file = args.get("file").and_then(|v| v.as_str());
+    let symbol = args.get("symbol").and_then(|v| v.as_str());
+    let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("mermaid");
+    let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+
+    if file.is_none() && symbol.is_none() {
+        return err_text("At least one of 'file' or 'symbol' is required");
+    }
+
+    with_graph(args, |gq, proj| {
+        let (symbols, edges) = if let Some(f) = file {
+            gq.file_subgraph(f)
+        } else {
+            let sym_name = symbol.unwrap();
+            let found = gq.find_symbol(sym_name);
+            if found.is_empty() {
+                return err_text(&format!("Symbol '{}' not found", sym_name));
+            }
+            gq.neighborhood(found[0].id, depth)
+        };
+
+        let output = match format {
+            "dot" => render_dot(&symbols, &edges, &proj.slug),
+            _ => render_mermaid(&symbols, &edges, &proj.slug),
+        };
+
+        text_content(&output)
+    })
+}
+
+fn render_mermaid(symbols: &[graphmind_db::queries::SymbolRow], edges: &[graphmind_db::queries::EdgeRow], title: &str) -> String {
+    let mut out = format!("flowchart LR\n  %% {title}\n");
+    for s in symbols {
+        let shape = match s.kind.as_str() {
+            "Class" | "Interface" => format!("[{}]", s.name),
+            "Function" | "Method" => format!("({})", s.name),
+            _ => format!("[/{}\\]", s.name),
+        };
+        out.push_str(&format!("  s{}{};\n", s.id, shape));
+    }
+    for e in edges {
+        let label = &e.kind;
+        out.push_str(&format!("  s{} -->|{}| s{};\n", e.from_id, label, e.to_id));
+    }
+    out
+}
+
+fn render_dot(symbols: &[graphmind_db::queries::SymbolRow], edges: &[graphmind_db::queries::EdgeRow], title: &str) -> String {
+    let mut out = format!("digraph \"{}\" {{\n  rankdir=LR;\n", title);
+    for s in symbols {
+        let shape = match s.kind.as_str() {
+            "Class" | "Interface" => "box",
+            "Function" | "Method" => "ellipse",
+            _ => "diamond",
+        };
+        out.push_str(&format!("  s{} [label=\"{}\" shape={}];\n", s.id, s.name, shape));
+    }
+    for e in edges {
+        out.push_str(&format!("  s{} -> s{} [label=\"{}\"];\n", e.from_id, e.to_id, e.kind));
+    }
+    out.push_str("}\n");
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Similar symbols tool handler
+// ---------------------------------------------------------------------------
+
+fn handle_similar(args: &Value) -> Value {
+    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: symbol"),
+    };
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10);
+
+    with_graph(args, |gq, proj| {
+        let found = gq.find_symbol(symbol);
+        if found.is_empty() {
+            return err_text(&format!("Symbol '{}' not found", symbol));
+        }
+        let results = gq.similar_symbols(found[0].id, limit);
+        json_text(&json!({
+            "project": proj.slug,
+            "symbol": symbol,
+            "similar": results,
+            "count": results.len()
+        }))
+    })
 }

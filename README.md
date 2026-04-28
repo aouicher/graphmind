@@ -184,11 +184,12 @@ graphmind sync --all
 ┌─────────────────────────────────────────────┐
 │  Claude Code / MCP Client                    │
 ├─────────────────────────────────────────────┤
-│  MCP Server (rmcp SDK, stdio)                │
+│  MCP Server (rmcp SDK, stdio) — 24 tools      │
 │  gm_query · gm_fn · gm_deps · gm_impact    │
-│  gm_memory_search · gm_memory_add           │
-│  gm_cross_query · gm_diff_impact            │
-│  gm_status · gm_context                     │
+│  gm_outline · gm_who_calls_chain · gm_dead  │
+│  gm_export · gm_similar · gm_listeners      │
+│  gm_memory_search · gm_cross_query          │
+│  gm_status · gm_context · gm_diff_impact    │
 ├─────────────────────────────────────────────┤
 │  Layer 1: Structural Graph (SQLite + FTS5)   │
 │  Symbols · Edges · Call sites                │
@@ -298,7 +299,7 @@ graphmind hooks uninstall     # remove graphmind hooks
 
 ## MCP Tools Reference
 
-graphmind exposes 18 tools via MCP (Model Context Protocol):
+graphmind exposes 24 tools via MCP (Model Context Protocol):
 
 | Tool | Description |
 |------|-------------|
@@ -311,6 +312,12 @@ graphmind exposes 18 tools via MCP (Model Context Protocol):
 | `gm_map` | Most-connected files |
 | `gm_cycles` | Circular dependency detection |
 | `gm_search` | Full-text search across symbols |
+| `gm_listeners` | Find event listeners by event name |
+| `gm_outline` | Hierarchical file structure with qualified names |
+| `gm_who_calls_chain` | Transitive caller chain (BFS) |
+| `gm_dead_code` | Find symbols with no incoming edges |
+| `gm_export` | Export subgraph as Mermaid/DOT |
+| `gm_similar` | Find structurally similar symbols |
 | `gm_memory_search` | Search stored decisions/patterns |
 | `gm_memory_add` | Store a fact (requires confirmation) |
 | `gm_memory_list` | List memory entries |

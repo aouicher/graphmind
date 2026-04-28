@@ -57,6 +57,7 @@ pub struct BuildResult {
     pub symbols_found: usize,
     pub edges_created: usize,
     pub skipped: usize,
+    pub deleted: usize,
     pub duration_ms: u128,
 }
 
@@ -110,8 +111,32 @@ impl GraphBuilder {
 
         let mut processed = 0usize;
         let mut skipped = 0usize;
+        let mut deleted = 0usize;
         let mut total_symbols = 0usize;
         let mut total_edges = 0usize;
+
+        // Detect and clean up deleted files
+        if !options.full {
+            let current_paths: HashSet<String> = files.iter()
+                .map(|f| pathdiff(f.full_path.to_str().unwrap_or(""), project_path))
+                .collect();
+            let cached_paths = self.cache.known_files();
+            for stale in &cached_paths {
+                if !current_paths.contains(stale) {
+                    self.db.execute(
+                        "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
+                        params![stale],
+                    ).ok();
+                    self.db.execute("DELETE FROM symbols WHERE file = ?1", params![stale]).ok();
+                    self.db.execute("DELETE FROM files WHERE path = ?1", params![stale]).ok();
+                    self.cache.remove(stale);
+                    deleted += 1;
+                }
+            }
+            if deleted > 0 {
+                eprintln!("Cleaned up {} deleted files", deleted);
+            }
+        }
 
         eprintln!("Found {} source files", files.len());
 
@@ -246,6 +271,23 @@ impl GraphBuilder {
             eprintln!("warn: failed to begin transaction: {}", e);
         }
 
+        // Build import lookup: file -> (callee_name -> resolved_file)
+        let mut import_map: std::collections::HashMap<String, std::collections::HashMap<String, String>> = std::collections::HashMap::new();
+        for (rel_path, imports) in &pending_imports {
+            let mut file_imports = std::collections::HashMap::new();
+            for imp in imports {
+                if let Some(resolved) = self.resolve_import_path(&imp.source, rel_path) {
+                    for spec in &imp.specifiers {
+                        let clean = spec.trim_start_matches("* as ").to_string();
+                        file_imports.insert(clean, resolved.clone());
+                    }
+                }
+            }
+            if !file_imports.is_empty() {
+                import_map.insert(rel_path.clone(), file_imports);
+            }
+        }
+
         for (rel_path, call_sites) in &pending_calls {
             for cs in call_sites {
                 let caller_id: Option<i64> = self.db.query_row(
@@ -256,22 +298,42 @@ impl GraphBuilder {
 
                 let Some(caller_id) = caller_id else { continue };
 
+                // 1. Same file
                 let callee_id: Option<i64> = self.db.query_row(
                     "SELECT id FROM symbols WHERE name = ?1 AND file = ?2",
                     params![cs.callee, rel_path],
                     |r| r.get(0),
-                ).ok().or_else(|| {
-                    self.db.query_row(
+                ).ok();
+
+                // 2. Import-resolved file
+                let callee_id = callee_id.or_else(|| {
+                    import_map.get(rel_path.as_str())
+                        .and_then(|m| m.get(&cs.callee))
+                        .and_then(|target_file| {
+                            self.db.query_row(
+                                "SELECT id FROM symbols WHERE name = ?1 AND file = ?2",
+                                params![cs.callee, target_file],
+                                |r| r.get(0),
+                            ).ok()
+                        })
+                });
+
+                // 3. Global fallback
+                let (callee_id, confidence) = if let Some(id) = callee_id {
+                    (Some(id), 1.0f64)
+                } else {
+                    let global_id: Option<i64> = self.db.query_row(
                         "SELECT id FROM symbols WHERE name = ?1",
                         params![cs.callee],
                         |r| r.get(0),
-                    ).ok()
-                });
+                    ).ok();
+                    (global_id, 0.5f64)
+                };
 
                 if let Some(callee_id) = callee_id {
                     if let Err(e) = self.db.execute(
-                        "INSERT INTO edges (from_id, to_id, kind, file) VALUES (?1, ?2, ?3, ?4)",
-                        params![caller_id, callee_id, "calls", rel_path],
+                        "INSERT INTO edges (from_id, to_id, kind, file, confidence) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![caller_id, callee_id, "calls", rel_path, confidence],
                     ) {
                         eprintln!("warn: failed to insert call edge in {}: {}", rel_path, e);
                     } else {
@@ -336,6 +398,7 @@ impl GraphBuilder {
             symbols_found: total_symbols,
             edges_created: total_edges,
             skipped,
+            deleted,
             duration_ms: start.elapsed().as_millis(),
         }
     }
