@@ -20,21 +20,21 @@ fn make_tool(name: &'static str, description: &'static str, schema: serde_json::
 
 fn tool_defs() -> Vec<Tool> {
     vec![
-        make_tool("gm_query", "Find a symbol and its callers/callees in the code graph", json!({
+        make_tool("gm_query", "Find a symbol and its callers/callees. Searches all projects if no project specified.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
-                "project": { "type": "string", "description": "Project slug (optional)" },
+                "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_fn", "Get the full call chain for a function (callers and callees)", json!({
+        make_tool("gm_fn", "Get full function detail with source code, callers and callees. Searches all projects if no project specified.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
-                "project": { "type": "string", "description": "Project slug (optional)" },
+                "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
@@ -79,11 +79,11 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_memory_search", "Search memory entries by query", json!({
+        make_tool("gm_memory_search", "Search declarative memory (decisions, patterns, conventions)", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query" },
-                "limit": { "type": "integer", "description": "Max results (default 10)" },
+                "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["query"]
@@ -148,7 +148,7 @@ fn tool_defs() -> Vec<Tool> {
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
-        make_tool("gm_search", "Full-text search across symbols in one or all projects. Supports natural language queries and semicolons for multi-query.", json!({
+        make_tool("gm_search", "Find symbols by name or keyword. Returns name, kind, file, and signature. Use gm_fn to get full source code for a specific symbol.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
