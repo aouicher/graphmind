@@ -152,7 +152,7 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
-                "limit": { "type": "integer", "description": "Max results (default 10)" },
+                "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: function, class, method, interface, type" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },

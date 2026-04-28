@@ -791,7 +791,7 @@ fn handle_search(args: &Value) -> Value {
     let limit = args
         .get("limit")
         .and_then(|v| v.as_i64())
-        .unwrap_or(10);
+        .unwrap_or(20);
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
