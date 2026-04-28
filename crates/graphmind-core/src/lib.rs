@@ -119,5 +119,18 @@ pub fn languages_list() -> Vec<String> {
         "ruby".to_string(),
         "hcl".to_string(),
         "yaml".to_string(),
+        "c".to_string(),
+        "objc".to_string(),
+        "java".to_string(),
+        "php".to_string(),
+        "swift".to_string(),
+        "bash".to_string(),
+        "perl".to_string(),
+        "css".to_string(),
+        "scss".to_string(),
+        "html".to_string(),
+        "toml".to_string(),
+        "dockerfile".to_string(),
+        "sql".to_string(),
     ]
 }

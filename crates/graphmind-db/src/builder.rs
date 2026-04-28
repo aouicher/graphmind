@@ -22,6 +22,26 @@ const LANGUAGE_MAP: &[(&str, &str)] = &[
     (".yml", "yaml"),
     (".yaml", "yaml"),
     (".md", "markdown"),
+    (".c", "c"),
+    (".h", "c"),
+    (".m", "objc"),
+    (".mm", "objc"),
+    (".java", "java"),
+    (".php", "php"),
+    (".swift", "swift"),
+    (".sh", "bash"),
+    (".bash", "bash"),
+    (".zsh", "bash"),
+    (".pl", "perl"),
+    (".pm", "perl"),
+    (".css", "css"),
+    (".scss", "scss"),
+    (".sass", "scss"),
+    (".html", "html"),
+    (".htm", "html"),
+    (".toml", "toml"),
+    (".sql", "sql"),
+    ("Dockerfile", "dockerfile"),
 ];
 
 const DEFAULT_EXCLUDE: &[&str] = &[
@@ -509,7 +529,7 @@ fn walk_dir(
                 let ext = Path::new(&name).extension()
                     .map(|e| format!(".{}", e.to_string_lossy()))
                     .unwrap_or_default();
-                if let Some(language) = extension_to_language(&ext) {
+                if let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) {
                     files.push(SourceFile {
                         full_path,
                         language: language.to_string(),

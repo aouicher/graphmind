@@ -349,6 +349,19 @@ graphmind exposes 24 tools via MCP (Model Context Protocol):
 | Terraform (HCL) | `.tf`, `.tfvars` | Stable |
 | YAML | `.yml`, `.yaml` | Stable |
 | Markdown | `.md` | Stable |
+| C | `.c`, `.h` | Stable |
+| Objective-C | `.m`, `.mm` | Stable |
+| Java | `.java` | Stable |
+| PHP | `.php` | Stable |
+| Swift | `.swift` | Stable |
+| Bash | `.sh`, `.bash`, `.zsh` | Stable |
+| Perl | `.pl`, `.pm` | Stable |
+| CSS | `.css` | Stable |
+| SCSS | `.scss`, `.sass` | Stable |
+| HTML | `.html`, `.htm` | Stable |
+| TOML | `.toml` | Stable |
+| Dockerfile | `Dockerfile` | Stable |
+| SQL | `.sql` | Stable |
 
 ## Data Storage
 
