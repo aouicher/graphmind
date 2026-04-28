@@ -418,6 +418,28 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
             }
         }
 
+        // Class ↔ Method links
+        if kind == "Class" || kind == "Interface" {
+            let members: Vec<_> = symbols.iter()
+                .filter(|(mid, _, mk, mf, _, _, _, _, _)| mf == file && mk == "Method" && mid != id)
+                .collect();
+            if !members.is_empty() {
+                content.push_str("## Members\n\n");
+                for (_, mname, _, mfile, _, _, _, _, _) in &members {
+                    let pg = page_name(mname, mfile);
+                    content.push_str(&format!("- [[{pg}]]\n"));
+                }
+                content.push('\n');
+            }
+        }
+        if kind == "Method" {
+            let parent: Option<_> = symbols.iter()
+                .find(|(_, _, pk, pf, _, _, _, _, _)| pf == file && (pk == "Class" || pk == "Interface"));
+            if let Some((_, pname, pk, pfile, _, _, _, _, _)) = parent {
+                content.push_str(&format!("**Belongs to:** [[{}]] ({pk})\n\n", page_name(pname, pfile)));
+            }
+        }
+
         // Edges
         let calls: Vec<_> = edges.iter().filter(|(fid, _, k)| fid == id && k == "calls").collect();
         let called_by: Vec<_> = edges.iter().filter(|(_, tid, k)| tid == id && k == "calls").collect();
