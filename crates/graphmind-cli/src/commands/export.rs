@@ -281,7 +281,7 @@ fn export_json(db: &rusqlite::Connection, cross: bool, slug: &str) {
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
 }
 
-type ObsidianSymbol = (i64, String, String, String, i64, i64, Option<String>, Option<String>);
+type ObsidianSymbol = (i64, String, String, String, i64, i64, Option<String>, Option<String>, Option<String>);
 
 fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
     use std::io::Write;
@@ -294,7 +294,7 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
     });
 
     let mut stmt = db
-        .prepare("SELECT id, name, kind, file, line_start, line_end, signature, content FROM symbols")
+        .prepare("SELECT id, name, kind, file, line_start, line_end, signature, content, doc FROM symbols")
         .unwrap();
     let symbols: Vec<ObsidianSymbol> = stmt
         .query_map([], |row| {
@@ -307,6 +307,7 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
                 row.get::<_, i64>(5)?,
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })
         .unwrap()
@@ -349,7 +350,7 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
     };
 
     let mut name_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (_, name, _, _, _, _, _, _) in &symbols {
+    for (_, name, _, _, _, _, _, _, _) in &symbols {
         *name_counts.entry(name.clone()).or_default() += 1;
     }
 
@@ -366,11 +367,16 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
 
     let id_to_page: std::collections::HashMap<i64, String> = symbols
         .iter()
-        .map(|(id, name, _, file, _, _, _, _)| (*id, page_name(name, file)))
+        .map(|(id, name, _, file, _, _, _, _, _)| (*id, page_name(name, file)))
+        .collect();
+
+    let id_to_kind: std::collections::HashMap<i64, String> = symbols
+        .iter()
+        .map(|(id, _, kind, _, _, _, _, _, _)| (*id, kind.clone()))
         .collect();
 
     let mut symbol_count = 0;
-    for (id, name, kind, file, line_start, line_end, sig, body) in &symbols {
+    for (id, name, kind, file, line_start, line_end, sig, body, doc) in &symbols {
         let md_name = page_name(name, file);
         let md_path = graphmind_dir.join(format!("{md_name}.md"));
         let lang = lang_for_ext(file);
@@ -387,12 +393,20 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
 
         // Title
         content.push_str(&format!("# {name}\n\n"));
-        content.push_str(&format!("**{kind}** in `{file}` L{line_start}-{line_end}\n\n"));
-
-        // Signature
+        content.push_str(&format!("**{kind}** in `{file}:{line_start}`\n"));
         if let Some(s) = sig {
             if !s.is_empty() {
-                content.push_str(&format!("```{lang}\n{s}\n```\n\n"));
+                content.push_str(&format!("**Signature:** `{s}`\n"));
+            }
+        }
+        content.push('\n');
+
+        // Documentation
+        if let Some(d) = doc {
+            if !d.is_empty() {
+                content.push_str("## Documentation\n\n");
+                content.push_str(d);
+                content.push_str("\n\n");
             }
         }
 
@@ -411,40 +425,42 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
         let imported_by: Vec<_> = edges.iter().filter(|(_, tid, k)| tid == id && k == "imports").collect();
 
         if !calls.is_empty() || !called_by.is_empty() || !imports.is_empty() || !imported_by.is_empty() {
-            content.push_str("## Connections\n\n");
-
             if !calls.is_empty() {
-                content.push_str("**Calls:**\n");
+                content.push_str("## Calls / Uses\n\n");
                 for (_, to_id, _) in &calls {
                     if let Some(pg) = id_to_page.get(to_id) {
-                        content.push_str(&format!("- [[{pg}]]\n"));
-                    }
-                }
-                content.push('\n');
-            }
-            if !called_by.is_empty() {
-                content.push_str("**Called by:**\n");
-                for (from_id, _, _) in &called_by {
-                    if let Some(pg) = id_to_page.get(from_id) {
-                        content.push_str(&format!("- [[{pg}]]\n"));
+                        let tk = id_to_kind.get(to_id).map(|s| s.as_str()).unwrap_or("?");
+                        content.push_str(&format!("- calls [[{pg}]] ({tk})\n"));
                     }
                 }
                 content.push('\n');
             }
             if !imports.is_empty() {
-                content.push_str("**Imports:**\n");
+                content.push_str("## Imports\n\n");
                 for (_, to_id, _) in &imports {
                     if let Some(pg) = id_to_page.get(to_id) {
-                        content.push_str(&format!("- [[{pg}]]\n"));
+                        let tk = id_to_kind.get(to_id).map(|s| s.as_str()).unwrap_or("?");
+                        content.push_str(&format!("- imports [[{pg}]] ({tk})\n"));
+                    }
+                }
+                content.push('\n');
+            }
+            if !called_by.is_empty() {
+                content.push_str("## Called By / Used By\n\n");
+                for (from_id, _, _) in &called_by {
+                    if let Some(pg) = id_to_page.get(from_id) {
+                        let fk = id_to_kind.get(from_id).map(|s| s.as_str()).unwrap_or("?");
+                        content.push_str(&format!("- calls from [[{pg}]] ({fk})\n"));
                     }
                 }
                 content.push('\n');
             }
             if !imported_by.is_empty() {
-                content.push_str("**Imported by:**\n");
+                content.push_str("## Imported By\n\n");
                 for (from_id, _, _) in &imported_by {
                     if let Some(pg) = id_to_page.get(from_id) {
-                        content.push_str(&format!("- [[{pg}]]\n"));
+                        let fk = id_to_kind.get(from_id).map(|s| s.as_str()).unwrap_or("?");
+                        content.push_str(&format!("- imports from [[{pg}]] ({fk})\n"));
                     }
                 }
                 content.push('\n');
@@ -461,7 +477,7 @@ fn export_obsidian(db: &rusqlite::Connection, slug: &str, vault_path: &str) {
 
     // Generate index.md grouped by file
     let mut by_file: std::collections::BTreeMap<String, Vec<(String, String, String)>> = std::collections::BTreeMap::new();
-    for (_, name, kind, file, _, _, _, _) in &symbols {
+    for (_, name, kind, file, _, _, _, _, _) in &symbols {
         by_file.entry(file.clone()).or_default().push((
             kind.clone(),
             name.clone(),
