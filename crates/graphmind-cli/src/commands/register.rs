@@ -1,6 +1,4 @@
-use crate::config::Registry;
-use crate::paths;
-use crate::resolve::resolve_project_slug;
+use graphmind_config::{paths, Registry, resolve_project_slug};
 use colored::Colorize;
 
 pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) {

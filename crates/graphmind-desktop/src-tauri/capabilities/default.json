@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Default capability for GraphMind",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "shell:default"
+  ]
+}

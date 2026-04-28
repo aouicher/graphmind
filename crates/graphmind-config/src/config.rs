@@ -1,5 +1,4 @@
 use crate::paths;
-use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -102,7 +101,7 @@ pub fn save_config(config: &GlobalConfig) {
     ensure_dirs();
     let json = serde_json::to_string_pretty(config).unwrap_or_default();
     if let Err(e) = fs::write(paths::config_path(), json) {
-        eprintln!("{} Failed to write config: {}", "Warning:".yellow().bold(), e);
+        eprintln!("Warning: Failed to write config: {e}");
     }
 }
 
@@ -121,11 +120,7 @@ pub fn slugify(input: &str) -> String {
 pub struct Registry;
 
 impl Registry {
-    pub fn register(
-        path: &str,
-        slug: Option<&str>,
-        exclude: &[String],
-    ) -> ProjectConfig {
+    pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) -> ProjectConfig {
         let mut config = load_config();
         let abs_path = fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
@@ -148,7 +143,6 @@ impl Registry {
         config.projects.insert(slug.clone(), project.clone());
         save_config(&config);
 
-        // Ensure graph directory exists
         fs::create_dir_all(paths::graph_dir(&slug)).ok();
 
         project

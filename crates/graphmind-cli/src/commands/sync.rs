@@ -1,6 +1,4 @@
-use crate::config::Registry;
-use crate::paths;
-use crate::resolve::resolve_project_slug;
+use graphmind_config::{paths, Registry, resolve_project_slug};
 use colored::Colorize;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
