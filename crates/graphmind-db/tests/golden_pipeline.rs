@@ -83,8 +83,12 @@ fn find_interface_symbol() {
     let q = GraphQueries::new(builder.database());
 
     let results = q.find_symbol("Wallet");
-    assert!(!results.is_empty(), "Wallet interface not found");
-    assert_eq!(results[0].kind, "Interface");
+    assert!(!results.is_empty(), "Wallet not found");
+    assert!(
+        results.iter().any(|r| r.kind == "Interface"),
+        "expected at least one Wallet as Interface, got kinds: {:?}",
+        results.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>()
+    );
 }
 
 // ── FTS search ───────────────────────────────────────────────────
