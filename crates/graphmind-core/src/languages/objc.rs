@@ -20,12 +20,23 @@ pub fn extract_imports(root: Node, source: &str, _file_path: &str) -> Vec<Resolv
     imports
 }
 
+fn first_identifier_child(node: Node, source: &str) -> Option<String> {
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if child.kind() == "identifier" {
+                return Some(node_text(child, source));
+            }
+        }
+    }
+    None
+}
+
 fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
     match node.kind() {
         "class_interface" | "class_implementation" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
+            if let Some(name) = first_identifier_child(node, source) {
                 symbols.push(Symbol {
-                    name: node_text(name_node, source),
+                    name,
                     kind: SymbolKind::Class,
                     line_start: node.start_position().row as u32 + 1,
                     line_end: node.end_position().row as u32 + 1,
@@ -35,9 +46,9 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
             }
         }
         "protocol_declaration" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
+            if let Some(name) = first_identifier_child(node, source) {
                 symbols.push(Symbol {
-                    name: node_text(name_node, source),
+                    name,
                     kind: SymbolKind::Interface,
                     line_start: node.start_position().row as u32 + 1,
                     line_end: node.end_position().row as u32 + 1,
@@ -47,22 +58,21 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
             }
         }
         "method_definition" | "method_declaration" => {
-            if let Some(sel) = node.child_by_field_name("selector") {
+            if let Some(name) = extract_method_selector(node, source) {
                 symbols.push(Symbol {
-                    name: node_text(sel, source),
+                    name: name.clone(),
                     kind: SymbolKind::Method,
                     line_start: node.start_position().row as u32 + 1,
                     line_end: node.end_position().row as u32 + 1,
-                    signature: Some(node_text(sel, source)),
+                    signature: Some(name),
                     doc: None,
                 });
             }
         }
         "function_definition" => {
             if let Some(decl) = node.child_by_field_name("declarator") {
-                let name = node_text(decl, source);
                 symbols.push(Symbol {
-                    name,
+                    name: node_text(decl, source),
                     kind: SymbolKind::Function,
                     line_start: node.start_position().row as u32 + 1,
                     line_end: node.end_position().row as u32 + 1,
@@ -80,16 +90,42 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
     }
 }
 
+fn extract_method_selector(node: Node, source: &str) -> Option<String> {
+    if let Some(sel) = node.child_by_field_name("selector") {
+        return Some(node_text(sel, source));
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if child.kind() == "identifier" {
+                return Some(node_text(child, source));
+            }
+            if child.kind() == "keyword_selector" {
+                return Some(node_text(child, source));
+            }
+        }
+    }
+    None
+}
+
 fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, current_fn: Option<&str>) {
     let fn_name = match node.kind() {
-        "method_definition" => node.child_by_field_name("selector").map(|n| node_text(n, source)),
+        "method_definition" => extract_method_selector(node, source),
         "function_definition" => node.child_by_field_name("declarator").map(|n| node_text(n, source)),
         _ => None,
     };
     let active_fn = fn_name.as_deref().or(current_fn);
 
     if node.kind() == "message_expression" {
-        if let Some(sel) = node.child_by_field_name("selector") {
+        if let Some(sel) = node.child_by_field_name("selector").or_else(|| {
+            for i in 0..node.named_child_count() {
+                if let Some(child) = node.named_child(i) {
+                    if child.kind() == "identifier" || child.kind() == "keyword_selector" {
+                        return Some(child);
+                    }
+                }
+            }
+            None
+        }) {
             let callee = node_text(sel, source);
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
@@ -110,7 +146,16 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
 
 fn collect_imports(node: Node, source: &str, imports: &mut Vec<ResolvedImport>) {
     if node.kind() == "preproc_import" || node.kind() == "preproc_include" {
-        if let Some(path_node) = node.child_by_field_name("path") {
+        if let Some(path_node) = node.child_by_field_name("path").or_else(|| {
+            for i in 0..node.named_child_count() {
+                if let Some(child) = node.named_child(i) {
+                    if child.kind() == "string_literal" || child.kind() == "system_lib_string" {
+                        return Some(child);
+                    }
+                }
+            }
+            None
+        }) {
             let path = node_text(path_node, source)
                 .trim_matches('"')
                 .trim_start_matches('<')
