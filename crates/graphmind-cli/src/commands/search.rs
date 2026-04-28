@@ -41,7 +41,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
         .filter(|w| w.len() > 1)
         .map(|w| format!("{w}*"))
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" OR ");
 
     if fts_query.is_empty() {
         println!("{} Empty search query", "!".yellow());

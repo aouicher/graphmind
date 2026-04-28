@@ -271,14 +271,14 @@ fn fts_query_conversion_logic() {
             .filter(|w| w.len() > 1)
             .map(|w| format!("{w}*"))
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" OR ")
     };
 
     assert_eq!(convert("createWallet"), "createWallet*");
-    assert_eq!(convert("create wallet"), "create* wallet*");
-    assert_eq!(convert("auth; validate token"), "auth* validate* token*");
+    assert_eq!(convert("create wallet"), "create* OR wallet*");
+    assert_eq!(convert("auth; validate token"), "auth* OR validate* OR token*");
     assert_eq!(convert("a b"), "", "single-char words filtered out");
-    assert_eq!(convert("handleCreate; getBalance"), "handleCreate* getBalance*");
+    assert_eq!(convert("handleCreate; getBalance"), "handleCreate* OR getBalance*");
 }
 
 // ══════════════════════════════════════════════════════════════════

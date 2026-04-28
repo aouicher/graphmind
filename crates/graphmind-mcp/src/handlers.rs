@@ -783,7 +783,7 @@ fn handle_search(args: &Value) -> Value {
         .filter(|w| w.len() > 1)
         .map(|w| format!("{w}*"))
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" OR ");
     if fts_query.is_empty() {
         return err_text("Empty search query after filtering");
     }
