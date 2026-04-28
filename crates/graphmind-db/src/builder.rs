@@ -42,6 +42,23 @@ const LANGUAGE_MAP: &[(&str, &str)] = &[
     (".toml", "toml"),
     (".sql", "sql"),
     ("Dockerfile", "dockerfile"),
+    (".cpp", "cpp"),
+    (".cc", "cpp"),
+    (".cxx", "cpp"),
+    (".hpp", "cpp"),
+    (".hh", "cpp"),
+    (".cs", "csharp"),
+    (".kt", "kotlin"),
+    (".kts", "kotlin"),
+    (".dart", "dart"),
+    (".scala", "scala"),
+    (".sc", "scala"),
+    (".r", "r"),
+    (".R", "r"),
+    (".graphql", "graphql"),
+    (".gql", "graphql"),
+    (".ps1", "powershell"),
+    (".psm1", "powershell"),
 ];
 
 const DEFAULT_EXCLUDE: &[&str] = &[

@@ -1,0 +1,139 @@
+use crate::extractor::{CallSite, Symbol, SymbolKind};
+use crate::resolver::ResolvedImport;
+use tree_sitter::Node;
+
+pub fn extract_symbols(root: Node, source: &str) -> Vec<Symbol> {
+    let mut symbols = Vec::new();
+    collect_symbols(root, source, &mut symbols);
+    symbols
+}
+
+pub fn extract_call_sites(root: Node, source: &str) -> Vec<CallSite> {
+    let mut sites = Vec::new();
+    collect_call_sites(root, source, &mut sites, None);
+    sites
+}
+
+pub fn extract_imports(root: Node, source: &str, _file_path: &str) -> Vec<ResolvedImport> {
+    let mut imports = Vec::new();
+    collect_imports(root, source, &mut imports);
+    imports
+}
+
+fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
+    match node.kind() {
+        "function_signature" | "method_signature" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                symbols.push(Symbol {
+                    name: node_text(name_node, source),
+                    kind: SymbolKind::Function,
+                    line_start: node.start_position().row as u32 + 1,
+                    line_end: node.end_position().row as u32 + 1,
+                    signature: node.child_by_field_name("parameters").map(|p| node_text(p, source)),
+                    doc: None,
+                });
+            }
+        }
+        "class_definition" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                symbols.push(Symbol {
+                    name: node_text(name_node, source),
+                    kind: SymbolKind::Class,
+                    line_start: node.start_position().row as u32 + 1,
+                    line_end: node.end_position().row as u32 + 1,
+                    signature: None,
+                    doc: None,
+                });
+            }
+        }
+        "enum_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                symbols.push(Symbol {
+                    name: node_text(name_node, source),
+                    kind: SymbolKind::Type,
+                    line_start: node.start_position().row as u32 + 1,
+                    line_end: node.end_position().row as u32 + 1,
+                    signature: None,
+                    doc: None,
+                });
+            }
+        }
+        "mixin_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                symbols.push(Symbol {
+                    name: node_text(name_node, source),
+                    kind: SymbolKind::Interface,
+                    line_start: node.start_position().row as u32 + 1,
+                    line_end: node.end_position().row as u32 + 1,
+                    signature: None,
+                    doc: None,
+                });
+            }
+        }
+        _ => {}
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            collect_symbols(child, source, symbols);
+        }
+    }
+}
+
+fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, current_fn: Option<&str>) {
+    let fn_name = match node.kind() {
+        "function_signature" | "method_signature" => {
+            node.child_by_field_name("name").map(|n| node_text(n, source))
+        }
+        _ => None,
+    };
+    let active_fn = fn_name.as_deref().or(current_fn);
+
+    if node.kind() == "call_expression" || node.kind() == "method_invocation" {
+        if let Some(func) = node.child_by_field_name("function").or_else(|| node.named_child(0)) {
+            let callee = node_text(func, source);
+            if let Some(caller) = active_fn {
+                sites.push(CallSite {
+                    caller: caller.to_string(),
+                    callee,
+                    line: node.start_position().row as u32 + 1,
+                });
+            }
+        }
+    }
+
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            collect_call_sites(child, source, sites, active_fn);
+        }
+    }
+}
+
+fn collect_imports(node: Node, source: &str, imports: &mut Vec<ResolvedImport>) {
+    if node.kind() == "import_or_export" || node.kind() == "import_specification" {
+        let text = node_text(node, source);
+        if text.starts_with("import ") {
+            let path = text.trim_start_matches("import ")
+                .trim_end_matches(';')
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .to_string();
+            imports.push(ResolvedImport {
+                source: path,
+                specifiers: Vec::new(),
+                line: node.start_position().row as u32 + 1,
+                is_default: false,
+                from_file: String::new(),
+            });
+        }
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            collect_imports(child, source, imports);
+        }
+    }
+}
+
+fn node_text(node: Node, source: &str) -> String {
+    source[node.start_byte()..node.end_byte()].to_string()
+}

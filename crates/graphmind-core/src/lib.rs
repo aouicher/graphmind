@@ -132,5 +132,13 @@ pub fn languages_list() -> Vec<String> {
         "toml".to_string(),
         "dockerfile".to_string(),
         "sql".to_string(),
+        "cpp".to_string(),
+        "csharp".to_string(),
+        "kotlin".to_string(),
+        "dart".to_string(),
+        "scala".to_string(),
+        "r".to_string(),
+        "graphql".to_string(),
+        "powershell".to_string(),
     ]
 }

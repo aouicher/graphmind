@@ -175,6 +175,126 @@ CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));
 CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1;
 "#;
     let r = parse("test.sql", source, "sql").unwrap();
-    // SQL parse should succeed
     let _ = &r; // parse succeeded
+}
+
+#[test]
+fn parse_cpp() {
+    let source = r#"
+#include <iostream>
+namespace MyApp {
+class Service {
+public:
+    void run() { helper(); }
+private:
+    void helper() {}
+};
+}
+"#;
+    let r = parse("test.cpp", source, "cpp").unwrap();
+    assert!(!r.symbols.is_empty(), "C++: no symbols found");
+    assert!(!r.imports.is_empty(), "C++: no imports found");
+}
+
+#[test]
+fn parse_csharp() {
+    let source = r#"
+using System.Collections.Generic;
+namespace MyApp {
+    public class UserService {
+        public void GetUsers() { Helper(); }
+        private void Helper() {}
+    }
+    public interface IService { void Run(); }
+}
+"#;
+    let r = parse("test.cs", source, "csharp").unwrap();
+    assert!(!r.symbols.is_empty(), "C#: no symbols found");
+    let names: Vec<&str> = r.symbols.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"UserService"), "C#: missing class, got: {:?}", names);
+    assert!(!r.imports.is_empty(), "C#: no imports found");
+}
+
+#[test]
+fn parse_kotlin() {
+    let source = r#"
+import kotlin.collections.List
+class UserRepository {
+    fun findAll(): List<String> { return fetch() }
+    private fun fetch(): List<String> { return emptyList() }
+}
+interface Repository { fun count(): Int }
+"#;
+    let r = parse("test.kt", source, "kotlin").unwrap();
+    assert!(!r.symbols.is_empty(), "Kotlin: no symbols found");
+}
+
+#[test]
+fn parse_dart() {
+    let source = r#"
+import 'package:flutter/material.dart';
+class MyWidget extends StatelessWidget {
+    Widget build(BuildContext context) { return render(); }
+    Widget render() { return Container(); }
+}
+"#;
+    let r = parse("test.dart", source, "dart").unwrap();
+    assert!(!r.symbols.is_empty(), "Dart: no symbols found");
+}
+
+#[test]
+fn parse_scala() {
+    let source = r#"
+import scala.collection.mutable
+class UserService {
+    def findUser(id: Int): String = helper(id)
+    private def helper(id: Int): String = ""
+}
+trait Repository { def count(): Int }
+object Main { def main(args: Array[String]): Unit = {} }
+"#;
+    let r = parse("test.scala", source, "scala").unwrap();
+    assert!(!r.symbols.is_empty(), "Scala: no symbols found");
+}
+
+#[test]
+fn parse_r() {
+    let source = r#"
+library(ggplot2)
+process_data <- function(x) { clean(x) }
+clean <- function(x) { x }
+"#;
+    let r = parse("test.R", source, "r").unwrap();
+    assert!(!r.symbols.is_empty(), "R: no symbols found");
+    assert!(!r.imports.is_empty(), "R: no imports found");
+}
+
+#[test]
+fn parse_graphql() {
+    let source = r#"
+type User {
+    id: ID!
+    name: String!
+}
+interface Node { id: ID! }
+enum Role { ADMIN USER }
+query GetUser($id: ID!) { user(id: $id) { name } }
+"#;
+    let r = parse("schema.graphql", source, "graphql").unwrap();
+    assert!(!r.symbols.is_empty(), "GraphQL: no symbols found");
+    let names: Vec<&str> = r.symbols.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"User"), "GraphQL: missing type, got: {:?}", names);
+}
+
+#[test]
+fn parse_powershell() {
+    let source = r#"
+function Deploy-App {
+    Build-Project
+    Write-Host "Deploying"
+}
+function Build-Project { Write-Host "Building" }
+"#;
+    let r = parse("deploy.ps1", source, "powershell").unwrap();
+    assert!(!r.symbols.is_empty(), "PowerShell: no symbols found");
 }

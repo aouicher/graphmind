@@ -362,6 +362,14 @@ graphmind exposes 24 tools via MCP (Model Context Protocol):
 | TOML | `.toml` | Stable |
 | Dockerfile | `Dockerfile` | Stable |
 | SQL | `.sql` | Stable |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` | Stable |
+| C# | `.cs` | Stable |
+| Kotlin | `.kt`, `.kts` | Stable |
+| Dart | `.dart` | Stable |
+| Scala | `.scala`, `.sc` | Stable |
+| R | `.r`, `.R` | Stable |
+| GraphQL | `.graphql`, `.gql` | Stable |
+| PowerShell | `.ps1`, `.psm1` | Stable |
 
 ## Data Storage
 

@@ -33,6 +33,14 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
         "toml" => tree_sitter_toml_ng::language(),
         "dockerfile" => tree_sitter_containerfile::LANGUAGE.into(),
         "sql" => tree_sitter_sql::LANGUAGE.into(),
+        "cpp" => tree_sitter_cpp::LANGUAGE.into(),
+        "csharp" => tree_sitter_c_sharp::LANGUAGE.into(),
+        "kotlin" => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        "dart" => tree_sitter_dart::LANGUAGE.into(),
+        "scala" => tree_sitter_scala::LANGUAGE.into(),
+        "r" => tree_sitter_r::LANGUAGE.into(),
+        "graphql" => tree_sitter_graphql::LANGUAGE.into(),
+        "powershell" => tree_sitter_powershell::LANGUAGE.into(),
         _ => return Err(format!("Unsupported language: {language}")),
     };
 
@@ -146,6 +154,46 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
             languages::sql::extract_symbols(root, source),
             languages::sql::extract_call_sites(root, source),
             languages::sql::extract_imports(root, source, path),
+        ),
+        "cpp" => (
+            languages::cpp::extract_symbols(root, source),
+            languages::cpp::extract_call_sites(root, source),
+            languages::cpp::extract_imports(root, source, path),
+        ),
+        "csharp" => (
+            languages::csharp::extract_symbols(root, source),
+            languages::csharp::extract_call_sites(root, source),
+            languages::csharp::extract_imports(root, source, path),
+        ),
+        "kotlin" => (
+            languages::kotlin::extract_symbols(root, source),
+            languages::kotlin::extract_call_sites(root, source),
+            languages::kotlin::extract_imports(root, source, path),
+        ),
+        "dart" => (
+            languages::dart::extract_symbols(root, source),
+            languages::dart::extract_call_sites(root, source),
+            languages::dart::extract_imports(root, source, path),
+        ),
+        "scala" => (
+            languages::scala::extract_symbols(root, source),
+            languages::scala::extract_call_sites(root, source),
+            languages::scala::extract_imports(root, source, path),
+        ),
+        "r" => (
+            languages::r::extract_symbols(root, source),
+            languages::r::extract_call_sites(root, source),
+            languages::r::extract_imports(root, source, path),
+        ),
+        "graphql" => (
+            languages::graphql::extract_symbols(root, source),
+            languages::graphql::extract_call_sites(root, source),
+            languages::graphql::extract_imports(root, source, path),
+        ),
+        "powershell" => (
+            languages::powershell::extract_symbols(root, source),
+            languages::powershell::extract_call_sites(root, source),
+            languages::powershell::extract_imports(root, source, path),
         ),
         _ => unreachable!(),
     };
