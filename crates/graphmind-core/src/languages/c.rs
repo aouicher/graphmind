@@ -22,20 +22,18 @@ pub fn extract_imports(root: Node, source: &str, _file_path: &str) -> Vec<Resolv
 
 fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
     match node.kind() {
-        "function_definition" | "declaration" => {
-            if node.kind() == "function_definition" {
-                if let Some(decl) = node.child_by_field_name("declarator") {
-                    if let Some(name) = extract_declarator_name(decl, source) {
-                        let sig = build_c_signature(node, source);
-                        symbols.push(Symbol {
-                            name,
-                            kind: SymbolKind::Function,
-                            line_start: node.start_position().row as u32 + 1,
-                            line_end: node.end_position().row as u32 + 1,
-                            signature: Some(sig),
-                            doc: None,
-                        });
-                    }
+        "function_definition" => {
+            if let Some(decl) = node.child_by_field_name("declarator") {
+                if let Some(name) = extract_declarator_name(decl, source) {
+                    let sig = build_c_signature(node, source);
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Function,
+                        line_start: node.start_position().row as u32 + 1,
+                        line_end: node.end_position().row as u32 + 1,
+                        signature: Some(sig),
+                        doc: None,
+                    });
                 }
             }
         }

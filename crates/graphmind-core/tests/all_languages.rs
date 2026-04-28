@@ -139,7 +139,7 @@ fn parse_html() {
 </html>"#;
     let r = parse("test.html", source, "html").unwrap();
     // HTML parsing should at minimum not error
-    assert!(r.symbols.len() + r.imports.len() >= 0, "HTML: parse succeeded");
+    let _ = &r; // parse succeeded
 }
 
 #[test]
@@ -153,7 +153,7 @@ serde = "1.0"
 "#;
     let r = parse("test.toml", source, "toml").unwrap();
     // TOML should parse without error
-    assert!(r.symbols.is_empty() || !r.symbols.is_empty(), "TOML: parse succeeded");
+    let _ = &r; // parse succeeded
 }
 
 #[test]
@@ -176,5 +176,5 @@ CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1;
 "#;
     let r = parse("test.sql", source, "sql").unwrap();
     // SQL parse should succeed
-    assert!(r.symbols.is_empty() || !r.symbols.is_empty(), "SQL: parse succeeded");
+    let _ = &r; // parse succeeded
 }
