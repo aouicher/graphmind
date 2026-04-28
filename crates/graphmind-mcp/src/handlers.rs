@@ -793,6 +793,7 @@ fn handle_search(args: &Value) -> Value {
         .and_then(|v| v.as_i64())
         .unwrap_or(20);
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
+    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     let slugs = if let Some(slug) = project_slug {
@@ -823,14 +824,24 @@ fn handle_search(args: &Value) -> Value {
         };
         if !results.is_empty() {
             total_found += results.len();
-            let compact: Vec<Value> = results.iter().map(|s| json!({
-                "name": s.name,
-                "kind": s.kind,
-                "file": s.file,
-                "line_start": s.line_start,
-                "line_end": s.line_end,
-                "signature": s.signature,
-            })).collect();
+            let compact: Vec<Value> = results.iter().map(|s| {
+                let snippet = s.content.as_deref().map(|c| {
+                    c.lines().take(5).collect::<Vec<_>>().join("\n")
+                });
+                let mut entry = json!({
+                    "name": s.name,
+                    "kind": s.kind,
+                    "file": s.file,
+                    "line_start": s.line_start,
+                    "line_end": s.line_end,
+                    "signature": s.signature,
+                    "snippet": snippet,
+                });
+                if include_content {
+                    entry.as_object_mut().unwrap().insert("content".to_string(), json!(s.content));
+                }
+                entry
+            }).collect();
             all_results.push(json!({
                 "project": slug,
                 "symbols": compact

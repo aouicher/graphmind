@@ -148,12 +148,13 @@ fn tool_defs() -> Vec<Tool> {
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
-        make_tool("gm_search", "Find symbols by name or keyword. Returns name, kind, file, and signature. Use gm_fn to get full source code for a specific symbol.", json!({
+        make_tool("gm_search", "Find symbols by name or keyword. Returns name, kind, file, signature, and a 5-line snippet. Set include_content=true for full source code, or use gm_fn for a single symbol with callers/callees.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: function, class, method, interface, type" },
+                "include_content": { "type": "boolean", "description": "Include full source code in results (default false)" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["query"]
