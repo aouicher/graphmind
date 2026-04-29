@@ -40,12 +40,10 @@ pub fn cache_dir_path(slug: &str) -> PathBuf {
     graph_dir(slug).join("cache")
 }
 
-#[allow(dead_code)]
 pub fn memory_path(slug: &str) -> PathBuf {
     memory_dir().join(format!("{slug}.jsonl"))
 }
 
-#[allow(dead_code)]
 pub fn global_memory_path() -> PathBuf {
     memory_dir().join("global.jsonl")
 }
