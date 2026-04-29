@@ -19,6 +19,7 @@ graphmind-core = { path = "../graphmind-core" }
 graphmind-db = { path = "../graphmind-db" }
 graphmind-memory = { path = "../graphmind-memory" }
 graphmind-mcp = { path = "../graphmind-mcp" }
+graphmind-config = { path = "../graphmind-config" }
 clap = { version = "4", features = ["derive"] }
 colored = "2"
 serde = { version = "1", features = ["derive"] }

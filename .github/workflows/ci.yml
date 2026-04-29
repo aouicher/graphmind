@@ -32,6 +32,7 @@ jobs:
 
   rust-build:
     needs: rust-check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
     strategy:
       fail-fast: false
       matrix:
@@ -73,15 +74,88 @@ jobs:
           path: dist/${{ matrix.binary }}
           if-no-files-found: error
 
-  # --- CD: only on push to main, after CI passes ---
+  # --- Desktop app build (macOS, signed + notarized) ---
+
+  desktop-build:
+    needs: rust-check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            arch: x86_64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: crates/graphmind-desktop
+        run: npm ci
+
+      - name: Install Apple certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Tauri app (sign + notarize)
+        working-directory: crates/graphmind-desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphmind-desktop-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  # --- CD: release on push to main or staging ---
 
   release:
     needs: [rust-check]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
       tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,10 +163,20 @@ jobs:
 
       - name: Check version bump
         id: version
+        env:
+          BRANCH_REF: ${{ github.ref }}
         run: |
           CURRENT=$(grep '^version' crates/graphmind-cli/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG="v${CURRENT}"
+          BRANCH="${BRANCH_REF#refs/heads/}"
+          if [ "$BRANCH" = "staging" ]; then
+            TAG="v${CURRENT}-rc"
+            PRERELEASE="true"
+          else
+            TAG="v${CURRENT}"
+            PRERELEASE="false"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -105,14 +189,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           git tag "$TAG"
           git push origin "$TAG"
-          gh release create "$TAG" --generate-notes --title "$TAG"
+          if [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" --generate-notes --title "$TAG" --prerelease
+          else
+            gh release create "$TAG" --generate-notes --title "$TAG"
+          fi
           echo "released=true" >> "$GITHUB_OUTPUT"
 
-  release-rust:
-    needs: [release, rust-build]
+  release-assets:
+    needs: [release, rust-build, desktop-build]
     if: needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -120,20 +209,33 @@ jobs:
         with:
           path: artifacts
 
-      - name: Upload binaries to release
+      - name: Upload all assets to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
-          for dir in artifacts/graphmind-*; do
-            binary=$(ls "$dir")
-            gh release upload "$TAG" "$dir/$binary" --repo "$REPO"
+          # Upload CLI binaries
+          for dir in artifacts/graphmind-aarch64-apple-darwin artifacts/graphmind-x86_64-apple-darwin artifacts/graphmind-x86_64-unknown-linux-gnu; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"/*; do
+                gh release upload "$TAG" "$file" --repo "$REPO" --clobber
+              done
+            fi
+          done
+
+          # Upload desktop DMGs
+          for dir in artifacts/graphmind-desktop-*; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"/*.dmg; do
+                gh release upload "$TAG" "$file" --repo "$REPO" --clobber
+              done
+            fi
           done
 
   update-homebrew:
-    needs: [release, release-rust]
-    if: needs.release.outputs.released == 'true'
+    needs: [release, release-assets]
+    if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -150,9 +252,11 @@ jobs:
 
           # Create release on homebrew-graphmind and upload binaries
           gh release create "$TAG" --repo "$TAP_REPO" --title "graphmind $TAG" --notes "graphmind $TAG binaries" 2>/dev/null || true
-          for dir in artifacts/graphmind-*; do
-            binary=$(ls "$dir")
-            gh release upload "$TAG" "$dir/$binary" --repo "$TAP_REPO" --clobber
+          for dir in artifacts/graphmind-*-*-darwin artifacts/graphmind-*-linux-*; do
+            if [ -d "$dir" ]; then
+              binary=$(ls "$dir")
+              gh release upload "$TAG" "$dir/$binary" --repo "$TAP_REPO" --clobber
+            fi
           done
 
           # Compute SHA256

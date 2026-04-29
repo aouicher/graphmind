@@ -1,5 +1,4 @@
-use crate::config::Registry;
-use crate::resolve::resolve_project_slug;
+use graphmind_config::{Registry, resolve_project_slug};
 use colored::Colorize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

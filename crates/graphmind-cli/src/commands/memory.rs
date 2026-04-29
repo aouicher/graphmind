@@ -1,5 +1,4 @@
-use crate::paths;
-use crate::resolve::resolve_project_slug;
+use graphmind_config::{paths, resolve_project_slug};
 use colored::Colorize;
 use graphmind_memory::search::search as memory_search;
 use graphmind_memory::store::{AddOptions, MemoryStore, MemoryType};

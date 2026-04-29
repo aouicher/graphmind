@@ -1,0 +1,38 @@
+mod commands;
+mod state;
+mod tray;
+mod types;
+
+use state::AppState;
+use std::sync::Mutex;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .manage(Mutex::new(AppState::default()))
+        .setup(|app| {
+            tray::create_tray(app)?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::projects::list_projects,
+            commands::projects::add_project,
+            commands::projects::remove_project,
+            commands::projects::get_project_status,
+            commands::indexing::build_project,
+            commands::indexing::build_all_projects,
+            commands::watcher::start_watching,
+            commands::watcher::stop_watching,
+            commands::watcher::get_watch_status,
+            commands::integrations::detect_clients,
+            commands::integrations::install_mcp_for_client,
+            commands::integrations::uninstall_mcp_for_client,
+            commands::setup::check_cli_installed,
+            commands::setup::install_cli,
+            commands::setup::get_cli_path,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

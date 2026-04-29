@@ -1,9 +1,6 @@
 use clap::Parser;
 
 mod commands;
-mod config;
-mod paths;
-mod resolve;
 
 #[derive(Parser)]
 #[command(name = "graphmind", version, about = "Local-first code intelligence CLI")]
@@ -297,7 +294,7 @@ enum ExcludeAction {
 
 fn main() {
     let cli = Cli::parse();
-    config::ensure_dirs();
+    graphmind_config::ensure_dirs();
 
     match cli.command {
         Commands::Register {
