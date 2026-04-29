@@ -39,8 +39,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "11.0",
-      "signingIdentity": "-"
+      "minimumSystemVersion": "11.0"
     },
     "category": "DeveloperTool",
     "shortDescription": "Local-first code intelligence",
