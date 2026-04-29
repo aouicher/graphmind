@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/core/tauri-config-schema/schema.json",
   "productName": "GraphMind",
-  "version": "0.1.0",
+  "version": "0.2.33",
   "identifier": "com.graphmind.desktop",
   "build": {
     "frontendDist": "../dist",

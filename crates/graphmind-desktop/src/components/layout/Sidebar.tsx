@@ -42,7 +42,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
       <div className="p-3 border-t border-border">
         <p className="text-[10px] text-text-muted text-center">
-          GraphMind v0.1.0
+          GraphMind v0.2.33
         </p>
       </div>
     </aside>
