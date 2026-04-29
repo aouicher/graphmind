@@ -15,7 +15,7 @@ const navItems = [
 export function Sidebar({ activePage, onNavigate }: SidebarProps) {
   return (
     <aside className="w-56 h-full bg-bg-sidebar border-r border-border flex flex-col">
-      <div className="h-12 flex items-center gap-2 px-4 border-b border-border drag-region">
+      <div className="h-12 flex items-center gap-2 pl-20 pr-4 border-b border-border drag-region">
         <GitGraph className="w-5 h-5 text-accent" />
         <span className="font-semibold text-sm text-text-primary">GraphMind</span>
       </div>
