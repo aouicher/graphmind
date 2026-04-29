@@ -234,7 +234,7 @@ jobs:
           done
 
   update-homebrew:
-    needs: [release, release-assets]
+    needs: [release, rust-build]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
