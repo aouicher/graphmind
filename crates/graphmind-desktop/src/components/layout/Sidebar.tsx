@@ -1,4 +1,6 @@
+import { useState, useEffect } from "react";
 import { FolderGit2, Plug, GitGraph, Network, SlidersHorizontal } from "lucide-react";
+import { api } from "../../lib/tauri";
 
 interface SidebarProps {
   activePage: string;
@@ -13,6 +15,12 @@ const navItems = [
 ];
 
 export function Sidebar({ activePage, onNavigate }: SidebarProps) {
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    api.getAppVersion().then(setVersion);
+  }, []);
+
   return (
     <aside className="w-56 h-full bg-bg-sidebar border-r border-border flex flex-col">
       <div className="h-12 flex items-center gap-2 pl-20 pr-4 border-b border-border drag-region">
@@ -42,7 +50,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
       <div className="p-3 border-t border-border">
         <p className="text-[10px] text-text-muted text-center">
-          GraphMind v0.2.33
+          GraphMind {version && `v${version}`}
         </p>
       </div>
     </aside>
