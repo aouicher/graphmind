@@ -16,13 +16,17 @@
     "framer-motion": "^11",
     "lucide-react": "^0.460",
     "react": "^18.3",
-    "react-dom": "^18.3"
+    "react-dom": "^18.3",
+    "react-force-graph-2d": "^1.29.1",
+    "react-force-graph-3d": "^1.29.1",
+    "three": "^0.184.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
     "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
     "@types/react": "^18.3",
     "@types/react-dom": "^18.3",
+    "@types/three": "^0.184.0",
     "@vitejs/plugin-react": "^4",
     "tailwindcss": "^4",
     "typescript": "^5.6",

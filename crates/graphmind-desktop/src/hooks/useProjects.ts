@@ -9,6 +9,7 @@ export function useProjects() {
     setLoading(true);
     try {
       const data = await api.listProjects();
+      data.sort((a, b) => a.slug.localeCompare(b.slug));
       setProjects(data);
     } finally {
       setLoading(false);

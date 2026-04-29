@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
+import { Graph } from "./pages/Graph";
 
-type Page = "projects" | "integrations";
+type Page = "projects" | "integrations" | "graph";
 
 export default function App() {
   const [page, setPage] = useState<Page>("projects");
@@ -24,6 +25,7 @@ export default function App() {
           >
             {page === "projects" && <Projects />}
             {page === "integrations" && <Integrations />}
+            {page === "graph" && <Graph />}
           </motion.div>
         </AnimatePresence>
       </main>
