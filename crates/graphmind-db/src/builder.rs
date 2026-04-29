@@ -71,14 +71,17 @@ const DEFAULT_EXCLUDE: &[&str] = &[
     "__pycache__",
     ".venv",
     "venv",
+    "env",
     "vendor",
     "target",
     "tmp",
     "log",
     "cdk.out",
+    "deployment_packages",
     "public/packs",
     "public/assets",
     ".terraform",
+    ".serverless",
 ];
 
 fn extension_to_language(ext: &str) -> Option<&'static str> {
