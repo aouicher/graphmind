@@ -32,6 +32,7 @@ pub fn run() {
             commands::setup::check_cli_installed,
             commands::setup::install_cli,
             commands::setup::get_cli_path,
+            commands::graph::get_graph_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

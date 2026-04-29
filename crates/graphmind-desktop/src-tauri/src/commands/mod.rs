@@ -1,3 +1,4 @@
+pub mod graph;
 pub mod indexing;
 pub mod integrations;
 pub mod projects;

@@ -1,12 +1,13 @@
-import { FolderGit2, Plug, GitGraph } from "lucide-react";
+import { FolderGit2, Plug, GitGraph, Network } from "lucide-react";
 
 interface SidebarProps {
   activePage: string;
-  onNavigate: (page: "projects" | "integrations") => void;
+  onNavigate: (page: "projects" | "integrations" | "graph") => void;
 }
 
 const navItems = [
   { id: "projects" as const, icon: FolderGit2, label: "Projects" },
+  { id: "graph" as const, icon: Network, label: "Graph" },
   { id: "integrations" as const, icon: Plug, label: "Integrations" },
 ];
 
