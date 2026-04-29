@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::types::{GraphStats, ProjectInfo};
 use graphmind_config::{paths, Registry};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub fn list_projects(state: State<Mutex<AppState>>) -> Vec<ProjectInfo> {
@@ -27,17 +27,24 @@ pub fn list_projects(state: State<Mutex<AppState>>) -> Vec<ProjectInfo> {
 }
 
 #[tauri::command]
-pub fn add_project(path: String) -> Result<ProjectInfo, String> {
+pub async fn add_project(path: String, app: AppHandle) -> Result<ProjectInfo, String> {
     let project = Registry::register(&path, None, &[]);
-    let stats = get_stats(&project.slug);
-    Ok(ProjectInfo {
+    let slug = project.slug.clone();
+    let info = ProjectInfo {
         slug: project.slug,
         path: project.path,
         last_build: project.last_build,
         languages: project.languages,
-        stats,
+        stats: None,
         is_watching: false,
-    })
+    };
+
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        super::indexing::build_project(slug, true, app_clone).await.ok();
+    });
+
+    Ok(info)
 }
 
 #[tauri::command]
