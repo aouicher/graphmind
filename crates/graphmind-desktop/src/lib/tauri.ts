@@ -53,6 +53,11 @@ export interface GraphData {
   languages: string[];
 }
 
+export interface ExcludeSettings {
+  global: string[];
+  project: string[];
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -71,4 +76,7 @@ export const api = {
   getCliPath: () => invoke<string>("get_cli_path"),
   getGraphData: (slug: string, fileFilter?: string, kindFilter?: string, languageFilter?: string, limit?: number) =>
     invoke<GraphData>("get_graph_data", { slug, fileFilter: fileFilter || null, kindFilter: kindFilter || null, languageFilter: languageFilter || null, limit: limit || null }),
+  getExcludes: (slug?: string) => invoke<ExcludeSettings>("get_excludes", { slug: slug || null }),
+  setGlobalExcludes: (excludes: string[]) => invoke<void>("set_global_excludes", { excludes }),
+  setProjectExcludes: (slug: string, excludes: string[]) => invoke<void>("set_project_excludes", { slug, excludes }),
 };

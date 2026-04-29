@@ -82,6 +82,10 @@ const DEFAULT_EXCLUDE: &[&str] = &[
     "public/assets",
     ".terraform",
     ".serverless",
+    "*.min.js",
+    "*.min.css",
+    "*.bundle.js",
+    "*.chunk.js",
 ];
 
 fn extension_to_language(ext: &str) -> Option<&'static str> {
@@ -152,8 +156,8 @@ impl GraphBuilder {
         let mut total_symbols = 0usize;
         let mut total_edges = 0usize;
 
-        // Detect and clean up deleted files
-        if !options.full {
+        // Clean up files no longer in scope (deleted, excluded, or filtered)
+        {
             let current_paths: HashSet<String> = files.iter()
                 .map(|f| pathdiff(f.full_path.to_str().unwrap_or(""), project_path))
                 .collect();
@@ -171,7 +175,7 @@ impl GraphBuilder {
                 }
             }
             if deleted > 0 {
-                eprintln!("Cleaned up {} deleted files", deleted);
+                eprintln!("Cleaned up {} deleted/excluded files", deleted);
             }
         }
 
@@ -194,6 +198,15 @@ impl GraphBuilder {
             };
 
             let rel_path = pathdiff(file.full_path.to_str().unwrap_or(""), project_path);
+
+            // Skip minified/bundled files: avg line > 500 chars with significant size
+            if content.len() > 5000 {
+                let line_count = content.lines().count().max(1);
+                if content.len() / line_count > 500 {
+                    skipped += 1;
+                    continue;
+                }
+            }
 
             if !options.full && !self.cache.has_changed(&rel_path, &content) {
                 skipped += 1;
