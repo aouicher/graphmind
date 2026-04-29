@@ -161,8 +161,21 @@ impl GraphBuilder {
             let current_paths: HashSet<String> = files.iter()
                 .map(|f| pathdiff(f.full_path.to_str().unwrap_or(""), project_path))
                 .collect();
+
+            // Collect stale paths from both cache and DB
             let cached_paths = self.cache.known_files();
-            for stale in &cached_paths {
+            let db_paths: Vec<String> = self.db
+                .prepare("SELECT DISTINCT path FROM files")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| row.get(0))
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .unwrap_or_default();
+
+            let mut all_known: HashSet<String> = cached_paths.into_iter().collect();
+            all_known.extend(db_paths);
+
+            for stale in &all_known {
                 if !current_paths.contains(stale) {
                     self.db.execute(
                         "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
