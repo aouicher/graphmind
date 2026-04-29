@@ -82,6 +82,10 @@ const DEFAULT_EXCLUDE: &[&str] = &[
     "public/assets",
     ".terraform",
     ".serverless",
+    "*.min.js",
+    "*.min.css",
+    "*.bundle.js",
+    "*.chunk.js",
 ];
 
 fn extension_to_language(ext: &str) -> Option<&'static str> {
@@ -194,6 +198,15 @@ impl GraphBuilder {
             };
 
             let rel_path = pathdiff(file.full_path.to_str().unwrap_or(""), project_path);
+
+            // Skip minified/bundled files: avg line > 500 chars with significant size
+            if content.len() > 5000 {
+                let line_count = content.lines().count().max(1);
+                if content.len() / line_count > 500 {
+                    skipped += 1;
+                    continue;
+                }
+            }
 
             if !options.full && !self.cache.has_changed(&rel_path, &content) {
                 skipped += 1;
