@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FolderPlus, RefreshCw, Eye, EyeOff, Trash2, RotateCcw } from "lucide-react";
+import { FolderPlus, RotateCcw, Eye, EyeOff, Trash2, Zap } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjects } from "../hooks/useProjects";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -12,9 +12,11 @@ import { Spinner } from "../components/ui/Spinner";
 export function Projects() {
   const { projects, loading, refresh } = useProjects();
   const [building, setBuilding] = useState<string | null>(null);
+  const [buildingAll, setBuildingAll] = useState(false);
 
   useTauriEvent<string>("indexing-complete", useCallback(() => {
     setBuilding(null);
+    setBuildingAll(false);
     refresh();
   }, [refresh]));
 
@@ -32,6 +34,24 @@ export function Projects() {
       await api.buildProject(slug, false);
     } catch {
       setBuilding(null);
+    }
+  };
+
+  const handleRebuildAll = async () => {
+    setBuildingAll(true);
+    try {
+      await api.buildAllProjects(true);
+    } catch {
+      setBuildingAll(false);
+    }
+  };
+
+  const handleUpdateAll = async () => {
+    setBuildingAll(true);
+    try {
+      await api.buildAllProjects(false);
+    } catch {
+      setBuildingAll(false);
     }
   };
 
@@ -69,9 +89,13 @@ export function Projects() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={refresh}>
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
+          <Button variant="secondary" size="sm" onClick={handleUpdateAll} disabled={buildingAll || projects.length === 0}>
+            <Zap className="w-3.5 h-3.5" />
+            Update All
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleRebuildAll} disabled={buildingAll || projects.length === 0}>
+            <RotateCcw className={`w-3.5 h-3.5 ${buildingAll ? "animate-spin" : ""}`} />
+            Rebuild All
           </Button>
           <Button size="sm" onClick={handleAdd}>
             <FolderPlus className="w-3.5 h-3.5" />

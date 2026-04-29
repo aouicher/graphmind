@@ -73,9 +73,42 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
                 symbols.push(sym);
             }
         }
-        "export_statement" | "lexical_declaration" => {
+        "export_statement" => {
             if let Some(child) = find_arrow_function(node, source) {
                 symbols.push(child);
+                // Recurse into the arrow function body directly, skipping the
+                // lexical_declaration wrapper to avoid duplicate detection
+                for i in 0..node.named_child_count() {
+                    if let Some(c) = node.named_child(i) {
+                        if c.kind() == "lexical_declaration" {
+                            // Find the arrow body and recurse into it
+                            for j in 0..c.named_child_count() {
+                                if let Some(decl) = c.named_child(j) {
+                                    if decl.kind() == "variable_declarator" {
+                                        if let Some(val) = decl.child_by_field_name("value") {
+                                            if val.kind() == "arrow_function" {
+                                                if let Some(body) = val.child_by_field_name("body") {
+                                                    for k in 0..body.named_child_count() {
+                                                        if let Some(stmt) = body.named_child(k) {
+                                                            collect_symbols(stmt, source, symbols);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
+        "lexical_declaration" => {
+            if let Some(child) = find_arrow_function(node, source) {
+                symbols.push(child);
+                return;
             }
         }
         _ => {}

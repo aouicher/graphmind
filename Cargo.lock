@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "chrono",
  "clap",
@@ -1509,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "napi",
  "napi-build",
@@ -1561,7 +1561,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1587,6 +1587,7 @@ dependencies = [
  "graphmind-memory",
  "notify",
  "notify-debouncer-mini",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
@@ -1598,7 +1599,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "rusqlite",
  "serde",
@@ -1607,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "dirs 5.0.1",
  "graphmind-db",
@@ -1620,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "chrono",
  "graphmind-db",

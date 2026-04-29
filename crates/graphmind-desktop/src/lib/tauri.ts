@@ -30,6 +30,29 @@ export interface CliStatus {
   version: string | null;
 }
 
+export interface GraphNode {
+  id: string;
+  name: string;
+  kind: string;
+  file: string;
+  line_start: number;
+  connections: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  kind: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  files: string[];
+  kinds: string[];
+  languages: string[];
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -46,4 +69,6 @@ export const api = {
   checkCliInstalled: () => invoke<CliStatus>("check_cli_installed"),
   installCli: () => invoke<CliStatus>("install_cli"),
   getCliPath: () => invoke<string>("get_cli_path"),
+  getGraphData: (slug: string, fileFilter?: string, kindFilter?: string, languageFilter?: string, limit?: number) =>
+    invoke<GraphData>("get_graph_data", { slug, fileFilter: fileFilter || null, kindFilter: kindFilter || null, languageFilter: languageFilter || null, limit: limit || null }),
 };
