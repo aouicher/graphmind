@@ -33,6 +33,9 @@ pub fn run() {
             commands::setup::install_cli,
             commands::setup::get_cli_path,
             commands::graph::get_graph_data,
+            commands::settings::get_excludes,
+            commands::settings::set_global_excludes,
+            commands::settings::set_project_excludes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
