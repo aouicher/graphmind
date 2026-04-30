@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-core"
-version = "0.2.36"
+version = "0.2.37"
 edition = "2021"
 license = "MIT"
 description = "Tree-sitter based code graph extraction core for graphmind"
