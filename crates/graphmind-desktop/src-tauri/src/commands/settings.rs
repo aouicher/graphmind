@@ -1,6 +1,17 @@
 use graphmind_config::{load_config, save_config, Registry};
 use serde::Serialize;
 
+#[tauri::command]
+pub fn get_app_version() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let hash = env!("GIT_SHORT_HASH");
+    if hash.is_empty() {
+        version.to_string()
+    } else {
+        format!("{} ({})", version, hash)
+    }
+}
+
 #[derive(Serialize)]
 pub struct ExcludeSettings {
     pub global: Vec<String>,

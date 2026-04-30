@@ -36,6 +36,7 @@ pub fn run() {
             commands::settings::get_excludes,
             commands::settings::set_global_excludes,
             commands::settings::set_project_excludes,
+            commands::settings::get_app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

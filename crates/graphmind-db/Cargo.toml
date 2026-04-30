@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-db"
-version = "0.2.33"
+version = "0.2.34"
 edition = "2021"
 license = "MIT"
 description = "SQLite graph storage layer for graphmind"
