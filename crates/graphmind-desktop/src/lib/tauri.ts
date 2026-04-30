@@ -79,4 +79,5 @@ export const api = {
   getExcludes: (slug?: string) => invoke<ExcludeSettings>("get_excludes", { slug: slug || null }),
   setGlobalExcludes: (excludes: string[]) => invoke<void>("set_global_excludes", { excludes }),
   setProjectExcludes: (slug: string, excludes: string[]) => invoke<void>("set_project_excludes", { slug, excludes }),
+  getAppVersion: () => invoke<string>("get_app_version"),
 };
