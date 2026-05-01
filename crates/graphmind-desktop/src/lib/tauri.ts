@@ -58,6 +58,22 @@ export interface ExcludeSettings {
   project: string[];
 }
 
+export interface EmbeddingSettings {
+  mode: string;
+  model: string | null;
+  openai_base_url: string | null;
+  openai_key: string | null;
+  voyage_key: string | null;
+}
+
+export interface EmbeddingSettingsInput {
+  mode: string;
+  model: string | null;
+  openai_base_url: string | null;
+  openai_key: string | null;
+  voyage_key: string | null;
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -88,4 +104,6 @@ export const api = {
   uninstallGitHook: (slug?: string) => invoke<void>("uninstall_git_hook", { slug: slug || null }),
   getSkillStatus: () => invoke<boolean>("get_skill_status"),
   installSkill: () => invoke<void>("install_skill"),
+  getEmbeddingSettings: () => invoke<EmbeddingSettings>("get_embedding_settings"),
+  setEmbeddingSettings: (settings: EmbeddingSettingsInput) => invoke<void>("set_embedding_settings", { settings }),
 };

@@ -55,3 +55,7 @@ pub fn cross_links_path() -> PathBuf {
 pub fn meta_path(slug: &str) -> PathBuf {
     graph_dir(slug).join("meta.json")
 }
+
+pub fn embedding_db_path(slug: &str) -> PathBuf {
+    graph_dir(slug).join("embeddings.db")
+}

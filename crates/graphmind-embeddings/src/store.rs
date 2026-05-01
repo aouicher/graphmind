@@ -1,10 +1,19 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingRow {
     pub id: i64,
+    pub symbol_name: String,
+    pub symbol_kind: String,
+    pub file: String,
+    pub text: String,
+    pub embedding: Vec<u8>,
+}
+
+pub struct NewEmbeddingRow {
     pub symbol_name: String,
     pub symbol_kind: String,
     pub file: String,
@@ -32,13 +41,36 @@ impl EmbeddingStore {
                 text TEXT NOT NULL,
                 embedding BLOB NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(file);",
+            CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(file);
+            CREATE TABLE IF NOT EXISTS embedding_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
         )?;
         Ok(Self { conn })
     }
 
+    pub fn get_meta(&self, key: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT value FROM embedding_meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO embedding_meta (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn clear(&self) -> rusqlite::Result<()> {
         self.conn.execute("DELETE FROM embeddings", [])?;
+        self.conn.execute("DELETE FROM embedding_meta", [])?;
         Ok(())
     }
 
@@ -76,6 +108,20 @@ impl EmbeddingStore {
         tx.commit()
     }
 
+    pub fn delete_by_file(&self, file: &str) -> rusqlite::Result<usize> {
+        self.conn.execute("DELETE FROM embeddings WHERE file = ?1", params![file])
+    }
+
+    pub fn files_indexed(&self) -> HashSet<String> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT DISTINCT file FROM embeddings") else {
+            return HashSet::new();
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+            return HashSet::new();
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
     pub fn all(&self) -> rusqlite::Result<Vec<EmbeddingRow>> {
         let mut stmt = self.conn.prepare("SELECT id, symbol_name, symbol_kind, file, text, embedding FROM embeddings")?;
         let rows = stmt.query_map([], |row| {
@@ -94,14 +140,6 @@ impl EmbeddingStore {
     pub fn count(&self) -> rusqlite::Result<usize> {
         self.conn.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
     }
-}
-
-pub struct NewEmbeddingRow {
-    pub symbol_name: String,
-    pub symbol_kind: String,
-    pub file: String,
-    pub text: String,
-    pub embedding: Vec<u8>,
 }
 
 pub fn float32_to_bytes(arr: &[f32]) -> Vec<u8> {

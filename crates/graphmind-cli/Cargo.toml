@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-cli"
-version = "0.2.45"
+version = "0.2.47"
 edition = "2021"
 license = "MIT"
 description = "Local-first code intelligence CLI"
@@ -30,3 +30,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
+graphmind-embeddings = { path = "../graphmind-embeddings" }
