@@ -56,7 +56,7 @@ fn deterministic_vector(text: &str, dims: usize) -> Vec<f32> {
 
 #[test]
 fn float32_roundtrip() {
-    let original = vec![1.0f32, -0.5, 0.0, 3.14159, f32::MIN, f32::MAX];
+    let original = vec![1.0f32, -0.5, 0.0, std::f32::consts::PI, f32::MIN, f32::MAX];
     let bytes = float32_to_bytes(&original);
     let recovered = bytes_to_float32(&bytes);
     assert_eq!(original.len(), recovered.len());
@@ -106,7 +106,7 @@ fn store_insert_batch() {
             symbol_kind: "function".to_string(),
             file: format!("src/file_{}.rs", i / 10),
             text: format!("fn sym_{i}()"),
-            embedding: float32_to_bytes(&vec![i as f32 / 100.0; 8]),
+            embedding: float32_to_bytes(&[i as f32 / 100.0; 8]),
         })
         .collect();
     store.insert_batch(&rows).unwrap();
