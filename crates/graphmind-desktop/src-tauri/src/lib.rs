@@ -40,6 +40,11 @@ pub fn run() {
             commands::settings::get_hook_status,
             commands::settings::install_claude_hook,
             commands::settings::uninstall_claude_hook,
+            commands::settings::get_git_hook_status,
+            commands::settings::install_git_hook,
+            commands::settings::uninstall_git_hook,
+            commands::settings::install_skill,
+            commands::settings::get_skill_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
