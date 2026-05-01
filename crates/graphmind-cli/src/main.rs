@@ -101,17 +101,16 @@ enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
-    /// Manage git hooks
-    Hooks {
+    /// Install components (hooks, skill)
+    Install {
         #[command(subcommand)]
-        action: HooksAction,
+        action: InstallAction,
     },
-    /// Install Claude Code skill
-    InstallSkill,
-    /// Install Claude Code search hook (redirects grep/find to graphmind)
-    InstallHook,
-    /// Uninstall Claude Code search hook
-    UninstallHook,
+    /// Uninstall components (hooks)
+    Uninstall {
+        #[command(subcommand)]
+        action: UninstallAction,
+    },
     /// Memory operations
     Memory {
         #[command(subcommand)]
@@ -256,13 +255,23 @@ enum SessionAction {
 }
 
 #[derive(clap::Subcommand)]
-enum HooksAction {
+enum InstallAction {
+    /// Install Claude Code search hook (redirects grep/find to graphmind)
+    HookClaude,
     /// Install git hooks (post-commit + pre-push)
-    Install {
+    HookGit {
         slug: Option<String>,
     },
+    /// Install Claude Code skill
+    Skill,
+}
+
+#[derive(clap::Subcommand)]
+enum UninstallAction {
+    /// Remove Claude Code search hook
+    HookClaude,
     /// Remove graphmind git hooks
-    Uninstall {
+    HookGit {
         slug: Option<String>,
     },
 }
@@ -367,23 +376,25 @@ fn main() {
                 commands::session::history(slug.as_deref(), limit);
             }
         },
-        Commands::Hooks { action } => match action {
-            HooksAction::Install { slug } => {
+        Commands::Install { action } => match action {
+            InstallAction::HookClaude => {
+                commands::claude_hook::install_hook();
+            }
+            InstallAction::HookGit { slug } => {
                 commands::hooks::install(slug.as_deref());
             }
-            HooksAction::Uninstall { slug } => {
+            InstallAction::Skill => {
+                commands::install_skill::install_skill();
+            }
+        },
+        Commands::Uninstall { action } => match action {
+            UninstallAction::HookClaude => {
+                commands::claude_hook::uninstall_hook();
+            }
+            UninstallAction::HookGit { slug } => {
                 commands::hooks::uninstall(slug.as_deref());
             }
         },
-        Commands::InstallSkill => {
-            commands::install_skill::install_skill();
-        }
-        Commands::InstallHook => {
-            commands::claude_hook::install_hook();
-        }
-        Commands::UninstallHook => {
-            commands::claude_hook::uninstall_hook();
-        }
         Commands::Memory { action } => match action {
             MemoryAction::Add {
                 content,

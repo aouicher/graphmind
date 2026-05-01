@@ -153,7 +153,7 @@ Re-run `graphmind sync` after each build to keep it current.
 Installs a Claude Code hook that transparently rewrites `grep`/`find`/`rg` commands to `graphmind search`. Claude gets graph-powered results without changing its workflow.
 
 ```bash
-graphmind install-hook
+graphmind install hook-claude
 ```
 
 This registers hooks in `~/.claude/settings.json` for:
@@ -166,7 +166,7 @@ The hook automatically bypasses rewriting for exhaustive searches (e.g., "find a
 
 To uninstall:
 ```bash
-graphmind uninstall-hook
+graphmind uninstall hook-claude
 ```
 
 ### 4. Claude Code skill (optional)
@@ -174,7 +174,7 @@ graphmind uninstall-hook
 Installs a skill that teaches Claude the 3-layer rule: query the graph first, check memory second, read raw files only when needed.
 
 ```bash
-graphmind install-skill
+graphmind install skill
 ```
 
 ### 5. Git hooks (optional)
@@ -182,7 +182,7 @@ graphmind install-skill
 Auto-rebuild on commit, impact check on push:
 
 ```bash
-graphmind hooks install
+graphmind install hook-git
 ```
 
 ### Multi-project setup
@@ -312,19 +312,15 @@ graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
 ```
 
-### Claude Code Integration
+### Install / Uninstall
 ```bash
-graphmind install-hook        # install search hook in Claude Code
-graphmind uninstall-hook      # remove search hook
-graphmind install-skill       # install Claude Code skill
-graphmind sync [slug]         # inject graph context into CLAUDE.md
-graphmind sync --all          # update CLAUDE.md for all projects
-```
-
-### Git Hooks
-```bash
-graphmind hooks install       # post-commit + pre-push
-graphmind hooks uninstall     # remove graphmind hooks
+graphmind install hook-claude     # Claude Code search hook
+graphmind install hook-git        # git hooks (post-commit + pre-push)
+graphmind install skill           # Claude Code skill
+graphmind uninstall hook-claude   # remove Claude Code hook
+graphmind uninstall hook-git      # remove git hooks
+graphmind sync [slug]             # inject graph context into CLAUDE.md
+graphmind sync --all              # update CLAUDE.md for all projects
 ```
 
 ## MCP Tools Reference
