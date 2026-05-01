@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api, ProjectInfo, EmbeddingSettings } from "../lib/tauri";
+import { api, ProjectInfo } from "../lib/tauri";
 import { Plus, X, Save, Brain } from "lucide-react";
 
 export function Settings() {
