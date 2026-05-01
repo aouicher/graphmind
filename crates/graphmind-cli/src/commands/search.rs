@@ -99,13 +99,20 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
 
     for hit in &results {
         let score_str = format!("{:.3}", hit.score);
+        let source = match (hit.from_fts, hit.from_sem) {
+            (true, true) => "FTS+SEM",
+            (true, false) => "FTS",
+            (false, true) => "SEM",
+            _ => "?",
+        };
         println!(
-            "  {} [{}] {}:{} ({})",
+            "  {} [{}] {}:{} ({}) [{}]",
             hit.name.bold(),
             hit.kind.yellow(),
             hit.file.dimmed(),
             hit.line,
-            score_str.dimmed()
+            score_str.dimmed(),
+            source.cyan()
         );
         if let Some(ref s) = hit.signature {
             if !s.is_empty() {
@@ -156,6 +163,8 @@ struct FusedHit {
     line: i64,
     signature: Option<String>,
     score: f64,
+    from_fts: bool,
+    from_sem: bool,
 }
 
 fn fuse_results(
@@ -170,10 +179,11 @@ fn fuse_results(
         let key = format!("{}:{}:{}", s.file, s.name, s.line_start);
         let rrf = 1.0 / (k + i as f64 + 1.0);
         scores.entry(key)
-            .and_modify(|e| e.score += rrf)
+            .and_modify(|e| { e.score += rrf; e.from_fts = true; })
             .or_insert_with(|| FusedHit {
                 name: s.name.clone(), kind: s.kind.clone(), file: s.file.clone(),
                 line: s.line_start, signature: s.signature.clone(), score: rrf,
+                from_fts: true, from_sem: false,
             });
     }
 
@@ -181,10 +191,11 @@ fn fuse_results(
         let key = format!("{}:{}:0", r.file, r.symbol_name);
         let rrf = 1.0 / (k + i as f64 + 1.0);
         scores.entry(key)
-            .and_modify(|e| e.score += rrf)
+            .and_modify(|e| { e.score += rrf; e.from_sem = true; })
             .or_insert_with(|| FusedHit {
                 name: r.symbol_name.clone(), kind: r.symbol_kind.clone(), file: r.file.clone(),
                 line: 0, signature: None, score: rrf,
+                from_fts: false, from_sem: true,
             });
     }
 
