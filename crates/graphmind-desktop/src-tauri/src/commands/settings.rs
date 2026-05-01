@@ -86,3 +86,68 @@ pub fn uninstall_claude_hook() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub fn get_git_hook_status(slug: Option<String>) -> bool {
+    let slug = slug.or_else(|| {
+        Registry::list().first().map(|p| p.slug.clone())
+    });
+    let Some(slug) = slug else { return false };
+    let project = Registry::get(&slug);
+    let Some(project) = project else { return false };
+    let hooks_dir = std::path::Path::new(&project.path).join(".git/hooks");
+    hooks_dir.join("post-commit").exists()
+        && std::fs::read_to_string(hooks_dir.join("post-commit"))
+            .map(|s| s.contains("graphmind"))
+            .unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn install_git_hook(slug: Option<String>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("graphmind");
+    cmd.args(["install", "hook-git"]);
+    if let Some(s) = &slug {
+        cmd.arg(s);
+    }
+    let output = cmd.output().map_err(|e| format!("Failed to run graphmind: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Install git hook failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn uninstall_git_hook(slug: Option<String>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("graphmind");
+    cmd.args(["uninstall", "hook-git"]);
+    if let Some(s) = &slug {
+        cmd.arg(s);
+    }
+    let output = cmd.output().map_err(|e| format!("Failed to run graphmind: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Uninstall git hook failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn install_skill() -> Result<(), String> {
+    let output = std::process::Command::new("graphmind")
+        .args(["install", "skill"])
+        .output()
+        .map_err(|e| format!("Failed to run graphmind: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Install skill failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_skill_status() -> bool {
+    let skill_path = dirs::home_dir()
+        .map(|h| h.join(".claude/skills/graphmind/SKILL.md"));
+    skill_path.map(|p| p.exists()).unwrap_or(false)
+}

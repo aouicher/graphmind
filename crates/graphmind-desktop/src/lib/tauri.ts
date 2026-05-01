@@ -83,4 +83,9 @@ export const api = {
   getHookStatus: () => invoke<boolean>("get_hook_status"),
   installClaudeHook: () => invoke<void>("install_claude_hook"),
   uninstallClaudeHook: () => invoke<void>("uninstall_claude_hook"),
+  getGitHookStatus: (slug?: string) => invoke<boolean>("get_git_hook_status", { slug: slug || null }),
+  installGitHook: (slug?: string) => invoke<void>("install_git_hook", { slug: slug || null }),
+  uninstallGitHook: (slug?: string) => invoke<void>("uninstall_git_hook", { slug: slug || null }),
+  getSkillStatus: () => invoke<boolean>("get_skill_status"),
+  installSkill: () => invoke<void>("install_skill"),
 };
