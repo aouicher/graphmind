@@ -15,7 +15,7 @@ if ! command -v graphmind &>/dev/null; then
 fi
 
 INPUT=$(cat)
-TOOL_NAME="${CLAUDE_TOOL_NAME:-}"
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
 
 # Check if we're in a graphmind-registered project
 PROJECT_STATUS=$(graphmind status 2>/dev/null)
