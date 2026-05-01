@@ -51,6 +51,43 @@ pub struct ProjectConfig {
     pub exclude: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum EmbeddingMode {
+    Local,
+    Openai,
+    Voyage,
+    #[default]
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ApiKeys {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openai: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voyage: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    pub mode: EmbeddingMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub api_keys: ApiKeys,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            mode: EmbeddingMode::Disabled,
+            model: None,
+            api_keys: ApiKeys::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub version: String,
@@ -58,6 +95,8 @@ pub struct GlobalConfig {
     pub global_exclude: Vec<String>,
     pub defaults: DefaultsConfig,
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
 }
 
 impl Default for GlobalConfig {
@@ -68,6 +107,7 @@ impl Default for GlobalConfig {
             global_exclude: Vec::new(),
             defaults: DefaultsConfig::default(),
             mcp: McpConfig::default(),
+            embedding: EmbeddingConfig::default(),
         }
     }
 }

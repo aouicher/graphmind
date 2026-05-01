@@ -5,7 +5,16 @@ edition = "2021"
 license = "MIT"
 description = "Optional embedding engine for graphmind semantic search"
 
+[features]
+default = ["local", "remote"]
+local = ["dep:fastembed"]
+remote = ["dep:reqwest", "dep:tokio"]
+
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+graphmind-config = { path = "../graphmind-config" }
+fastembed = { version = "4", optional = true }
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
