@@ -23,8 +23,8 @@ extract_pattern() {
       ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      # Extract pattern from grep/rg/ag commands
-      if echo "$CMD" | grep -qE '^\s*(grep|rg|ag)\b'; then
+      # Extract pattern from grep/rg/ag commands (may be prefixed with rtk)
+      if echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag)\b'; then
         # Try quoted pattern first, then unquoted
         PAT=$(echo "$CMD" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
         if [ -z "$PAT" ]; then
@@ -32,10 +32,10 @@ extract_pattern() {
         fi
         if [ -z "$PAT" ]; then
           # Last word before path/flags that looks like a pattern
-          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(grep|rg|ag)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*//' | awk '{print $1}')
+          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(rtk[[:space:]]+)?(grep|rg|ag)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*//' | awk '{print $1}')
         fi
         echo "$PAT"
-      elif echo "$CMD" | grep -qE '^\s*(find|fd)\b'; then
+      elif echo "$CMD" | grep -qE '^\s*(rtk\s+)?(find|fd)\b'; then
         # Extract -name pattern or fd pattern
         PAT=$(echo "$CMD" | grep -oE '\-name[[:space:]]+"?[^"]+' | sed 's/-name[[:space:]]*//' | tr -d '"')
         if [ -z "$PAT" ]; then
@@ -69,7 +69,7 @@ should_intercept() {
     Grep) return 0 ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      echo "$CMD" | grep -qE '^\s*(grep|rg|ag|find|fd)\b' && return 0
+      echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag|find|fd)\b' && return 0
       ;;
     Glob|LS) return 0 ;;
     Agent)
