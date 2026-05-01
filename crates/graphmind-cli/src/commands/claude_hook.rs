@@ -341,10 +341,6 @@ pub fn uninstall_hook() {
     println!("{} Hooks uninstalled", "OK".green().bold());
 }
 
-pub fn hook_status() -> bool {
-    hook_path().exists()
-}
-
 fn register_in_settings() -> Result<(), String> {
     let path = settings_path();
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
@@ -376,7 +372,7 @@ fn register_in_settings() -> Result<(), String> {
     for matcher_name in &pre_matchers {
         let has_graphmind = arr.iter().any(|entry| {
             entry.get("matcher").and_then(|m| m.as_str()) == Some(matcher_name)
-                && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+                && entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
                     hooks.iter().any(|h| {
                         h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                     })
@@ -394,7 +390,7 @@ fn register_in_settings() -> Result<(), String> {
     // Bash — merge with existing
     let has_graphmind_bash = arr.iter().any(|entry| {
         entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
-            && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+            && entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
                 hooks.iter().any(|h| {
                     h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                 })
@@ -425,7 +421,7 @@ fn register_in_settings() -> Result<(), String> {
     let session_arr = session_start.as_array_mut().ok_or("SessionStart is not an array")?;
 
     let has_graphmind_session = session_arr.iter().any(|entry| {
-        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+        entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
             hooks.iter().any(|h| {
                 h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
@@ -446,7 +442,7 @@ fn register_in_settings() -> Result<(), String> {
     let prompt_arr = user_prompt.as_array_mut().ok_or("UserPromptSubmit is not an array")?;
 
     let has_graphmind_prompt = prompt_arr.iter().any(|entry| {
-        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+        entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
             hooks.iter().any(|h| {
                 h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
@@ -467,7 +463,7 @@ fn register_in_settings() -> Result<(), String> {
     let post_arr = post_tool.as_array_mut().ok_or("PostToolUse is not an array")?;
 
     let has_graphmind_post = post_arr.iter().any(|entry| {
-        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+        entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
             hooks.iter().any(|h| {
                 h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
