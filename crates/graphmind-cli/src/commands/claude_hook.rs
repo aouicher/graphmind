@@ -2,81 +2,184 @@ use colored::Colorize;
 use std::fs;
 use std::path::PathBuf;
 
-const HOOK_SCRIPT: &str = r#"#!/usr/bin/env bash
-# graphmind Claude Code hook — reminds to use graphmind for code search
-# Intercepts Grep, Bash(grep/find/rg/ag), Glob, LS, and Agent(Explore) to suggest graphmind first.
+const PRE_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
+# graphmind PreToolUse hook — executes graphmind search and injects results
+# Also reminds to use graphmind MCP tools directly.
 
-if ! command -v jq &>/dev/null; then
-  exit 0
-fi
-
-if ! command -v graphmind &>/dev/null; then
-  exit 0
-fi
+if ! command -v jq &>/dev/null; then exit 0; fi
+if ! command -v graphmind &>/dev/null; then exit 0; fi
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
 
 # Check if we're in a graphmind-registered project
-PROJECT_STATUS=$(graphmind status 2>/dev/null)
-if [ $? -ne 0 ]; then
-  exit 0
-fi
+graphmind status &>/dev/null || exit 0
 
-should_intercept() {
+# Extract search pattern from the tool call
+extract_pattern() {
   case "$TOOL_NAME" in
     Grep)
-      return 0
+      echo "$INPUT" | jq -r '.tool_input.pattern // .tool_input.regex // empty'
       ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      if echo "$CMD" | grep -qE '^\s*(grep|rg|ag|find|fd)\b'; then
-        return 0
+      # Extract pattern from grep/rg commands
+      if echo "$CMD" | grep -qE '^\s*(grep|rg)'; then
+        echo "$CMD" | sed -E 's/^[[:space:]]*(grep|rg)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*"?([^"]+)"?.*/\3/' | head -1
       fi
       ;;
     Glob)
-      return 0
-      ;;
-    LS)
-      return 0
+      echo "$INPUT" | jq -r '.tool_input.pattern // empty'
       ;;
     Agent)
-      # Intercept Explore agents used for codebase search
-      SUBAGENT=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
-      PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
-      if [ "$SUBAGENT" = "Explore" ]; then
-        return 0
-      fi
-      # Also catch general agents doing exploration
-      if echo "$PROMPT" | grep -qiE 'search|find|explore|locate|where is|which file'; then
-        return 0
-      fi
+      echo "$INPUT" | jq -r '.tool_input.prompt // empty' | head -c 100
       ;;
   esac
+}
 
+should_intercept() {
+  case "$TOOL_NAME" in
+    Grep) return 0 ;;
+    Bash)
+      CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+      echo "$CMD" | grep -qE '^\s*(grep|rg|ag|find|fd)\b' && return 0
+      ;;
+    Glob|LS) return 0 ;;
+    Agent)
+      SUBAGENT=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
+      [ "$SUBAGENT" = "Explore" ] && return 0
+      PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
+      echo "$PROMPT" | grep -qiE 'search|find|explore|locate|where is|which file|architecture|structure' && return 0
+      ;;
+  esac
   return 1
 }
 
-if ! should_intercept; then
-  exit 0
+if ! should_intercept; then exit 0; fi
+
+# Execute graphmind search and include results
+PATTERN=$(extract_pattern)
+RESULTS=""
+if [ -n "$PATTERN" ] && [ ${#PATTERN} -lt 200 ]; then
+  RESULTS=$(graphmind search "$PATTERN" --limit 10 2>/dev/null | head -50)
 fi
 
-# Different messages based on tool type
-case "$TOOL_NAME" in
-  Agent)
-    MSG="⚡ graphmind is indexed for this project. Before spawning an exploration agent, use graphmind directly:\n- MCP \`gm_search\` for semantic symbol search\n- MCP \`gm_fn\` for function lookup with source\n- MCP \`gm_deps\` for file dependencies\n- MCP \`gm_map\` for project overview\n- MCP \`gm_outline\` for file structure\nOnly spawn an Explore agent if graphmind cannot answer (e.g., non-code files, runtime behavior, config analysis)."
-    ;;
-  Glob|LS)
-    MSG="⚡ graphmind is indexed for this project. Before browsing the file tree, prefer:\n- MCP \`gm_map\` for project structure overview\n- MCP \`gm_outline\` for file symbols\n- MCP \`gm_search\` to find files/symbols by intent\nOnly use Glob/LS if graphmind cannot answer (e.g., checking non-code files, build outputs, configs)."
-    ;;
-  *)
-    MSG="⚡ graphmind is indexed for this project. Before grep/find, prefer:\n- MCP \`gm_search\` for semantic symbol search\n- MCP \`gm_fn\` for function lookup with source\n- MCP \`gm_deps\` for file dependencies\n- MCP \`gm_query\` for symbol resolution\nOnly fall back to grep/find if graphmind cannot answer (e.g., string literals, config values, non-code patterns)."
-    ;;
-esac
+# Build context message
+if [ -n "$RESULTS" ]; then
+  MSG="⚡ graphmind results for \"$PATTERN\":\n$RESULTS\n\n→ Use MCP tools (gm_fn, gm_search, gm_deps, gm_map) for deeper queries. Only use grep/find for string literals or non-code patterns."
+else
+  case "$TOOL_NAME" in
+    Agent)
+      MSG="⚡ graphmind is indexed for this project. Use MCP tools directly instead of spawning an Explore agent:\n- gm_search: semantic symbol search\n- gm_fn: function lookup with source\n- gm_deps: file dependencies\n- gm_map: project overview\n- gm_outline: file structure"
+      ;;
+    Glob|LS)
+      MSG="⚡ graphmind is indexed. Use MCP gm_map for structure, gm_outline for file symbols, gm_search to find by intent."
+      ;;
+    *)
+      MSG="⚡ graphmind is indexed. Use MCP gm_search, gm_fn, gm_deps, gm_query instead of grep/find for code patterns."
+      ;;
+  esac
+fi
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
+    "additionalContext": $msg
+  }
+}'
+"#;
+
+const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
+# graphmind SessionStart hook — auto-loads project context at session start
+
+if ! command -v jq &>/dev/null; then exit 0; fi
+if ! command -v graphmind &>/dev/null; then exit 0; fi
+
+# Check if we're in a graphmind-registered project
+graphmind status &>/dev/null || exit 0
+
+# Get project summary
+STATUS=$(graphmind status 2>/dev/null | head -10)
+MAP=$(graphmind map 2>/dev/null | head -30)
+
+MSG="[graphmind] Project indexed and ready. Use MCP tools (gm_search, gm_fn, gm_deps, gm_map, gm_outline, gm_query) for ALL code exploration before grep/find/ls.\n\nProject status:\n$STATUS\n\nTop-level structure:\n$MAP"
+
+jq -n --arg msg "$MSG" '{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": $msg
+  }
+}'
+"#;
+
+const USER_PROMPT_HOOK: &str = r#"#!/usr/bin/env bash
+# graphmind UserPromptSubmit hook — pre-fetches context for exploration questions
+
+if ! command -v jq &>/dev/null; then exit 0; fi
+if ! command -v graphmind &>/dev/null; then exit 0; fi
+
+INPUT=$(cat)
+PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // .prompt // empty')
+
+# Only activate for exploration-type questions
+if ! echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour'; then
+  exit 0
+fi
+
+# Check if we're in a graphmind-registered project
+graphmind status &>/dev/null || exit 0
+
+# Extract likely search terms (first meaningful words after question words)
+SEARCH_TERMS=$(echo "$PROMPT" | sed -E 's/(comment|how|where|what|who|show|montre|explique|explain|trace|parcour)[[:space:]]+(does|is|me|moi|la|le|les|the|this)?[[:space:]]*//' | head -c 80)
+
+RESULTS=""
+if [ -n "$SEARCH_TERMS" ]; then
+  RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
+fi
+
+if [ -n "$RESULTS" ]; then
+  MSG="[graphmind pre-fetch] Relevant symbols found for this query:\n$RESULTS\n\n→ Use MCP tools (gm_fn, gm_deps, gm_map, gm_outline) to explore further. Avoid grep/find/ls for code navigation."
+else
+  MSG="[graphmind] This project is indexed. Use MCP tools (gm_fn, gm_search, gm_deps, gm_map) for code exploration instead of grep/find/ls."
+fi
+
+jq -n --arg msg "$MSG" '{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": $msg
+  }
+}'
+"#;
+
+const POST_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
+# graphmind PostToolUse hook — feedback after grep/ls that could have used graphmind
+
+if ! command -v jq &>/dev/null; then exit 0; fi
+if ! command -v graphmind &>/dev/null; then exit 0; fi
+
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
+
+# Only trigger on tools that could have been replaced
+case "$TOOL_NAME" in
+  Grep|Bash|Glob|LS) ;;
+  *) exit 0 ;;
+esac
+
+# Check if we're in a graphmind-registered project
+graphmind status &>/dev/null || exit 0
+
+# Check output size — only warn on large outputs (>20 lines indicates broad search)
+OUTPUT_LINES=$(echo "$INPUT" | jq -r '.tool_output // .output // empty' | wc -l)
+if [ "$OUTPUT_LINES" -lt 20 ]; then
+  exit 0
+fi
+
+MSG="Note: this search returned ${OUTPUT_LINES}+ lines. For code navigation, graphmind MCP tools (gm_search, gm_fn, gm_deps) are faster and more precise. Reserve grep/find for string literals and non-code patterns."
+
+jq -n --arg msg "$MSG" '{
+  "hookSpecificOutput": {
+    "hookEventName": "PostToolUse",
     "additionalContext": $msg
   }
 }'
@@ -93,6 +196,18 @@ fn hook_path() -> PathBuf {
     hooks_dir().join("graphmind-search.sh")
 }
 
+fn session_hook_path() -> PathBuf {
+    hooks_dir().join("graphmind-session.sh")
+}
+
+fn prompt_hook_path() -> PathBuf {
+    hooks_dir().join("graphmind-prompt.sh")
+}
+
+fn post_hook_path() -> PathBuf {
+    hooks_dir().join("graphmind-post.sh")
+}
+
 fn settings_path() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
@@ -107,49 +222,59 @@ pub fn install_hook() {
         std::process::exit(1);
     });
 
-    let path = hook_path();
-    fs::write(&path, HOOK_SCRIPT).unwrap_or_else(|e| {
-        eprintln!("{} Failed to write hook script: {}", "Error:".red().bold(), e);
-        std::process::exit(1);
-    });
+    // Write all hook scripts
+    let hook_p = hook_path();
+    let session_p = session_hook_path();
+    let prompt_p = prompt_hook_path();
+    let post_p = post_hook_path();
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).ok();
+    let scripts = [
+        (&hook_p, PRE_TOOL_HOOK, "PreToolUse"),
+        (&session_p, SESSION_START_HOOK, "SessionStart"),
+        (&prompt_p, USER_PROMPT_HOOK, "UserPromptSubmit"),
+        (&post_p, POST_TOOL_HOOK, "PostToolUse"),
+    ];
+
+    for (path, content, name) in &scripts {
+        fs::write(path, content).unwrap_or_else(|e| {
+            eprintln!("{} Failed to write {} hook: {}", "Error:".red().bold(), name, e);
+            std::process::exit(1);
+        });
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(*path, fs::Permissions::from_mode(0o755)).ok();
+        }
+
+        println!("{} {} hook → {}", "OK".green().bold(), name, path.display());
     }
 
-    // Register hook in Claude Code settings.json
+    // Register hooks in Claude Code settings.json
     if let Err(e) = register_in_settings() {
-        eprintln!("{} Hook script installed but failed to register in settings: {}", "Warning:".yellow().bold(), e);
-        println!("  Manually add the hook to ~/.claude/settings.json under hooks.PreToolUse");
+        eprintln!("{} Hooks installed but failed to register in settings: {}", "Warning:".yellow().bold(), e);
+        println!("  Manually add hooks to ~/.claude/settings.json");
     } else {
-        println!("{} Hook registered in Claude Code settings", "OK".green().bold());
+        println!("{} All hooks registered in Claude Code settings", "OK".green().bold());
     }
-
-    println!(
-        "{} Hook installed to {}",
-        "OK".green().bold(),
-        path.display()
-    );
 }
 
 pub fn uninstall_hook() {
-    let path = hook_path();
-    if path.exists() {
-        fs::remove_file(&path).unwrap_or_else(|e| {
-            eprintln!("{} Failed to remove hook: {}", "Error:".red().bold(), e);
-            std::process::exit(1);
-        });
+    let paths = [hook_path(), session_hook_path(), prompt_hook_path(), post_hook_path()];
+
+    for path in &paths {
+        if path.exists() {
+            fs::remove_file(path).ok();
+        }
     }
 
     if let Err(e) = unregister_from_settings() {
         eprintln!("{} Failed to unregister from settings: {}", "Warning:".yellow().bold(), e);
     } else {
-        println!("{} Hook unregistered from Claude Code settings", "OK".green().bold());
+        println!("{} All hooks unregistered from Claude Code settings", "OK".green().bold());
     }
 
-    println!("{} Hook uninstalled", "OK".green().bold());
+    println!("{} Hooks uninstalled", "OK".green().bold());
 }
 
 pub fn hook_status() -> bool {
@@ -169,21 +294,22 @@ fn register_in_settings() -> Result<(), String> {
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
 
-    let pre_tool_use = hooks
-        .as_object_mut()
-        .ok_or("hooks is not an object")?
+    let hooks_obj = hooks.as_object_mut().ok_or("hooks is not an object")?;
+
+    let hook_cmd = hook_path().to_string_lossy().to_string();
+    let session_cmd = session_hook_path().to_string_lossy().to_string();
+    let prompt_cmd = prompt_hook_path().to_string_lossy().to_string();
+    let post_cmd = post_hook_path().to_string_lossy().to_string();
+
+    // --- PreToolUse ---
+    let pre_tool_use = hooks_obj
         .entry("PreToolUse")
         .or_insert_with(|| serde_json::json!([]));
 
-    let arr = pre_tool_use
-        .as_array_mut()
-        .ok_or("PreToolUse is not an array")?;
+    let arr = pre_tool_use.as_array_mut().ok_or("PreToolUse is not an array")?;
 
-    let hook_cmd = hook_path().to_string_lossy().to_string();
-
-    let matchers_to_add = ["Grep", "Glob", "LS", "Agent"];
-
-    for matcher_name in &matchers_to_add {
+    let pre_matchers = ["Grep", "Glob", "LS", "Agent"];
+    for matcher_name in &pre_matchers {
         let has_graphmind = arr.iter().any(|entry| {
             entry.get("matcher").and_then(|m| m.as_str()) == Some(matcher_name)
                 && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
@@ -201,7 +327,7 @@ fn register_in_settings() -> Result<(), String> {
         }
     }
 
-    // For Bash, add our hook to the existing Bash matcher or create a new one
+    // Bash — merge with existing
     let has_graphmind_bash = arr.iter().any(|entry| {
         entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
             && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
@@ -214,11 +340,6 @@ fn register_in_settings() -> Result<(), String> {
     if !has_graphmind_bash {
         let existing_bash = arr.iter_mut().find(|entry| {
             entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
-                && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
-                    !hooks.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
-                    })
-                })
         });
 
         if let Some(bash_matcher) = existing_bash {
@@ -229,6 +350,72 @@ fn register_in_settings() -> Result<(), String> {
             arr.push(serde_json::json!({
                 "matcher": "Bash",
                 "hooks": [{"type": "command", "command": &hook_cmd}]
+            }));
+        }
+    }
+
+    // --- SessionStart ---
+    let session_start = hooks_obj
+        .entry("SessionStart")
+        .or_insert_with(|| serde_json::json!([]));
+    let session_arr = session_start.as_array_mut().ok_or("SessionStart is not an array")?;
+
+    let has_graphmind_session = session_arr.iter().any(|entry| {
+        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+            hooks.iter().any(|h| {
+                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+            })
+        })
+    });
+
+    if !has_graphmind_session {
+        session_arr.push(serde_json::json!({
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": &session_cmd}]
+        }));
+    }
+
+    // --- UserPromptSubmit ---
+    let user_prompt = hooks_obj
+        .entry("UserPromptSubmit")
+        .or_insert_with(|| serde_json::json!([]));
+    let prompt_arr = user_prompt.as_array_mut().ok_or("UserPromptSubmit is not an array")?;
+
+    let has_graphmind_prompt = prompt_arr.iter().any(|entry| {
+        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+            hooks.iter().any(|h| {
+                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+            })
+        })
+    });
+
+    if !has_graphmind_prompt {
+        prompt_arr.push(serde_json::json!({
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": &prompt_cmd}]
+        }));
+    }
+
+    // --- PostToolUse ---
+    let post_tool = hooks_obj
+        .entry("PostToolUse")
+        .or_insert_with(|| serde_json::json!([]));
+    let post_arr = post_tool.as_array_mut().ok_or("PostToolUse is not an array")?;
+
+    let has_graphmind_post = post_arr.iter().any(|entry| {
+        entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+            hooks.iter().any(|h| {
+                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+            })
+        })
+    });
+
+    if !has_graphmind_post {
+        let post_matchers = ["Grep", "Bash", "Glob", "LS"];
+        for matcher_name in &post_matchers {
+            post_arr.push(serde_json::json!({
+                "matcher": matcher_name,
+                "hooks": [{"type": "command", "command": &post_cmd}]
             }));
         }
     }
@@ -251,29 +438,37 @@ fn unregister_from_settings() -> Result<(), String> {
         .map_err(|e| format!("Failed to parse settings.json: {}", e))?;
 
     if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-        if let Some(pre_tool_use) = hooks.get_mut("PreToolUse").and_then(|p| p.as_array_mut()) {
-            // Remove entries that only have graphmind hooks
-            pre_tool_use.retain(|entry| {
-                let hooks_arr = entry.get("hooks").and_then(|h| h.as_array());
-                if let Some(hooks) = hooks_arr {
-                    // If all hooks in this entry are graphmind, remove the whole entry
-                    let all_graphmind = hooks.iter().all(|h| {
-                        h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
-                    });
-                    if all_graphmind {
-                        return false;
+        let events = ["PreToolUse", "SessionStart", "UserPromptSubmit", "PostToolUse"];
+
+        for event in &events {
+            if let Some(arr) = hooks.get_mut(*event).and_then(|p| p.as_array_mut()) {
+                // Remove entries that only have graphmind hooks
+                arr.retain(|entry| {
+                    let hooks_arr = entry.get("hooks").and_then(|h| h.as_array());
+                    if let Some(hooks) = hooks_arr {
+                        let all_graphmind = hooks.iter().all(|h| {
+                            h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                        });
+                        if all_graphmind {
+                            return false;
+                        }
+                    }
+                    true
+                });
+
+                // For entries with mixed hooks, remove only graphmind ones
+                for entry in arr.iter_mut() {
+                    if let Some(hooks_arr) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                        hooks_arr.retain(|h| {
+                            !h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                        });
                     }
                 }
-                true
-            });
 
-            // For entries with mixed hooks, just remove the graphmind ones
-            for entry in pre_tool_use.iter_mut() {
-                if let Some(hooks_arr) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-                    hooks_arr.retain(|h| {
-                        !h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
-                    });
-                }
+                // Remove entries with empty hooks arrays
+                arr.retain(|entry| {
+                    entry.get("hooks").and_then(|h| h.as_array()).map_or(true, |hooks| !hooks.is_empty())
+                });
             }
         }
     }

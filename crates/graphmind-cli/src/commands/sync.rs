@@ -115,11 +115,25 @@ fn build_section(slug: &str) -> String {
             lines.push("MCP: `graphmind mcp` (stdio)".to_string());
 
             lines.push(String::new());
-            lines.push("### Before editing anything".to_string());
-            lines.push("- Symbol: `graphmind fn <symbol> --no-tests`".to_string());
-            lines.push("- File: `graphmind deps <file>`".to_string());
-            lines.push("- Git changes: `graphmind diff-impact`".to_string());
-            lines.push("- Find by intent: `graphmind search \"handle auth; validate token\"`".to_string());
+            lines.push("### MANDATORY: use graphmind for ALL code exploration".to_string());
+            lines.push("NEVER use grep/find/ls/Glob to search code. Use graphmind MCP tools:".to_string());
+            lines.push(String::new());
+            lines.push("| Need | MCP tool | CLI equivalent |".to_string());
+            lines.push("|------|----------|----------------|".to_string());
+            lines.push("| Find symbol | `gm_fn` | `graphmind fn <name>` |".to_string());
+            lines.push("| Search by intent | `gm_search` | `graphmind search \"<query>\"` |".to_string());
+            lines.push("| File dependencies | `gm_deps` | `graphmind deps <file>` |".to_string());
+            lines.push("| Symbol resolution | `gm_query` | `graphmind query <name>` |".to_string());
+            lines.push("| Blast radius | `gm_fn_impact` | `graphmind fn-impact <name>` |".to_string());
+            lines.push("| Git diff impact | `gm_diff_impact` | `graphmind diff-impact` |".to_string());
+            lines.push("| Project overview | `gm_map` | `graphmind map` |".to_string());
+            lines.push("| File outline | `gm_outline` | `graphmind outline <file>` |".to_string());
+            lines.push("| Who calls chain | `gm_who_calls_chain` | — |".to_string());
+            lines.push("| Dead code | `gm_dead_code` | — |".to_string());
+            lines.push("| Cross-project | `gm_cross_query` | `graphmind cross query` |".to_string());
+            lines.push("| Memory search | `gm_memory_search` | `graphmind memory search` |".to_string());
+            lines.push(String::new());
+            lines.push("Only fall back to grep/find for: string literals, config values, non-code patterns.".to_string());
 
             lines.push(String::new());
             lines.push("### Rebuild when".to_string());
