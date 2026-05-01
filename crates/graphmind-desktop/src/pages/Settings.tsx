@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save, Zap, GitBranch, BookOpen, Check } from "lucide-react";
+import { Plus, X, Save } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -10,19 +10,10 @@ export function Settings() {
   const [newGlobal, setNewGlobal] = useState("");
   const [newProject, setNewProject] = useState("");
   const [saving, setSaving] = useState(false);
-  const [hookEnabled, setHookEnabled] = useState(false);
-  const [hookLoading, setHookLoading] = useState(false);
-  const [gitHookEnabled, setGitHookEnabled] = useState(false);
-  const [gitHookLoading, setGitHookLoading] = useState(false);
-  const [skillInstalled, setSkillInstalled] = useState(false);
-  const [skillLoading, setSkillLoading] = useState(false);
 
   useEffect(() => {
     api.listProjects().then(setProjects);
     api.getExcludes().then((s) => setGlobalExcludes(s.global));
-    api.getHookStatus().then(setHookEnabled);
-    api.getGitHookStatus().then(setGitHookEnabled);
-    api.getSkillStatus().then(setSkillInstalled);
   }, []);
 
   useEffect(() => {
@@ -62,138 +53,10 @@ export function Settings() {
     }
   };
 
-  const toggleHook = async () => {
-    setHookLoading(true);
-    try {
-      if (hookEnabled) {
-        await api.uninstallClaudeHook();
-        setHookEnabled(false);
-      } else {
-        await api.installClaudeHook();
-        setHookEnabled(true);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setHookLoading(false);
-  };
-
-  const toggleGitHook = async () => {
-    setGitHookLoading(true);
-    try {
-      if (gitHookEnabled) {
-        await api.uninstallGitHook(selectedProject || undefined);
-        setGitHookEnabled(false);
-      } else {
-        await api.installGitHook(selectedProject || undefined);
-        setGitHookEnabled(true);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setGitHookLoading(false);
-  };
-
-  const handleInstallSkill = async () => {
-    setSkillLoading(true);
-    try {
-      await api.installSkill();
-      setSkillInstalled(true);
-    } catch (e) {
-      console.error(e);
-    }
-    setSkillLoading(false);
-  };
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-8">
       <h1 className="text-lg font-semibold text-text-primary">Settings</h1>
-
-      {/* Claude Code Integration */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-text-primary">Claude Code Integration</h2>
-
-        {/* Search Hook */}
-        <div className="flex items-center justify-between p-3 bg-bg-card rounded-lg border border-border">
-          <div className="flex items-center gap-3">
-            <Zap className={`w-4 h-4 ${hookEnabled ? "text-accent" : "text-text-muted"}`} />
-            <div>
-              <p className="text-sm text-text-primary">Search Hook</p>
-              <p className="text-xs text-text-muted">
-                Redirects grep/find to graphmind for structural code search
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={toggleHook}
-            disabled={hookLoading}
-            className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
-              hookEnabled ? "bg-accent" : "bg-border"
-            } ${hookLoading ? "opacity-50" : ""}`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
-                hookEnabled ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Git Hooks */}
-        <div className="flex items-center justify-between p-3 bg-bg-card rounded-lg border border-border">
-          <div className="flex items-center gap-3">
-            <GitBranch className={`w-4 h-4 ${gitHookEnabled ? "text-accent" : "text-text-muted"}`} />
-            <div>
-              <p className="text-sm text-text-primary">Git Hooks</p>
-              <p className="text-xs text-text-muted">
-                Auto-rebuild on commit, impact check on push
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={toggleGitHook}
-            disabled={gitHookLoading}
-            className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
-              gitHookEnabled ? "bg-accent" : "bg-border"
-            } ${gitHookLoading ? "opacity-50" : ""}`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
-                gitHookEnabled ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Skill */}
-        <div className="flex items-center justify-between p-3 bg-bg-card rounded-lg border border-border">
-          <div className="flex items-center gap-3">
-            <BookOpen className={`w-4 h-4 ${skillInstalled ? "text-accent" : "text-text-muted"}`} />
-            <div>
-              <p className="text-sm text-text-primary">Claude Code Skill</p>
-              <p className="text-xs text-text-muted">
-                Teaches Claude the 3-layer rule: graph first, memory second, files last
-              </p>
-            </div>
-          </div>
-          {skillInstalled ? (
-            <span className="flex items-center gap-1 text-xs text-accent">
-              <Check className="w-3.5 h-3.5" />
-              Installed
-            </span>
-          ) : (
-            <button
-              onClick={handleInstallSkill}
-              disabled={skillLoading}
-              className={`px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 ${
-                skillLoading ? "opacity-50" : ""
-              }`}
-            >
-              {skillLoading ? "Installing..." : "Install"}
-            </button>
-          )}
-        </div>
-      </section>
 
       <h2 className="text-lg font-semibold text-text-primary">Exclusions</h2>
 
