@@ -1,7 +1,10 @@
 use graphmind_config::{paths, Registry, resolve_project_slug};
+use graphmind_config::config::{EmbeddingMode, load_config};
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
+use graphmind_embeddings::factory::create_engine;
+use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde_json::json;
 use std::path::Path;
@@ -128,6 +131,12 @@ fn build_single(slug: &str, full: bool) {
     let meta_path = paths::meta_path(slug);
     std::fs::write(meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()).ok();
 
+    // Embedding step
+    let global_config = load_config();
+    if global_config.embedding.mode != EmbeddingMode::Disabled {
+        run_embedding_step(slug, &queries, &global_config.embedding);
+    }
+
     println!(
         "{} {} | {} symbols | {} edges | {} files processed | {} skipped | {} deleted | {}ms",
         "OK".green().bold(),
@@ -139,6 +148,125 @@ fn build_single(slug: &str, full: bool) {
         result.deleted.to_string().red(),
         result.duration_ms
     );
+}
+
+fn run_embedding_step(
+    slug: &str,
+    queries: &GraphQueries,
+    config: &graphmind_config::config::EmbeddingConfig,
+) {
+    let engine = match create_engine(config) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("{} Embeddings: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    let emb_db_path = paths::embedding_db_path(slug);
+    let store = match EmbeddingStore::open(&emb_db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{} Embedding store: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    // Check model compatibility — re-index if model changed
+    let current_model = format!("{}:{}", engine.provider_name(), engine.model_id());
+    if let Some(stored_model) = store.get_meta("model") {
+        if stored_model != current_model {
+            println!(
+                "{} Embedding model changed ({} → {}), re-indexing...",
+                ">>".cyan().bold(),
+                stored_model.dimmed(),
+                current_model.cyan()
+            );
+            store.clear().ok();
+        }
+    }
+    store.set_meta("model", &current_model).ok();
+
+    let indexed_files = store.files_indexed();
+    let all_symbols = queries.all_symbols();
+
+    // Find files that need embedding (new or re-processed by graph build)
+    let files_in_graph: std::collections::HashSet<String> =
+        all_symbols.iter().map(|s| s.file.clone()).collect();
+
+    // Remove embeddings for files no longer in graph
+    for old_file in &indexed_files {
+        if !files_in_graph.contains(old_file) {
+            store.delete_by_file(old_file).ok();
+        }
+    }
+
+    // Collect symbols from files not yet indexed
+    let new_symbols: Vec<_> = all_symbols
+        .iter()
+        .filter(|s| !indexed_files.contains(&s.file))
+        .filter(|s| s.content.is_some() || s.signature.is_some())
+        .collect();
+
+    if new_symbols.is_empty() {
+        return;
+    }
+
+    println!(
+        "{} Embedding {} symbols across {} new files...",
+        ">>".cyan().bold(),
+        new_symbols.len(),
+        new_symbols.iter().map(|s| &s.file).collect::<std::collections::HashSet<_>>().len()
+    );
+
+    // Build texts for embedding
+    let texts: Vec<String> = new_symbols
+        .iter()
+        .map(|s| {
+            let mut t = format!("{} {} ({})", s.kind, s.name, s.file);
+            if let Some(sig) = &s.signature {
+                t.push_str(&format!("\n{sig}"));
+            }
+            if let Some(content) = &s.content {
+                let truncated: String = content.chars().take(512).collect();
+                t.push_str(&format!("\n{truncated}"));
+            }
+            t
+        })
+        .collect();
+
+    let text_refs: Vec<&str> = texts.iter().map(|t| t.as_str()).collect();
+
+    // Embed in batches
+    match engine.embed_batch(&text_refs) {
+        Ok(embeddings) => {
+            let rows: Vec<NewEmbeddingRow> = new_symbols
+                .iter()
+                .zip(embeddings.iter())
+                .map(|(sym, emb)| NewEmbeddingRow {
+                    symbol_name: sym.name.clone(),
+                    symbol_kind: sym.kind.clone(),
+                    file: sym.file.clone(),
+                    text: texts[new_symbols.iter().position(|s| s.id == sym.id).unwrap()].clone(),
+                    embedding: float32_to_bytes(emb),
+                })
+                .collect();
+
+            if let Err(e) = store.insert_batch(&rows) {
+                eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
+            } else {
+                println!(
+                    "{} Embedded {} symbols ({})",
+                    "OK".green().bold(),
+                    rows.len(),
+                    current_model.dimmed()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e);
+        }
+    }
 }
 
 fn watch_project(slug: &str) {

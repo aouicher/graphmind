@@ -3,11 +3,12 @@ use crate::engine::{EmbedError, EmbeddingEngine};
 pub struct OpenAiEngine {
     api_key: String,
     model: String,
+    base_url: String,
     dims: usize,
 }
 
 impl OpenAiEngine {
-    pub fn new(api_key: &str, model: &str) -> Self {
+    pub fn new(api_key: &str, model: &str, base_url: Option<&str>) -> Self {
         let dims = match model {
             "text-embedding-3-small" => 1536,
             "text-embedding-3-large" => 3072,
@@ -17,6 +18,10 @@ impl OpenAiEngine {
         Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
+            base_url: base_url
+                .unwrap_or("https://api.openai.com/v1")
+                .trim_end_matches('/')
+                .to_string(),
             dims,
         }
     }
@@ -28,8 +33,9 @@ impl OpenAiEngine {
             "model": self.model,
         });
 
+        let url = format!("{}/embeddings", self.base_url);
         let resp = client
-            .post("https://api.openai.com/v1/embeddings")
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
             .send()

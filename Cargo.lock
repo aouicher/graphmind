@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "chrono",
  "clap",
@@ -1850,6 +1850,7 @@ dependencies = [
  "graphmind-config",
  "graphmind-core",
  "graphmind-db",
+ "graphmind-embeddings",
  "graphmind-mcp",
  "graphmind-memory",
  "notify",
@@ -1862,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1872,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "napi",
  "napi-build",
@@ -1914,7 +1915,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1930,7 +1931,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1952,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "fastembed",
  "graphmind-config",
@@ -1960,15 +1961,18 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "dirs 5.0.1",
+ "graphmind-config",
  "graphmind-db",
+ "graphmind-embeddings",
  "graphmind-memory",
  "rmcp",
  "serde",
@@ -1978,7 +1982,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.45"
+version = "0.2.46"
 dependencies = [
  "chrono",
  "graphmind-db",

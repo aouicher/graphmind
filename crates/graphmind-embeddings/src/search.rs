@@ -67,12 +67,10 @@ fn rrf_merge(rankings: &[Vec<SearchResult>], k: usize) -> Vec<SearchResult> {
     results
 }
 
-pub type EmbedFn = dyn Fn(&str) -> Option<Vec<f32>>;
-
 pub fn semantic_search(
     db_path: &Path,
     query: &str,
-    embed_fn: &EmbedFn,
+    embed_fn: &dyn Fn(&str) -> Option<Vec<f32>>,
     limit: usize,
     kind_filter: Option<&str>,
 ) -> Vec<SearchResult> {

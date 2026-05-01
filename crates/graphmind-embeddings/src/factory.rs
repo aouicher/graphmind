@@ -24,7 +24,8 @@ pub fn create_engine(config: &EmbeddingConfig) -> Result<Box<dyn EmbeddingEngine
                 .as_deref()
                 .ok_or_else(|| EmbedError::NotConfigured("OpenAI API key not set".into()))?;
             let model = config.model.as_deref().unwrap_or("text-embedding-3-small");
-            Ok(Box::new(crate::openai::OpenAiEngine::new(key, model)))
+            let base_url = config.openai_base_url.as_deref();
+            Ok(Box::new(crate::openai::OpenAiEngine::new(key, model, base_url)))
         }
         EmbeddingMode::Voyage => {
             let key = config

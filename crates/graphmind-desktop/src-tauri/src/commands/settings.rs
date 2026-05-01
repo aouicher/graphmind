@@ -1,5 +1,5 @@
 use graphmind_config::{load_config, save_config, Registry};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[tauri::command]
@@ -150,4 +150,76 @@ pub fn get_skill_status() -> bool {
     let skill_path = dirs::home_dir()
         .map(|h| h.join(".claude/skills/graphmind/SKILL.md"));
     skill_path.map(|p| p.exists()).unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// Embedding settings
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct EmbeddingSettings {
+    pub mode: String,
+    pub model: Option<String>,
+    pub openai_base_url: Option<String>,
+    pub openai_key: Option<String>,
+    pub voyage_key: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_embedding_settings() -> EmbeddingSettings {
+    let config = load_config();
+    let emb = &config.embedding;
+    EmbeddingSettings {
+        mode: format!("{:?}", emb.mode).to_lowercase(),
+        model: emb.model.clone(),
+        openai_base_url: emb.openai_base_url.clone(),
+        openai_key: emb.api_keys.openai.as_deref().map(mask_key),
+        voyage_key: emb.api_keys.voyage.as_deref().map(mask_key),
+    }
+}
+
+fn mask_key(key: &str) -> String {
+    if key.len() <= 8 {
+        "****".to_string()
+    } else {
+        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+    }
+}
+
+#[derive(Deserialize)]
+pub struct EmbeddingSettingsInput {
+    pub mode: String,
+    pub model: Option<String>,
+    pub openai_base_url: Option<String>,
+    pub openai_key: Option<String>,
+    pub voyage_key: Option<String>,
+}
+
+#[tauri::command]
+pub fn set_embedding_settings(settings: EmbeddingSettingsInput) -> Result<(), String> {
+    use graphmind_config::config::EmbeddingMode;
+
+    let mut config = load_config();
+    config.embedding.mode = match settings.mode.as_str() {
+        "local" => EmbeddingMode::Local,
+        "openai" => EmbeddingMode::Openai,
+        "voyage" => EmbeddingMode::Voyage,
+        _ => EmbeddingMode::Disabled,
+    };
+    config.embedding.model = settings.model.filter(|s| !s.is_empty());
+    config.embedding.openai_base_url = settings.openai_base_url.filter(|s| !s.is_empty());
+
+    if let Some(key) = settings.openai_key {
+        if !key.is_empty() && !key.contains("...") {
+            config.embedding.api_keys.openai = Some(key);
+        }
+    }
+    if let Some(key) = settings.voyage_key {
+        if !key.is_empty() && !key.contains("...") {
+            config.embedding.api_keys.voyage = Some(key);
+        }
+    }
+
+    save_config(&config);
+    Ok(())
 }

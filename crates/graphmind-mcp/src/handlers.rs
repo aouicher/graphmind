@@ -860,6 +860,9 @@ fn handle_search(args: &Value) -> Value {
         all_project_slugs()
     };
 
+    // Load embedding engine if configured
+    let embed_engine = load_embed_engine();
+
     let mut all_results: Vec<Value> = Vec::new();
     let mut total_found = 0;
 
@@ -875,28 +878,46 @@ fn handle_search(args: &Value) -> Value {
         };
         let gq = GraphQueries::new(&conn);
         let raw_results = gq.search_symbols(query, limit * 5);
-        let results: Vec<_> = if let Some(k) = kind_filter {
+        let fts_results: Vec<_> = if let Some(k) = kind_filter {
             raw_results.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(limit as usize).collect()
         } else {
             raw_results.into_iter().take(limit as usize).collect()
         };
-        if !results.is_empty() {
-            total_found += results.len();
-            let compact: Vec<Value> = results.iter().map(|s| {
-                let snippet = s.content.as_deref().map(|c| {
-                    c.lines().take(5).collect::<Vec<_>>().join("\n")
-                });
+
+        // Semantic search via embeddings (if available)
+        let merged = if let Some(ref engine) = embed_engine {
+            let emb_db_path = embedding_db_path(slug);
+            if emb_db_path.exists() {
+                let semantic_results = graphmind_embeddings::search::semantic_search(
+                    &emb_db_path,
+                    raw_query,
+                    &|text| engine.embed(text).ok(),
+                    limit as usize,
+                    kind_filter,
+                );
+                fuse_fts_and_semantic(&fts_results, &semantic_results, limit as usize)
+            } else {
+                fts_results.into_iter().map(|s| FusedResult::from_symbol(s, None)).collect()
+            }
+        } else {
+            fts_results.into_iter().map(|s| FusedResult::from_symbol(s, None)).collect()
+        };
+
+        if !merged.is_empty() {
+            total_found += merged.len();
+            let compact: Vec<Value> = merged.iter().map(|r| {
                 let mut entry = json!({
-                    "name": s.name,
-                    "kind": s.kind,
-                    "file": s.file,
-                    "line_start": s.line_start,
-                    "line_end": s.line_end,
-                    "signature": s.signature,
-                    "snippet": snippet,
+                    "name": r.name,
+                    "kind": r.kind,
+                    "file": r.file,
+                    "line_start": r.line_start,
+                    "line_end": r.line_end,
+                    "signature": r.signature,
+                    "snippet": r.snippet,
+                    "score": r.score,
                 });
                 if include_content {
-                    entry.as_object_mut().unwrap().insert("content".to_string(), json!(s.content));
+                    entry.as_object_mut().unwrap().insert("content".to_string(), json!(r.content));
                 }
                 entry
             }).collect();
@@ -914,6 +935,104 @@ fn handle_search(args: &Value) -> Value {
         "total_found": total_found,
         "limit": limit
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Embedding fusion helpers
+// ---------------------------------------------------------------------------
+
+fn embedding_db_path(slug: &str) -> std::path::PathBuf {
+    graphs_dir().join(slug).join("embeddings.db")
+}
+
+fn load_embed_engine() -> Option<Box<dyn graphmind_embeddings::engine::EmbeddingEngine>> {
+    let config = graphmind_config::config::load_config();
+    if config.embedding.mode == graphmind_config::config::EmbeddingMode::Disabled {
+        return None;
+    }
+    graphmind_embeddings::factory::create_engine(&config.embedding).ok()
+}
+
+struct FusedResult {
+    name: String,
+    kind: String,
+    file: String,
+    line_start: i64,
+    line_end: i64,
+    signature: Option<String>,
+    snippet: Option<String>,
+    content: Option<String>,
+    score: f64,
+}
+
+impl FusedResult {
+    fn from_symbol(s: graphmind_db::queries::SymbolRow, score: Option<f64>) -> Self {
+        let snippet = s.content.as_deref().map(|c| {
+            c.lines().take(5).collect::<Vec<_>>().join("\n")
+        });
+        Self {
+            name: s.name,
+            kind: s.kind,
+            file: s.file,
+            line_start: s.line_start,
+            line_end: s.line_end,
+            signature: s.signature,
+            snippet,
+            content: s.content,
+            score: score.unwrap_or(0.0),
+        }
+    }
+}
+
+fn fuse_fts_and_semantic(
+    fts: &[graphmind_db::queries::SymbolRow],
+    semantic: &[graphmind_embeddings::search::SearchResult],
+    limit: usize,
+) -> Vec<FusedResult> {
+    use std::collections::HashMap;
+    let k = 60.0;
+
+    let mut scores: HashMap<String, FusedResult> = HashMap::new();
+
+    // FTS ranking
+    for (i, s) in fts.iter().enumerate() {
+        let key = format!("{}:{}:{}", s.file, s.name, s.line_start);
+        let rrf_score = 1.0 / (k + i as f64 + 1.0);
+        let snippet = s.content.as_deref().map(|c| c.lines().take(5).collect::<Vec<_>>().join("\n"));
+        scores.entry(key).or_insert_with(|| FusedResult {
+            name: s.name.clone(),
+            kind: s.kind.clone(),
+            file: s.file.clone(),
+            line_start: s.line_start,
+            line_end: s.line_end,
+            signature: s.signature.clone(),
+            snippet,
+            content: s.content.clone(),
+            score: 0.0,
+        }).score += rrf_score;
+    }
+
+    // Semantic ranking
+    for (i, r) in semantic.iter().enumerate() {
+        let key = format!("{}:{}:0", r.file, r.symbol_name);
+        let rrf_score = 1.0 / (k + i as f64 + 1.0);
+        scores.entry(key).or_insert_with(|| FusedResult {
+            name: r.symbol_name.clone(),
+            kind: r.symbol_kind.clone(),
+            file: r.file.clone(),
+            line_start: 0,
+            line_end: 0,
+            signature: None,
+            snippet: Some(r.text.lines().take(5).collect::<Vec<_>>().join("\n")),
+            content: None,
+            score: 0.0,
+        }).score += rrf_score;
+    }
+
+    let mut results: Vec<FusedResult> = scores.into_values().collect();
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(limit);
+    results
 }
 
 // ---------------------------------------------------------------------------

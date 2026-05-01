@@ -74,6 +74,8 @@ pub struct EmbeddingConfig {
     pub mode: EmbeddingMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openai_base_url: Option<String>,
     #[serde(default)]
     pub api_keys: ApiKeys,
 }
@@ -83,6 +85,7 @@ impl Default for EmbeddingConfig {
         Self {
             mode: EmbeddingMode::Disabled,
             model: None,
+            openai_base_url: None,
             api_keys: ApiKeys::default(),
         }
     }
