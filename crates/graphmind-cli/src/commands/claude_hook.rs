@@ -378,7 +378,7 @@ fn register_in_settings() -> Result<(), String> {
             entry.get("matcher").and_then(|m| m.as_str()) == Some(matcher_name)
                 && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
                     hooks.iter().any(|h| {
-                        h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                        h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                     })
                 })
         });
@@ -396,7 +396,7 @@ fn register_in_settings() -> Result<(), String> {
         entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
             && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
                 hooks.iter().any(|h| {
-                    h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                    h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                 })
             })
     });
@@ -427,7 +427,7 @@ fn register_in_settings() -> Result<(), String> {
     let has_graphmind_session = session_arr.iter().any(|entry| {
         entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
             hooks.iter().any(|h| {
-                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
         })
     });
@@ -448,7 +448,7 @@ fn register_in_settings() -> Result<(), String> {
     let has_graphmind_prompt = prompt_arr.iter().any(|entry| {
         entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
             hooks.iter().any(|h| {
-                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
         })
     });
@@ -469,7 +469,7 @@ fn register_in_settings() -> Result<(), String> {
     let has_graphmind_post = post_arr.iter().any(|entry| {
         entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
             hooks.iter().any(|h| {
-                h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
             })
         })
     });
@@ -511,7 +511,7 @@ fn unregister_from_settings() -> Result<(), String> {
                     let hooks_arr = entry.get("hooks").and_then(|h| h.as_array());
                     if let Some(hooks) = hooks_arr {
                         let all_graphmind = hooks.iter().all(|h| {
-                            h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                            h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                         });
                         if all_graphmind {
                             return false;
@@ -524,14 +524,14 @@ fn unregister_from_settings() -> Result<(), String> {
                 for entry in arr.iter_mut() {
                     if let Some(hooks_arr) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
                         hooks_arr.retain(|h| {
-                            !h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                            !h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
                         });
                     }
                 }
 
                 // Remove entries with empty hooks arrays
                 arr.retain(|entry| {
-                    entry.get("hooks").and_then(|h| h.as_array()).map_or(true, |hooks| !hooks.is_empty())
+                    entry.get("hooks").and_then(|h| h.as_array()).is_none_or(|hooks| !hooks.is_empty())
                 });
             }
         }
