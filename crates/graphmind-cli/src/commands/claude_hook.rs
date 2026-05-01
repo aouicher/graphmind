@@ -32,7 +32,15 @@ extract_pattern() {
       echo "$INPUT" | jq -r '.tool_input.pattern // empty'
       ;;
     Agent)
-      echo "$INPUT" | jq -r '.tool_input.prompt // empty' | head -c 100
+      # Extract meaningful keywords from the prompt (remove common words, keep nouns/symbols)
+      echo "$INPUT" | jq -r '.tool_input.prompt // empty' \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9_]+/ /g' \
+        | tr ' ' '\n' \
+        | grep -vE '^(the|a|an|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|could|should|may|might|shall|can|need|must|if|then|else|when|where|which|what|how|who|why|that|this|these|those|it|its|i|you|we|they|he|she|my|your|our|their|his|her|and|or|but|not|no|so|as|at|by|for|from|in|of|on|to|with|about|into|through|during|before|after|above|below|between|under|over|up|down|out|off|all|each|every|both|few|more|most|some|any|other|such|only|just|also|very|too|quite|rather|already|still|yet|even|much|well|here|there|now|then|again|once|always|never|often|sometimes|usually|find|search|explore|look|check|show|get|make|use|see|go|come|take|give|tell|say|know|think|want|try|ask|work|call|run|read|write|set|put|let|keep|start|turn|help|talk|begin|seem|leave|play|move|live|believe|hold|bring|happen|provide|include|continue|change|watch|follow|stop|create|speak|allow|add|grow|open|walk|win|offer|remember|consider|appear|buy|wait|serve|die|send|expect|build|stay|fall|cut|reach|kill|remain|file|files|code|source|project|codebase|repository|repo|directory|function|functions|class|module|component)$' \
+        | head -5 \
+        | tr '\n' ' ' \
+        | sed 's/ *$//'
       ;;
   esac
 }
@@ -129,8 +137,15 @@ fi
 # Check if we're in a graphmind-registered project
 graphmind status &>/dev/null || exit 0
 
-# Extract likely search terms (first meaningful words after question words)
-SEARCH_TERMS=$(echo "$PROMPT" | sed -E 's/(comment|how|where|what|who|show|montre|explique|explain|trace|parcour)[[:space:]]+(does|is|me|moi|la|le|les|the|this)?[[:space:]]*//' | head -c 80)
+# Extract meaningful keywords from prompt
+SEARCH_TERMS=$(echo "$PROMPT" \
+  | tr '[:upper:]' '[:lower:]' \
+  | sed -E 's/[^a-z0-9_]+/ /g' \
+  | tr ' ' '\n' \
+  | grep -vE '^(comment|how|where|what|who|show|montre|explique|explain|trace|parcour|fonctionne|marche|does|is|me|moi|la|le|les|the|this|that|a|an|de|du|des|un|une|et|ou|en|au|pour|avec|sur|dans|qui|que|ce|ca|il|elle|nous|vous|ils|sont|est|a|ont|fait|faire|peut|doit|from|to|in|of|and|or|but|not|for|with|on|at|by|all|each|can|will|would|should|could|may|might|just|also|very|too|here|there|now|then|be|been|have|has|had|do|it|its|i|you|we|they)$' \
+  | head -5 \
+  | tr '\n' ' ' \
+  | sed 's/ *$//')
 
 RESULTS=""
 if [ -n "$SEARCH_TERMS" ]; then
