@@ -121,7 +121,7 @@ if [ "$TOOL_NAME" = "Bash" ]; then
       "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
-        "permissionDecisionReason": "graphmind search rewrite",
+        "permissionDecisionReason": "graphmind hook: rewritten to graphmind search (code graph indexed)",
         "updatedInput": $updated
       }
     }'
