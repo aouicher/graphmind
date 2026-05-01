@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 const HOOK_SCRIPT: &str = r#"#!/usr/bin/env bash
 # graphmind Claude Code hook — reminds to use graphmind for code search
-# Intercepts Grep and Bash(grep/find/rg/ag) to suggest graphmind first.
+# Intercepts Grep, Bash(grep/find/rg/ag), Glob, LS, and Agent(Explore) to suggest graphmind first.
 
 if ! command -v jq &>/dev/null; then
   exit 0
@@ -24,16 +24,35 @@ if [ $? -ne 0 ]; then
 fi
 
 should_intercept() {
-  if [ "$TOOL_NAME" = "Grep" ]; then
-    return 0
-  fi
-
-  if [ "$TOOL_NAME" = "Bash" ]; then
-    CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-    if echo "$CMD" | grep -qE '^\s*(grep|rg|ag|find|fd)\b'; then
+  case "$TOOL_NAME" in
+    Grep)
       return 0
-    fi
-  fi
+      ;;
+    Bash)
+      CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+      if echo "$CMD" | grep -qE '^\s*(grep|rg|ag|find|fd)\b'; then
+        return 0
+      fi
+      ;;
+    Glob)
+      return 0
+      ;;
+    LS)
+      return 0
+      ;;
+    Agent)
+      # Intercept Explore agents used for codebase search
+      SUBAGENT=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
+      PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
+      if [ "$SUBAGENT" = "Explore" ]; then
+        return 0
+      fi
+      # Also catch general agents doing exploration
+      if echo "$PROMPT" | grep -qiE 'search|find|explore|locate|where is|which file'; then
+        return 0
+      fi
+      ;;
+  esac
 
   return 1
 }
@@ -42,11 +61,23 @@ if ! should_intercept; then
   exit 0
 fi
 
-# Output additional context message
-jq -n '{
+# Different messages based on tool type
+case "$TOOL_NAME" in
+  Agent)
+    MSG="⚡ graphmind is indexed for this project. Before spawning an exploration agent, use graphmind directly:\n- MCP \`gm_search\` for semantic symbol search\n- MCP \`gm_fn\` for function lookup with source\n- MCP \`gm_deps\` for file dependencies\n- MCP \`gm_map\` for project overview\n- MCP \`gm_outline\` for file structure\nOnly spawn an Explore agent if graphmind cannot answer (e.g., non-code files, runtime behavior, config analysis)."
+    ;;
+  Glob|LS)
+    MSG="⚡ graphmind is indexed for this project. Before browsing the file tree, prefer:\n- MCP \`gm_map\` for project structure overview\n- MCP \`gm_outline\` for file symbols\n- MCP \`gm_search\` to find files/symbols by intent\nOnly use Glob/LS if graphmind cannot answer (e.g., checking non-code files, build outputs, configs)."
+    ;;
+  *)
+    MSG="⚡ graphmind is indexed for this project. Before grep/find, prefer:\n- MCP \`gm_search\` for semantic symbol search\n- MCP \`gm_fn\` for function lookup with source\n- MCP \`gm_deps\` for file dependencies\n- MCP \`gm_query\` for symbol resolution\nOnly fall back to grep/find if graphmind cannot answer (e.g., string literals, config values, non-code patterns)."
+    ;;
+esac
+
+jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "additionalContext": "⚡ graphmind is available for this project. Before grep/find, prefer:\n- `graphmind search \"<query>\"` or MCP `gm_search` for semantic symbol search\n- `graphmind fn <symbol>` or MCP `gm_fn` for function lookup with source\n- `graphmind deps <file>` or MCP `gm_deps` for file dependencies\n- `graphmind query <name>` or MCP `gm_query` for symbol resolution\nOnly fall back to grep/find if graphmind cannot answer the query (e.g., searching for string literals, config values, or non-code patterns)."
+    "additionalContext": $msg
   }
 }'
 "#;
@@ -150,27 +181,27 @@ fn register_in_settings() -> Result<(), String> {
 
     let hook_cmd = hook_path().to_string_lossy().to_string();
 
-    // Add Grep matcher if not present
-    let grep_entry = serde_json::json!({
-        "matcher": "Grep",
-        "hooks": [{"type": "command", "command": &hook_cmd}]
-    });
+    let matchers_to_add = ["Grep", "Glob", "LS", "Agent"];
 
-    // Add Bash matcher if not present (in addition to existing Bash hooks)
-    let bash_entry = serde_json::json!({
-        "matcher": "Bash",
-        "hooks": [{"type": "command", "command": &hook_cmd}]
-    });
-
-    let has_graphmind_grep = arr.iter().any(|entry| {
-        entry.get("matcher").and_then(|m| m.as_str()) == Some("Grep")
-            && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
-                hooks.iter().any(|h| {
-                    h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+    for matcher_name in &matchers_to_add {
+        let has_graphmind = arr.iter().any(|entry| {
+            entry.get("matcher").and_then(|m| m.as_str()) == Some(matcher_name)
+                && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
+                    hooks.iter().any(|h| {
+                        h.get("command").and_then(|c| c.as_str()).map_or(false, |c| c.contains("graphmind"))
+                    })
                 })
-            })
-    });
+        });
 
+        if !has_graphmind {
+            arr.push(serde_json::json!({
+                "matcher": matcher_name,
+                "hooks": [{"type": "command", "command": &hook_cmd}]
+            }));
+        }
+    }
+
+    // For Bash, add our hook to the existing Bash matcher or create a new one
     let has_graphmind_bash = arr.iter().any(|entry| {
         entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
             && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
@@ -180,13 +211,7 @@ fn register_in_settings() -> Result<(), String> {
             })
     });
 
-    if !has_graphmind_grep {
-        arr.push(grep_entry);
-    }
-
-    // For Bash, we need to add our hook to the existing Bash matcher or create a new one
     if !has_graphmind_bash {
-        // Check if there's an existing Bash matcher we should add to
         let existing_bash = arr.iter_mut().find(|entry| {
             entry.get("matcher").and_then(|m| m.as_str()) == Some("Bash")
                 && entry.get("hooks").and_then(|h| h.as_array()).map_or(false, |hooks| {
@@ -197,12 +222,14 @@ fn register_in_settings() -> Result<(), String> {
         });
 
         if let Some(bash_matcher) = existing_bash {
-            // Add our hook to the existing Bash matcher's hooks array
             if let Some(hooks_arr) = bash_matcher.get_mut("hooks").and_then(|h| h.as_array_mut()) {
                 hooks_arr.push(serde_json::json!({"type": "command", "command": &hook_cmd}));
             }
         } else {
-            arr.push(bash_entry);
+            arr.push(serde_json::json!({
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": &hook_cmd}]
+            }));
         }
     }
 
