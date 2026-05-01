@@ -80,4 +80,7 @@ export const api = {
   setGlobalExcludes: (excludes: string[]) => invoke<void>("set_global_excludes", { excludes }),
   setProjectExcludes: (slug: string, excludes: string[]) => invoke<void>("set_project_excludes", { slug, excludes }),
   getAppVersion: () => invoke<string>("get_app_version"),
+  getHookStatus: () => invoke<boolean>("get_hook_status"),
+  installClaudeHook: () => invoke<void>("install_claude_hook"),
+  uninstallClaudeHook: () => invoke<void>("uninstall_claude_hook"),
 };

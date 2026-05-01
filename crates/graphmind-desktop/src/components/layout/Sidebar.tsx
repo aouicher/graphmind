@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { FolderGit2, Plug, GitGraph, SlidersHorizontal } from "lucide-react";
+import { FolderGit2, Plug, SlidersHorizontal } from "lucide-react";
 import { api } from "../../lib/tauri";
+import logo from "../../assets/logo.png";
 
 interface SidebarProps {
   activePage: string;
@@ -23,7 +24,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
   return (
     <aside className="w-56 h-full bg-bg-sidebar border-r border-border flex flex-col">
       <div className="h-12 flex items-center gap-2 pl-20 pr-4 border-b border-border drag-region">
-        <GitGraph className="w-5 h-5 text-accent" />
+        <img src={logo} alt="GraphMind" className="w-5 h-5 rounded" />
         <span className="font-semibold text-sm text-text-primary">GraphMind</span>
       </div>
 
