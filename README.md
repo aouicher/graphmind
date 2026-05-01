@@ -148,7 +148,28 @@ Command: `graphmind build`
 
 Re-run `graphmind sync` after each build to keep it current.
 
-### 3. Claude Code skill (optional)
+### 3. Claude Code search hook (recommended)
+
+Installs a Claude Code hook that transparently rewrites `grep`/`find`/`rg` commands to `graphmind search`. Claude gets graph-powered results without changing its workflow.
+
+```bash
+graphmind install-hook
+```
+
+This registers hooks in `~/.claude/settings.json` for:
+- **PreToolUse** — rewrites grep/find/rg to `graphmind search`, provides graph results for Grep/Glob/LS tools
+- **SessionStart** — loads project context (stats, structure) at session start
+- **UserPromptSubmit** — pre-fetches relevant graph context based on the user's prompt
+- **PostToolUse** — enriches results with graph-aware suggestions
+
+The hook automatically bypasses rewriting for exhaustive searches (e.g., "find all occurrences", `grep -c`, pipes to `wc`/`sort`).
+
+To uninstall:
+```bash
+graphmind uninstall-hook
+```
+
+### 4. Claude Code skill (optional)
 
 Installs a skill that teaches Claude the 3-layer rule: query the graph first, check memory second, read raw files only when needed.
 
@@ -156,7 +177,7 @@ Installs a skill that teaches Claude the 3-layer rule: query the graph first, ch
 graphmind install-skill
 ```
 
-### 4. Git hooks (optional)
+### 5. Git hooks (optional)
 
 Auto-rebuild on commit, impact check on push:
 
@@ -289,6 +310,15 @@ graphmind diff-impact --depth 3     # limit trace depth
 graphmind session start [slug]      # log session start
 graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
+```
+
+### Claude Code Integration
+```bash
+graphmind install-hook        # install search hook in Claude Code
+graphmind uninstall-hook      # remove search hook
+graphmind install-skill       # install Claude Code skill
+graphmind sync [slug]         # inject graph context into CLAUDE.md
+graphmind sync --all          # update CLAUDE.md for all projects
 ```
 
 ### Git Hooks
