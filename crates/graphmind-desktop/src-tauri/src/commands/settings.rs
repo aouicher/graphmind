@@ -62,7 +62,7 @@ pub fn get_hook_status() -> bool {
 #[tauri::command]
 pub fn install_claude_hook() -> Result<(), String> {
     let output = std::process::Command::new("graphmind")
-        .arg("install-hook")
+        .args(["install", "hook-claude"])
         .output()
         .map_err(|e| format!("Failed to run graphmind: {}", e))?;
 
@@ -76,7 +76,7 @@ pub fn install_claude_hook() -> Result<(), String> {
 #[tauri::command]
 pub fn uninstall_claude_hook() -> Result<(), String> {
     let output = std::process::Command::new("graphmind")
-        .arg("uninstall-hook")
+        .args(["uninstall", "hook-claude"])
         .output()
         .map_err(|e| format!("Failed to run graphmind: {}", e))?;
 
