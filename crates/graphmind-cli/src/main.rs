@@ -363,7 +363,7 @@ fn main() {
             commands::search::search(&query, slug.as_deref(), limit, kind.as_deref());
         }
         Commands::Embed => {
-            commands::search::embed();
+            commands::search::embed_status(None);
         }
         Commands::Session { action } => match action {
             SessionAction::Start { slug } => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { api, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save } from "lucide-react";
+import { api, ProjectInfo, EmbeddingSettings } from "../lib/tauri";
+import { Plus, X, Save, Brain } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -10,10 +10,23 @@ export function Settings() {
   const [newGlobal, setNewGlobal] = useState("");
   const [newProject, setNewProject] = useState("");
   const [saving, setSaving] = useState(false);
+  const [embMode, setEmbMode] = useState("disabled");
+  const [embModel, setEmbModel] = useState("");
+  const [embBaseUrl, setEmbBaseUrl] = useState("");
+  const [embOpenaiKey, setEmbOpenaiKey] = useState("");
+  const [embVoyageKey, setEmbVoyageKey] = useState("");
+  const [embSaving, setEmbSaving] = useState(false);
 
   useEffect(() => {
     api.listProjects().then(setProjects);
     api.getExcludes().then((s) => setGlobalExcludes(s.global));
+    api.getEmbeddingSettings().then((s) => {
+      setEmbMode(s.mode);
+      setEmbModel(s.model || "");
+      setEmbBaseUrl(s.openai_base_url || "");
+      setEmbOpenaiKey(s.openai_key || "");
+      setEmbVoyageKey(s.voyage_key || "");
+    });
   }, []);
 
   useEffect(() => {
@@ -53,6 +66,17 @@ export function Settings() {
     }
   };
 
+  const saveEmbeddings = async () => {
+    setEmbSaving(true);
+    await api.setEmbeddingSettings({
+      mode: embMode,
+      model: embModel || null,
+      openai_base_url: embBaseUrl || null,
+      openai_key: embOpenaiKey || null,
+      voyage_key: embVoyageKey || null,
+    });
+    setEmbSaving(false);
+  };
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-8">
@@ -176,6 +200,93 @@ export function Settings() {
             </div>
           </>
         )}
+      </section>
+
+      {/* Embeddings */}
+      <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+        <Brain className="w-4 h-4" />
+        Embeddings
+      </h2>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-text-muted">
+            Semantic vector search over symbols. Computed automatically during build.
+          </p>
+          <button
+            onClick={saveEmbeddings}
+            disabled={embSaving}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+          >
+            <Save className="w-3 h-3" />
+            Save
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Provider</label>
+            <select
+              value={embMode}
+              onChange={(e) => setEmbMode(e.target.value)}
+              className="w-full text-xs bg-bg-card px-3 py-2 rounded border border-border text-text-primary focus:outline-none focus:border-accent"
+            >
+              <option value="disabled">Disabled</option>
+              <option value="local">Local (all-MiniLM-L6-v2, no API key)</option>
+              <option value="openai">OpenAI</option>
+              <option value="voyage">Voyage AI (code-specialized)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Model override (optional)</label>
+            <input
+              type="text"
+              value={embModel}
+              onChange={(e) => setEmbModel(e.target.value)}
+              placeholder={embMode === "openai" ? "text-embedding-3-small" : embMode === "voyage" ? "voyage-code-3" : "all-MiniLM-L6-v2"}
+              className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          {embMode === "openai" && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">OpenAI API Key</label>
+                <input
+                  type="password"
+                  value={embOpenaiKey}
+                  onChange={(e) => setEmbOpenaiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">Base URL (optional, for Azure/proxies)</label>
+                <input
+                  type="text"
+                  value={embBaseUrl}
+                  onChange={(e) => setEmbBaseUrl(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                  className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                />
+              </div>
+            </>
+          )}
+
+          {embMode === "voyage" && (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Voyage API Key</label>
+              <input
+                type="password"
+                value={embVoyageKey}
+                onChange={(e) => setEmbVoyageKey(e.target.value)}
+                placeholder="pa-..."
+                className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+              />
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );

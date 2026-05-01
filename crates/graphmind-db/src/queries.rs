@@ -809,4 +809,30 @@ impl<'a> GraphQueries<'a> {
         results.truncate(limit as usize);
         results
     }
+
+    pub fn all_symbols(&self) -> Vec<SymbolRow> {
+        let mut stmt = match self.db.prepare(
+            "SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols"
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map([], |row| {
+            Ok(SymbolRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                kind: row.get(2)?,
+                file: row.get(3)?,
+                line_start: row.get(4)?,
+                line_end: row.get(5)?,
+                signature: row.get(6)?,
+                doc: row.get(7)?,
+                content: row.get(8)?,
+            })
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
 }
