@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-cli"
-version = "0.2.49"
+version = "0.2.50"
 edition = "2021"
 license = "MIT"
 description = "Local-first code intelligence CLI"
