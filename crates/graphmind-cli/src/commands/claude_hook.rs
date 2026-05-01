@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 
 const PRE_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind PreToolUse hook — executes graphmind search and injects results
-# Also reminds to use graphmind MCP tools directly.
+# graphmind PreToolUse hook — rewrites grep/find to graphmind search (like rtk)
+# For Bash: rewrites command. For Grep/Glob/LS/Agent: provides results and skips.
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -23,16 +23,35 @@ extract_pattern() {
       ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      # Extract pattern from grep/rg commands
-      if echo "$CMD" | grep -qE '^\s*(grep|rg)'; then
-        echo "$CMD" | sed -E 's/^[[:space:]]*(grep|rg)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*"?([^"]+)"?.*/\3/' | head -1
+      # Extract pattern from grep/rg/ag commands
+      if echo "$CMD" | grep -qE '^\s*(grep|rg|ag)\b'; then
+        # Try quoted pattern first, then unquoted
+        PAT=$(echo "$CMD" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+        if [ -z "$PAT" ]; then
+          PAT=$(echo "$CMD" | grep -oE "'[^']+'" | head -1 | tr -d "'")
+        fi
+        if [ -z "$PAT" ]; then
+          # Last word before path/flags that looks like a pattern
+          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(grep|rg|ag)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*//' | awk '{print $1}')
+        fi
+        echo "$PAT"
+      elif echo "$CMD" | grep -qE '^\s*(find|fd)\b'; then
+        # Extract -name pattern or fd pattern
+        PAT=$(echo "$CMD" | grep -oE '\-name[[:space:]]+"?[^"]+' | sed 's/-name[[:space:]]*//' | tr -d '"')
+        if [ -z "$PAT" ]; then
+          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(find|fd)[[:space:]]+[^[:space:]]+[[:space:]]*//' | awk '{print $1}')
+        fi
+        echo "$PAT"
       fi
       ;;
     Glob)
-      echo "$INPUT" | jq -r '.tool_input.pattern // empty'
+      echo "$INPUT" | jq -r '.tool_input.pattern // empty' | sed -E 's/.*\///' | sed 's/\*//g'
+      ;;
+    LS)
+      # For LS, use the directory name as context
+      echo "$INPUT" | jq -r '.tool_input.path // empty' | sed 's|.*/||'
       ;;
     Agent)
-      # Extract meaningful keywords from the prompt (remove common words, keep nouns/symbols)
       echo "$INPUT" | jq -r '.tool_input.prompt // empty' \
         | tr '[:upper:]' '[:lower:]' \
         | sed -E 's/[^a-z0-9_]+/ /g' \
@@ -65,28 +84,47 @@ should_intercept() {
 
 if ! should_intercept; then exit 0; fi
 
-# Execute graphmind search and include results
 PATTERN=$(extract_pattern)
-RESULTS=""
-if [ -n "$PATTERN" ] && [ ${#PATTERN} -lt 200 ]; then
-  RESULTS=$(graphmind search "$PATTERN" --limit 10 2>/dev/null | head -50)
+
+# If no pattern extracted, just provide advice
+if [ -z "$PATTERN" ] || [ ${#PATTERN} -gt 200 ]; then
+  MSG="⚡ graphmind is indexed. Use MCP gm_search, gm_fn, gm_deps, gm_query instead of grep/find for code patterns."
+  jq -n --arg msg "$MSG" '{
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "additionalContext": $msg
+    }
+  }'
+  exit 0
 fi
 
-# Build context message
+# For Bash tools: rewrite the command to use graphmind search
+if [ "$TOOL_NAME" = "Bash" ]; then
+  REWRITTEN="graphmind search \"$PATTERN\" --limit 15"
+  ORIGINAL_INPUT=$(echo "$INPUT" | jq -c '.tool_input')
+  UPDATED_INPUT=$(echo "$ORIGINAL_INPUT" | jq --arg cmd "$REWRITTEN" '.command = $cmd')
+
+  jq -n \
+    --argjson updated "$UPDATED_INPUT" \
+    '{
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "permissionDecisionReason": "graphmind search rewrite",
+        "updatedInput": $updated
+      }
+    }'
+  exit 0
+fi
+
+# For Grep/Glob/LS/Agent: execute graphmind and return results as additionalContext
+# (we can't rewrite these tools' input format, so we provide results + advice)
+RESULTS=$(graphmind search "$PATTERN" --limit 15 2>/dev/null | head -60)
+
 if [ -n "$RESULTS" ]; then
-  MSG="⚡ graphmind results for \"$PATTERN\":\n$RESULTS\n\n→ Use MCP tools (gm_fn, gm_search, gm_deps, gm_map) for deeper queries. Only use grep/find for string literals or non-code patterns."
+  MSG="⚡ graphmind results for \"$PATTERN\" (use these instead of grep/ls):\n$RESULTS\n\n→ For more detail, use MCP gm_fn <symbol> or gm_deps <file>."
 else
-  case "$TOOL_NAME" in
-    Agent)
-      MSG="⚡ graphmind is indexed for this project. Use MCP tools directly instead of spawning an Explore agent:\n- gm_search: semantic symbol search\n- gm_fn: function lookup with source\n- gm_deps: file dependencies\n- gm_map: project overview\n- gm_outline: file structure"
-      ;;
-    Glob|LS)
-      MSG="⚡ graphmind is indexed. Use MCP gm_map for structure, gm_outline for file symbols, gm_search to find by intent."
-      ;;
-    *)
-      MSG="⚡ graphmind is indexed. Use MCP gm_search, gm_fn, gm_deps, gm_query instead of grep/find for code patterns."
-      ;;
-  esac
+  MSG="⚡ graphmind found no results for \"$PATTERN\". Proceeding with original tool."
 fi
 
 jq -n --arg msg "$MSG" '{
