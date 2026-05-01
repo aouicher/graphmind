@@ -1,4 +1,5 @@
 pub mod build;
+pub mod claude_hook;
 pub mod clean;
 pub mod cross;
 pub mod diff_impact;

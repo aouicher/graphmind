@@ -36,15 +36,29 @@ curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/ins
 
 ## graphmind
 
-Last build: 2026-04-27 | 478 symbols | 426 edges | 53 files
-Languages: rust (50), markdown (3)
+Last build: 2026-05-01 | 934 symbols | 2246 edges | 131 files
+Languages: rust (92), typescript (20), toml (9), markdown (3), bash (2), ruby (1), python (1), html (1), go (1), css (1)
 MCP: `graphmind mcp` (stdio)
 
-### Before editing anything
-- Symbol: `graphmind fn <symbol> --no-tests`
-- File: `graphmind deps <file>`
-- Git changes: `graphmind diff-impact`
-- Find by intent: `graphmind search "handle auth; validate token"`
+### MANDATORY: use graphmind for ALL code exploration
+NEVER use grep/find/ls/Glob to search code. Use graphmind MCP tools:
+
+| Need | MCP tool | CLI equivalent |
+|------|----------|----------------|
+| Find symbol | `gm_fn` | `graphmind fn <name>` |
+| Search by intent | `gm_search` | `graphmind search "<query>"` |
+| File dependencies | `gm_deps` | `graphmind deps <file>` |
+| Symbol resolution | `gm_query` | `graphmind query <name>` |
+| Blast radius | `gm_fn_impact` | `graphmind fn-impact <name>` |
+| Git diff impact | `gm_diff_impact` | `graphmind diff-impact` |
+| Project overview | `gm_map` | `graphmind map` |
+| File outline | `gm_outline` | `graphmind outline <file>` |
+| Who calls chain | `gm_who_calls_chain` | — |
+| Dead code | `gm_dead_code` | — |
+| Cross-project | `gm_cross_query` | `graphmind cross query` |
+| Memory search | `gm_memory_search` | `graphmind memory search` |
+
+Only fall back to grep/find for: string literals, config values, non-code patterns.
 
 ### Rebuild when
 Structural changes, new modules, after merge.

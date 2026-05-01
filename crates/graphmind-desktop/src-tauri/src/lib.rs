@@ -37,6 +37,9 @@ pub fn run() {
             commands::settings::set_global_excludes,
             commands::settings::set_project_excludes,
             commands::settings::get_app_version,
+            commands::settings::get_hook_status,
+            commands::settings::install_claude_hook,
+            commands::settings::uninstall_claude_hook,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

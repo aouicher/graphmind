@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save } from "lucide-react";
+import { Plus, X, Save, Zap } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -10,10 +10,13 @@ export function Settings() {
   const [newGlobal, setNewGlobal] = useState("");
   const [newProject, setNewProject] = useState("");
   const [saving, setSaving] = useState(false);
+  const [hookEnabled, setHookEnabled] = useState(false);
+  const [hookLoading, setHookLoading] = useState(false);
 
   useEffect(() => {
     api.listProjects().then(setProjects);
     api.getExcludes().then((s) => setGlobalExcludes(s.global));
+    api.getHookStatus().then(setHookEnabled);
   }, []);
 
   useEffect(() => {
@@ -53,9 +56,56 @@ export function Settings() {
     }
   };
 
+  const toggleHook = async () => {
+    setHookLoading(true);
+    try {
+      if (hookEnabled) {
+        await api.uninstallClaudeHook();
+        setHookEnabled(false);
+      } else {
+        await api.installClaudeHook();
+        setHookEnabled(true);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setHookLoading(false);
+  };
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-8">
-      <h1 className="text-lg font-semibold text-text-primary">Exclusions</h1>
+      <h1 className="text-lg font-semibold text-text-primary">Settings</h1>
+
+      {/* Claude Code Hook */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-text-primary">Claude Code Integration</h2>
+        <div className="flex items-center justify-between p-3 bg-bg-card rounded-lg border border-border">
+          <div className="flex items-center gap-3">
+            <Zap className={`w-4 h-4 ${hookEnabled ? "text-accent" : "text-text-muted"}`} />
+            <div>
+              <p className="text-sm text-text-primary">Search Hook</p>
+              <p className="text-xs text-text-muted">
+                Redirects grep/find to graphmind for faster, structural code search
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={toggleHook}
+            disabled={hookLoading}
+            className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
+              hookEnabled ? "bg-accent" : "bg-border"
+            } ${hookLoading ? "opacity-50" : ""}`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
+                hookEnabled ? "translate-x-5" : ""
+              }`}
+            />
+          </button>
+        </div>
+      </section>
+
+      <h2 className="text-lg font-semibold text-text-primary">Exclusions</h2>
 
       {/* Global Excludes */}
       <section className="space-y-3">

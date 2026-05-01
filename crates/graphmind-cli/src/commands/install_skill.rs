@@ -5,11 +5,27 @@ const SKILL_CONTENT: &str = r#"---
 description: >
   graphmind gives Claude Code persistent memory and structural code intelligence
   across all registered projects. Auto-triggers in any registered project directory.
-  Always query the graph before reading source files.
+  MANDATORY: query graphmind before using grep, find, or reading source files.
 allowed-tools: Bash, Read, Write
 ---
 
 # graphmind — Persistent Code Intelligence
+
+## MANDATORY: Search through graphmind FIRST
+
+**Before using Grep, find, rg, ag, or reading files to understand code:**
+You MUST query graphmind first. Only fall back to grep/find if graphmind cannot answer (e.g., string literals, config values, non-code patterns).
+
+| Need | Command | MCP tool |
+|------|---------|----------|
+| Find a symbol | `graphmind fn <symbol>` | `gm_fn` |
+| Search by intent | `graphmind search "<query>"` | `gm_search` |
+| File dependencies | `graphmind deps <file>` | `gm_deps` |
+| Who calls X | `graphmind query <symbol>` | `gm_query` |
+| Blast radius | `graphmind fn-impact <symbol>` | `gm_fn_impact` |
+| Git change impact | `graphmind diff-impact` | `gm_diff_impact` |
+| Project overview | `graphmind map` | `gm_map` |
+| Cross-project | `graphmind cross query <symbol>` | `gm_cross_query` |
 
 ## Is this project registered?
 Check: `graphmind status`
@@ -18,27 +34,15 @@ Register if not: `graphmind register .`
 ## The 3-Layer Rule — always follow this order
 
 ### Layer 1 — Structural graph (what the code IS)
-Query before touching any code:
-- Find a symbol: `graphmind fn <symbol>` or MCP `gm_fn`
-- File dependencies: `graphmind deps <file>` or MCP `gm_deps`
-- Blast radius before editing: `graphmind fn-impact <symbol> --no-tests`
-- Impact of current git changes: `graphmind diff-impact`
-- Entry points: `graphmind map`
+Query before touching any code. This is faster and more accurate than grep.
 
 ### Layer 2 — Semantic memory (what was DECIDED)
 Query for context, decisions, conventions:
 - `graphmind memory search "<query>"` or MCP `gm_memory_search`
 
-### Layer 3 — Raw files (only when layers 1-2 are insufficient)
-Read source files only when editing or when the graph doesn't have the answer.
-
-## Cross-project queries
-When a symbol or pattern might exist in another project:
-`graphmind cross query <symbol>` or MCP `gm_cross_query`
-
-## Session workflow
-**Start of session:** run `graphmind session start` → loads graph summary + recent memory
-**End of session:** run `graphmind session save` → saves decisions and progress to memory
+### Layer 3 — Raw files (LAST RESORT)
+Read source files only when editing or when layers 1-2 cannot answer.
+Use grep/find ONLY for: string literals, config values, non-code patterns, regex searches.
 
 ## When to rebuild the graph
 - After adding/removing modules or major refactors
@@ -47,10 +51,11 @@ When a symbol or pattern might exist in another project:
 - Command: `graphmind build` (fast, SHA256-cached)
 
 ## NEVER
-- Never re-read the entire codebase if graphmind can answer it
-- Never manually edit files in `~/.graphmind/`
-- Never rebuild the graph every session
-- Never skip the 3-layer rule
+- NEVER grep/find for symbols, functions, or imports — graphmind has this indexed
+- NEVER re-read the entire codebase if graphmind can answer it
+- NEVER manually edit files in `~/.graphmind/`
+- NEVER rebuild the graph every session
+- NEVER skip the 3-layer rule
 "#;
 
 pub fn install_skill() {
