@@ -1,14 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
 import { Settings } from "./pages/Settings";
+import { Setup } from "./pages/Setup";
+import { api } from "./lib/tauri";
 
 type Page = "projects" | "integrations" | "settings";
 
 export default function App() {
   const [page, setPage] = useState<Page>("projects");
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.checkCliInstalled().then((status) => {
+      setNeedsSetup(!status.installed);
+    });
+  }, []);
+
+  if (needsSetup === null) return null;
+
+  if (needsSetup) {
+    return <Setup onComplete={() => setNeedsSetup(false)} />;
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

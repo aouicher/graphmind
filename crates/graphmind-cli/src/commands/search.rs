@@ -81,14 +81,58 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
     };
 
     // Fuse results with RRF
-    let results = fuse_results(&fts_results, &semantic_results, limit as usize);
+    let mut results = fuse_results(&fts_results, &semantic_results, limit as usize);
+
+    // Graph expansion: boost seeds with 1-hop neighbors
+    let graph_boost = 0.3;
+    let mut neighbor_scores: HashMap<String, FusedHit> = HashMap::new();
+    for hit in &results {
+        let callers = q.callers(&hit.name);
+        for c in callers.iter().take(3) {
+            let key = format!("{}:{}:{}", c.file, c.name, c.line_start);
+            let boost = hit.score * graph_boost;
+            neighbor_scores.entry(key)
+                .and_modify(|e| e.score += boost)
+                .or_insert_with(|| FusedHit {
+                    name: c.name.clone(), kind: c.kind.clone(), file: c.file.clone(),
+                    line: c.line_start, signature: c.signature.clone(), score: boost,
+                    from_fts: false, from_sem: false, from_graph: true,
+                });
+        }
+        let callees = q.callees(&hit.name);
+        for c in callees.iter().take(3) {
+            let key = format!("{}:{}:{}", c.file, c.name, c.line_start);
+            let boost = hit.score * graph_boost * 0.5;
+            neighbor_scores.entry(key)
+                .and_modify(|e| e.score += boost)
+                .or_insert_with(|| FusedHit {
+                    name: c.name.clone(), kind: c.kind.clone(), file: c.file.clone(),
+                    line: c.line_start, signature: c.signature.clone(), score: boost,
+                    from_fts: false, from_sem: false, from_graph: true,
+                });
+        }
+    }
+
+    // Merge graph neighbors into results
+    for (key, neighbor) in neighbor_scores {
+        let existing = results.iter_mut().find(|r| format!("{}:{}:{}", r.file, r.name, r.line) == key);
+        if let Some(e) = existing {
+            e.score += neighbor.score;
+            e.from_graph = true;
+        } else {
+            results.push(neighbor);
+        }
+    }
+
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(limit as usize);
 
     if results.is_empty() {
         println!("{} No results for: {}", "!".yellow(), query);
         return;
     }
 
-    let source_tag = if !semantic_results.is_empty() { "FTS+semantic" } else { "FTS" };
+    let source_tag = if !semantic_results.is_empty() { "FTS+semantic+graph" } else { "FTS+graph" };
     println!(
         "{} {} result(s) for \"{}\" [{}]:\n",
         ">>".cyan().bold(),
@@ -99,13 +143,24 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
 
     for hit in &results {
         let score_str = format!("{:.3}", hit.score);
+        let source = match (hit.from_fts, hit.from_sem, hit.from_graph) {
+            (true, true, true) => "FTS+SEM+G",
+            (true, true, false) => "FTS+SEM",
+            (true, false, true) => "FTS+G",
+            (false, true, true) => "SEM+G",
+            (true, false, false) => "FTS",
+            (false, true, false) => "SEM",
+            (false, false, true) => "GRAPH",
+            _ => "?",
+        };
         println!(
-            "  {} [{}] {}:{} ({})",
+            "  {} [{}] {}:{} ({}) [{}]",
             hit.name.bold(),
             hit.kind.yellow(),
             hit.file.dimmed(),
             hit.line,
-            score_str.dimmed()
+            score_str.dimmed(),
+            source.cyan()
         );
         if let Some(ref s) = hit.signature {
             if !s.is_empty() {
@@ -156,6 +211,9 @@ struct FusedHit {
     line: i64,
     signature: Option<String>,
     score: f64,
+    from_fts: bool,
+    from_sem: bool,
+    from_graph: bool,
 }
 
 fn fuse_results(
@@ -170,10 +228,11 @@ fn fuse_results(
         let key = format!("{}:{}:{}", s.file, s.name, s.line_start);
         let rrf = 1.0 / (k + i as f64 + 1.0);
         scores.entry(key)
-            .and_modify(|e| e.score += rrf)
+            .and_modify(|e| { e.score += rrf; e.from_fts = true; })
             .or_insert_with(|| FusedHit {
                 name: s.name.clone(), kind: s.kind.clone(), file: s.file.clone(),
                 line: s.line_start, signature: s.signature.clone(), score: rrf,
+                from_fts: true, from_sem: false, from_graph: false,
             });
     }
 
@@ -181,10 +240,11 @@ fn fuse_results(
         let key = format!("{}:{}:0", r.file, r.symbol_name);
         let rrf = 1.0 / (k + i as f64 + 1.0);
         scores.entry(key)
-            .and_modify(|e| e.score += rrf)
+            .and_modify(|e| { e.score += rrf; e.from_sem = true; })
             .or_insert_with(|| FusedHit {
                 name: r.symbol_name.clone(), kind: r.symbol_kind.clone(), file: r.file.clone(),
                 line: 0, signature: None, score: rrf,
+                from_fts: false, from_sem: true, from_graph: false,
             });
     }
 

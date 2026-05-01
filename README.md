@@ -217,7 +217,7 @@ graphmind sync --all
 │  Symbols · Edges · Call sites                │
 ├─────────────────────────────────────────────┤
 │  Layer 2: Semantic Embeddings (SQLite)       │
-│  Cosine search · RRF fusion · Multi-provider│
+│  Cosine search · Graph expansion · RRF      │
 ├─────────────────────────────────────────────┤
 │  Layer 3: Semantic Memory (JSONL)            │
 │  Decisions · Patterns · Conventions          │
@@ -279,10 +279,17 @@ graphmind memory delete <id>
 
 ### Search
 ```bash
-graphmind search "<query>"          # FTS search across symbols
+graphmind search "<query>"          # hybrid search (FTS + semantic + graph)
 graphmind search "<q1>; <q2>"       # multi-query with RRF ranking
 graphmind search "<query>" --kind function
 ```
+
+Search uses a 3-stage pipeline:
+1. **FTS5** — exact text matching on symbol names, signatures, docs
+2. **Semantic embeddings** — cosine similarity finds conceptually related symbols (e.g. "money transfer" → `payment_service`)
+3. **Graph expansion** — top results are expanded with 1-hop callers/callees from the structural graph
+
+Results are fused via Reciprocal Rank Fusion (RRF, k=60). Each result shows its source: `[FTS]`, `[SEM]`, `[GRAPH]`, or combinations like `[FTS+SEM+G]`.
 
 ### Embeddings
 
@@ -310,6 +317,8 @@ Semantic vector search over symbols. Configured in `~/.graphmind/config.json`:
 | `disabled` | — | No embeddings (default) |
 
 Embeddings are computed automatically during `graphmind build` when a provider is configured. If the model changes, the embedding index is rebuilt automatically.
+
+During search, semantic results are enriched with graph context: the structural graph expands top hits with their callers and callees, surfacing related symbols that neither text nor embedding search would find alone.
 
 OpenAI-compatible providers (Azure, proxys) can set a custom base URL:
 ```json
