@@ -84,6 +84,17 @@ should_intercept() {
 
 if ! should_intercept; then exit 0; fi
 
+# Skip rewriting for exhaustive searches — grep is better for "find all occurrences"
+# Detect via: description field, recursive grep with -l (file listing), or wc/count patterns
+CMD_CHECK=$(echo "$INPUT" | jq -r '(.tool_input.command // "") + " " + (.tool_input.description // "")')
+if echo "$CMD_CHECK" | grep -qiE 'partout|tous les|toutes les|every|everywhere|all (usages|occurrences|references|places|files|instances)|exhaustive|each (usage|occurrence|reference|place|instance)|list all|find all|chercher partout|chaque|l.ensemble|la totalit|tout le|complete list|comprehensive|thoroughly'; then
+  exit 0
+fi
+# If grep uses -c (count) or pipes to wc, it's an exhaustive count — let it through
+if echo "$CMD_CHECK" | grep -qE '\s-[a-zA-Z]*c|\|\s*wc\s|\|\s*sort\s|\|\s*uniq\s'; then
+  exit 0
+fi
+
 PATTERN=$(extract_pattern)
 
 # If no pattern extracted, just provide advice
