@@ -54,10 +54,10 @@ pub struct ProjectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmbeddingMode {
+    #[default]
     Local,
     Openai,
     Voyage,
-    #[default]
     Disabled,
 }
 
@@ -83,7 +83,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            mode: EmbeddingMode::Disabled,
+            mode: EmbeddingMode::Local,
             model: None,
             openai_base_url: None,
             api_keys: ApiKeys::default(),

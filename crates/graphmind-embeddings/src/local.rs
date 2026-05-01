@@ -9,7 +9,8 @@ pub struct LocalEngine {
 
 impl LocalEngine {
     pub fn new(model_name: Option<&str>) -> Result<Self, EmbedError> {
-        let (model_enum, dims) = match model_name.unwrap_or("all-MiniLM-L6-v2") {
+        let name = model_name.unwrap_or("all-MiniLM-L6-v2");
+        let (model_enum, dims) = match name {
             "all-MiniLM-L6-v2" => (EmbeddingModel::AllMiniLML6V2, 384),
             "bge-small-en-v1.5" => (EmbeddingModel::BGESmallENV15, 384),
             other => {
@@ -18,6 +19,7 @@ impl LocalEngine {
                 )))
             }
         };
+        eprintln!("Loading local embedding model ({name})... (first run downloads ~30MB)");
         let model = TextEmbedding::try_new(
             InitOptions::new(model_enum).with_show_download_progress(true),
         )
