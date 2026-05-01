@@ -1,5 +1,6 @@
 use graphmind_config::{load_config, save_config, Registry};
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[tauri::command]
 pub fn get_app_version() -> String {
@@ -43,4 +44,45 @@ pub fn set_project_excludes(slug: String, excludes: Vec<String>) {
     Registry::update_project(&slug, |p| {
         p.exclude = excludes.clone();
     });
+}
+
+fn hook_path() -> PathBuf {
+    dirs::home_dir()
+        .expect("Could not find home directory")
+        .join(".claude")
+        .join("hooks")
+        .join("graphmind-search.sh")
+}
+
+#[tauri::command]
+pub fn get_hook_status() -> bool {
+    hook_path().exists()
+}
+
+#[tauri::command]
+pub fn install_claude_hook() -> Result<(), String> {
+    let output = std::process::Command::new("graphmind")
+        .arg("install-hook")
+        .output()
+        .map_err(|e| format!("Failed to run graphmind: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Install hook failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn uninstall_claude_hook() -> Result<(), String> {
+    let output = std::process::Command::new("graphmind")
+        .arg("uninstall-hook")
+        .output()
+        .map_err(|e| format!("Failed to run graphmind: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Uninstall hook failed: {}", stderr));
+    }
+    Ok(())
 }

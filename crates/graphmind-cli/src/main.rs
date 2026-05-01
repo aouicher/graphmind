@@ -108,6 +108,10 @@ enum Commands {
     },
     /// Install Claude Code skill
     InstallSkill,
+    /// Install Claude Code search hook (redirects grep/find to graphmind)
+    InstallHook,
+    /// Uninstall Claude Code search hook
+    UninstallHook,
     /// Memory operations
     Memory {
         #[command(subcommand)]
@@ -373,6 +377,12 @@ fn main() {
         },
         Commands::InstallSkill => {
             commands::install_skill::install_skill();
+        }
+        Commands::InstallHook => {
+            commands::claude_hook::install_hook();
+        }
+        Commands::UninstallHook => {
+            commands::claude_hook::uninstall_hook();
         }
         Commands::Memory { action } => match action {
             MemoryAction::Add {
