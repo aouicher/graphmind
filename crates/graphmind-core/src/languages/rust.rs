@@ -121,21 +121,28 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
 
     if node.kind() == "call_expression" {
         if let Some(func) = node.child_by_field_name("function") {
-            let callee = if func.kind() == "field_expression" {
-                func.child_by_field_name("field")
+            let (callee, receiver) = if func.kind() == "field_expression" {
+                let method = func.child_by_field_name("field")
                     .map(|p| node_text(p, source))
-                    .unwrap_or_else(|| node_text(func, source))
+                    .unwrap_or_else(|| node_text(func, source));
+                let recv = func.child_by_field_name("value")
+                    .map(|o| crate::extractor::extract_receiver_name(o, source));
+                (method, recv)
             } else if func.kind() == "scoped_identifier" {
-                func.child_by_field_name("name")
+                let method = func.child_by_field_name("name")
                     .map(|p| node_text(p, source))
-                    .unwrap_or_else(|| node_text(func, source))
+                    .unwrap_or_else(|| node_text(func, source));
+                let recv = func.child_by_field_name("path")
+                    .map(|o| node_text(o, source));
+                (method, recv)
             } else {
-                node_text(func, source)
+                (node_text(func, source), None)
             };
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
+                    receiver,
                     line: node.start_position().row as u32 + 1,
                 });
             }

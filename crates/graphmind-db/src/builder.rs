@@ -129,6 +129,7 @@ struct ParsedImport {
 struct ParsedCallSite {
     caller: String,
     callee: String,
+    receiver: Option<String>,
 }
 
 pub struct GraphBuilder {
@@ -311,6 +312,7 @@ impl GraphBuilder {
                     parsed.call_sites.iter().map(|cs| ParsedCallSite {
                         caller: cs.caller.clone(),
                         callee: cs.callee.clone(),
+                        receiver: cs.receiver.clone(),
                     }).collect(),
                 ));
             }
@@ -381,7 +383,24 @@ impl GraphBuilder {
                         })
                 });
 
-                // 3. Global fallback
+                // 3. Receiver-scoped lookup (if receiver is a known class/module)
+                let callee_id = callee_id.or_else(|| {
+                    cs.receiver.as_ref().and_then(|recv| {
+                        self.db.query_row(
+                            "SELECT s.id FROM symbols s
+                             JOIN symbols parent ON s.file = parent.file
+                             WHERE s.name = ?1
+                               AND parent.name = ?2
+                               AND parent.kind IN ('Class', 'Interface', 'Module')
+                               AND s.line_start >= parent.line_start
+                               AND s.line_end <= parent.line_end",
+                            params![cs.callee, recv],
+                            |r| r.get(0),
+                        ).ok()
+                    })
+                });
+
+                // 4. Global fallback
                 let (callee_id, confidence) = if let Some(id) = callee_id {
                     (Some(id), 1.0f64)
                 } else {
@@ -390,7 +409,8 @@ impl GraphBuilder {
                         params![cs.callee],
                         |r| r.get(0),
                     ).ok();
-                    (global_id, 0.5f64)
+                    let conf = if cs.receiver.is_some() { 0.3f64 } else { 0.5f64 };
+                    (global_id, conf)
                 };
 
                 if let Some(callee_id) = callee_id {

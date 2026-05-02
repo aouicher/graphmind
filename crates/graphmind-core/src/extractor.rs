@@ -29,6 +29,7 @@ pub struct Symbol {
 pub struct CallSite {
     pub caller: String,
     pub callee: String,
+    pub receiver: Option<String>,
     pub line: u32,
 }
 
@@ -235,17 +236,21 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
 
     if node.kind() == "call_expression" {
         if let Some(func) = node.child_by_field_name("function") {
-            let callee = if func.kind() == "member_expression" {
-                func.child_by_field_name("property")
+            let (callee, receiver) = if func.kind() == "member_expression" {
+                let method = func.child_by_field_name("property")
                     .map(|p| node_text(p, source))
-                    .unwrap_or_else(|| node_text(func, source))
+                    .unwrap_or_else(|| node_text(func, source));
+                let recv = func.child_by_field_name("object")
+                    .map(|o| extract_receiver_name(o, source));
+                (method, recv)
             } else {
-                node_text(func, source)
+                (node_text(func, source), None)
             };
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
+                    receiver,
                     line: node.start_position().row as u32 + 1,
                 });
             }
@@ -281,6 +286,29 @@ fn extract_doc_comment(node: Node, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn extract_receiver_name(node: Node, source: &str) -> String {
+    match node.kind() {
+        "identifier" | "constant" | "scope_resolution" => node_text(node, source),
+        "member_expression" | "attribute" | "selector_expression" | "field_expression" => {
+            node.child_by_field_name("property")
+                .or_else(|| node.child_by_field_name("attribute"))
+                .or_else(|| node.child_by_field_name("field"))
+                .map(|n| node_text(n, source))
+                .unwrap_or_else(|| node_text(node, source))
+        }
+        "call_expression" | "call" => {
+            node.child_by_field_name("function")
+                .or_else(|| node.child_by_field_name("method"))
+                .map(|n| node_text(n, source))
+                .unwrap_or_else(|| node_text(node, source))
+        }
+        _ => {
+            let text = node_text(node, source);
+            if text.len() > 40 { text[..40].to_string() } else { text }
+        }
+    }
 }
 
 fn node_text(node: Node, source: &str) -> String {

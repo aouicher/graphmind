@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-desktop"
-version = "0.2.63"
+version = "0.2.64"
 edition = "2021"
 license = "MIT"
 description = "GraphMind Desktop - Local-first code intelligence app"

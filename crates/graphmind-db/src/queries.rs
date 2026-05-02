@@ -233,13 +233,13 @@ impl<'a> GraphQueries<'a> {
              FROM edges e
              JOIN symbols s ON s.id = e.to_id
              JOIN symbols source ON source.id = e.from_id
-             WHERE source.name = ?1 AND source.file = ?2"
+             WHERE source.name = ?1 AND source.file = ?2 AND e.confidence >= 0.5"
         } else {
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content, e.kind as edge_kind
              FROM edges e
              JOIN symbols s ON s.id = e.to_id
              JOIN symbols source ON source.id = e.from_id
-             WHERE source.name = ?1"
+             WHERE source.name = ?1 AND e.confidence >= 0.5"
         };
         let mut stmt = self.db.prepare(sql).unwrap();
         let map_row = |row: &rusqlite::Row| {

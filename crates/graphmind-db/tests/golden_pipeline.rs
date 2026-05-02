@@ -151,9 +151,10 @@ fn callees_of_create_wallet() {
         "createWallet should call validateAddress, got {:?}",
         callee_names
     );
+    // logger.info no longer resolves via global fallback (receiver-aware: confidence < 0.5)
     assert!(
-        callee_names.contains(&"info"),
-        "createWallet should call logger.info (resolved to 'info'), got {:?}",
+        !callee_names.contains(&"info"),
+        "createWallet should NOT resolve logger.info to unrelated 'info' symbol, got {:?}",
         callee_names
     );
 }
