@@ -97,6 +97,18 @@ fi
 
 PATTERN=$(extract_pattern)
 
+# Cache deduplication: skip if same query was searched in last 5 minutes
+CACHE_FILE="/tmp/graphmind-hook-cache.txt"
+NOW=$(date +%s)
+if [ -n "$PATTERN" ] && [ -f "$CACHE_FILE" ]; then
+  NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+  while IFS='|' read -r TS Q; do
+    if [ "$Q" = "$NORM" ] && [ $((NOW - TS)) -lt 300 ]; then
+      exit 0
+    fi
+  done < <(tail -50 "$CACHE_FILE")
+fi
+
 # If no pattern extracted, just provide advice
 if [ -z "$PATTERN" ] || [ ${#PATTERN} -gt 200 ]; then
   MSG="⚡ graphmind is indexed. Use MCP gm_search, gm_fn, gm_deps, gm_query instead of grep/find for code patterns."
@@ -115,6 +127,11 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   ORIGINAL_INPUT=$(echo "$INPUT" | jq -c '.tool_input')
   UPDATED_INPUT=$(echo "$ORIGINAL_INPUT" | jq --arg cmd "$REWRITTEN" '.command = $cmd')
 
+  # Record in cache
+  NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+  echo "${NOW}|${NORM}" >> "$CACHE_FILE"
+  tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
+
   jq -n \
     --argjson updated "$UPDATED_INPUT" \
     '{
@@ -131,6 +148,11 @@ fi
 # For Grep/Glob/LS/Agent: execute graphmind and return results as additionalContext
 # (we can't rewrite these tools' input format, so we provide results + advice)
 RESULTS=$(graphmind search "$PATTERN" --limit 15 2>/dev/null | head -60)
+
+# Record in cache
+NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+echo "${NOW}|${NORM}" >> "$CACHE_FILE"
+tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
 
 if [ -n "$RESULTS" ]; then
   MSG="⚡ graphmind results for \"$PATTERN\" (use these instead of grep/ls):\n$RESULTS\n\n→ For more detail, use MCP gm_fn <symbol> or gm_deps <file>."
@@ -196,9 +218,26 @@ SEARCH_TERMS=$(echo "$PROMPT" \
   | tr '\n' ' ' \
   | sed 's/ *$//')
 
+# Cache deduplication: skip search if same terms queried in last 5 minutes
+CACHE_FILE="/tmp/graphmind-hook-cache.txt"
+NOW=$(date +%s)
 RESULTS=""
 if [ -n "$SEARCH_TERMS" ]; then
-  RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
+  NORM=$(echo "$SEARCH_TERMS" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+  CACHED=0
+  if [ -f "$CACHE_FILE" ]; then
+    while IFS='|' read -r TS Q; do
+      if [ "$Q" = "$NORM" ] && [ $((NOW - TS)) -lt 300 ]; then
+        CACHED=1
+        break
+      fi
+    done < <(tail -50 "$CACHE_FILE")
+  fi
+  if [ "$CACHED" -eq 0 ]; then
+    RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
+    echo "${NOW}|${NORM}" >> "$CACHE_FILE"
+    tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
+  fi
 fi
 
 if [ -n "$RESULTS" ]; then
