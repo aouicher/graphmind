@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-const GITHUB_REPO: &str = "aouicher/graphmind";
+const GITHUB_REPO: &str = "aouicher/graphmind-dist";
 
 fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -50,61 +50,37 @@ fn download_and_replace(version: &str) -> Result<(), String> {
     };
 
     let url = format!(
-        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/graphmind-{target}.tar.gz"
+        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/graphmind-{target}"
     );
 
     println!("  {} v{version} for {target}...", "Downloading".blue());
 
-    let download = Command::new("curl")
-        .args(["-fsSL", &url])
-        .output()
+    let tmp_path = std::env::temp_dir().join("graphmind-update-bin");
+
+    let status = Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&tmp_path)
+        .arg(&url)
+        .status()
         .map_err(|e| format!("Download failed: {e}"))?;
 
-    if !download.status.success() {
+    if !status.success() {
         return Err(format!("Failed to download v{version} from {url}"));
     }
 
-    let bin_path = get_current_binary_path();
-    let tmp_dir = std::env::temp_dir().join("graphmind-update");
-    fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
-
-    let tar_result = Command::new("tar")
-        .args(["xzf", "-", "-C"])
-        .arg(&tmp_dir)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child.stdin.as_mut().unwrap().write_all(&download.stdout)?;
-            child.wait()
-        })
-        .map_err(|e| format!("Extract failed: {e}"))?;
-
-    if !tar_result.success() {
-        return Err("Failed to extract update archive".to_string());
-    }
-
-    let new_binary = tmp_dir.join("graphmind");
-    if !new_binary.exists() {
-        return Err("Binary not found in archive".to_string());
-    }
-
-    fs::set_permissions(&new_binary, fs::Permissions::from_mode(0o755))
+    fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
 
-    // Replace current binary
+    let bin_path = get_current_binary_path();
     let backup = bin_path.with_extension("old");
     fs::rename(&bin_path, &backup).map_err(|e| format!("Failed to backup current binary: {e}"))?;
 
-    if let Err(e) = fs::rename(&new_binary, &bin_path) {
-        // Restore backup on failure
+    if let Err(e) = fs::rename(&tmp_path, &bin_path) {
         fs::rename(&backup, &bin_path).ok();
         return Err(format!("Failed to install new binary: {e}"));
     }
 
-    // Clean up
     fs::remove_file(&backup).ok();
-    fs::remove_dir_all(&tmp_dir).ok();
 
     Ok(())
 }

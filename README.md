@@ -39,6 +39,10 @@ cargo install --git https://github.com/aouicher/graphmind graphmind-cli
 curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/install.sh | bash
 ```
 
+### Desktop app (macOS)
+
+Download the `.dmg` from [Releases](https://github.com/aouicher/graphmind/releases). The app includes a guided onboarding that installs the CLI, configures PATH, sets up MCP/hooks/skill, and configures embeddings — no terminal needed.
+
 ### From source
 
 ```bash
@@ -377,6 +381,14 @@ graphmind uninstall hook-git      # remove git hooks
 graphmind sync [slug]             # inject graph context into CLAUDE.md
 graphmind sync --all              # update CLAUDE.md for all projects
 ```
+
+### Update
+```bash
+graphmind update                  # download and install latest version
+graphmind update --check          # check for updates without installing
+```
+
+If installed via Homebrew, use `brew upgrade graphmind` instead. The desktop app also checks for CLI updates at startup and offers one-click update.
 
 ## Token Optimization
 
