@@ -401,6 +401,20 @@ fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Opti
         lines.push(format!("# {symbol} [{slug}]"));
         for d in &definitions {
             lines.push(compact_symbol_line(d));
+            if include_content {
+                if let Some(content) = d.get("content").and_then(|v| v.as_str()) {
+                    if !content.is_empty() {
+                        let content_lines: Vec<&str> = content.lines().collect();
+                        if content_lines.len() <= 100 {
+                            lines.push(format!("\n```\n{content}\n```"));
+                        } else {
+                            let head: String = content_lines[..60].join("\n");
+                            let tail: String = content_lines[content_lines.len()-20..].join("\n");
+                            lines.push(format!("\n```\n{head}\n// ... ({} lines total)\n{tail}\n```", content_lines.len()));
+                        }
+                    }
+                }
+            }
         }
         if !callers.is_empty() {
             let trunc = if callers_truncated { format!(" (showing {}/{}", limit, compact_callers.len()) + ")" } else { String::new() };
@@ -1139,6 +1153,12 @@ fn fuse_fts_and_semantic(
     }
 
     let mut results: Vec<FusedResult> = scores.into_values().collect();
+    // Penalize test files so production code ranks higher
+    for r in &mut results {
+        if r.file.contains("/tests/") || r.file.contains("/test/") || r.file.contains("_test.") || r.file.contains(".test.") {
+            r.score *= 0.5;
+        }
+    }
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(limit);
     results

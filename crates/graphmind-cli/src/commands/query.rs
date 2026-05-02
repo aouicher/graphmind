@@ -46,18 +46,22 @@ pub fn query_symbol(name: &str, slug: Option<&str>) {
             }
         }
 
-        // Show callers/callees
+        // Show callers/callees (deduplicated)
         let callers = q.callers(&s.name);
-        if !callers.is_empty() {
-            println!("  {} ({}):", "Callers".green(), callers.len());
-            for c in &callers {
+        let mut seen = std::collections::HashSet::new();
+        let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
+        if !unique_callers.is_empty() {
+            println!("  {} ({}):", "Callers".green(), unique_callers.len());
+            for c in &unique_callers {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
         }
         let callees = q.callees(&s.name);
-        if !callees.is_empty() {
-            println!("  {} ({}):", "Callees".green(), callees.len());
-            for c in &callees {
+        seen.clear();
+        let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
+        if !unique_callees.is_empty() {
+            println!("  {} ({}):", "Callees".green(), unique_callees.len());
+            for c in &unique_callees {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
         }
