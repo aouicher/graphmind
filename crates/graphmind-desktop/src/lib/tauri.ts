@@ -89,6 +89,7 @@ export const api = {
   uninstallMcp: (clientId: string) => invoke<void>("uninstall_mcp_for_client", { clientId }),
   checkCliInstalled: () => invoke<CliStatus>("check_cli_installed"),
   installCli: () => invoke<CliStatus>("install_cli"),
+  ensureCliInPath: () => invoke<string>("ensure_cli_in_path"),
   getCliPath: () => invoke<string>("get_cli_path"),
   getGraphData: (slug: string, fileFilter?: string, kindFilter?: string, languageFilter?: string, limit?: number) =>
     invoke<GraphData>("get_graph_data", { slug, fileFilter: fileFilter || null, kindFilter: kindFilter || null, languageFilter: languageFilter || null, limit: limit || null }),

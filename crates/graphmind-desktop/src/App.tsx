@@ -5,24 +5,35 @@ import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
 import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
-import { api } from "./lib/tauri";
 
 type Page = "projects" | "integrations" | "settings";
+
+const ONBOARDING_KEY = "graphmind_onboarding_done";
 
 export default function App() {
   const [page, setPage] = useState<Page>("projects");
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.checkCliInstalled().then((status) => {
-      setNeedsSetup(!status.installed);
-    });
+    const done = localStorage.getItem(ONBOARDING_KEY);
+    if (done === "true") {
+      setNeedsSetup(false);
+    } else {
+      setNeedsSetup(true);
+    }
   }, []);
 
   if (needsSetup === null) return null;
 
   if (needsSetup) {
-    return <Setup onComplete={() => setNeedsSetup(false)} />;
+    return (
+      <Setup
+        onComplete={() => {
+          localStorage.setItem(ONBOARDING_KEY, "true");
+          setNeedsSetup(false);
+        }}
+      />
+    );
   }
 
   return (
