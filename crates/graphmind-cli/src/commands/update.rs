@@ -1,0 +1,159 @@
+use colored::Colorize;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+use std::process::Command;
+
+const GITHUB_REPO: &str = "aouicher/graphmind";
+
+fn current_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn get_latest_version() -> Result<String, String> {
+    let output = Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            "Accept: application/vnd.github+json",
+            &format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest"),
+        ])
+        .output()
+        .map_err(|e| format!("Failed to check for updates: {e}"))?;
+
+    if !output.status.success() {
+        return Err("Failed to fetch latest release info".to_string());
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    // Extract tag_name from JSON (avoid serde dependency)
+    let tag = body
+        .split("\"tag_name\"")
+        .nth(1)
+        .and_then(|s| s.split('"').nth(1))
+        .ok_or_else(|| "Could not parse release tag".to_string())?;
+
+    Ok(tag.trim_start_matches('v').to_string())
+}
+
+fn get_current_binary_path() -> PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("graphmind"))
+}
+
+fn download_and_replace(version: &str) -> Result<(), String> {
+    let target = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else if cfg!(target_os = "linux") {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        "x86_64-apple-darwin"
+    };
+
+    let url = format!(
+        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/graphmind-{target}.tar.gz"
+    );
+
+    println!("  {} v{version} for {target}...", "Downloading".blue());
+
+    let download = Command::new("curl")
+        .args(["-fsSL", &url])
+        .output()
+        .map_err(|e| format!("Download failed: {e}"))?;
+
+    if !download.status.success() {
+        return Err(format!("Failed to download v{version} from {url}"));
+    }
+
+    let bin_path = get_current_binary_path();
+    let tmp_dir = std::env::temp_dir().join("graphmind-update");
+    fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+
+    let tar_result = Command::new("tar")
+        .args(["xzf", "-", "-C"])
+        .arg(&tmp_dir)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child.stdin.as_mut().unwrap().write_all(&download.stdout)?;
+            child.wait()
+        })
+        .map_err(|e| format!("Extract failed: {e}"))?;
+
+    if !tar_result.success() {
+        return Err("Failed to extract update archive".to_string());
+    }
+
+    let new_binary = tmp_dir.join("graphmind");
+    if !new_binary.exists() {
+        return Err("Binary not found in archive".to_string());
+    }
+
+    fs::set_permissions(&new_binary, fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())?;
+
+    // Replace current binary
+    let backup = bin_path.with_extension("old");
+    fs::rename(&bin_path, &backup).map_err(|e| format!("Failed to backup current binary: {e}"))?;
+
+    if let Err(e) = fs::rename(&new_binary, &bin_path) {
+        // Restore backup on failure
+        fs::rename(&backup, &bin_path).ok();
+        return Err(format!("Failed to install new binary: {e}"));
+    }
+
+    // Clean up
+    fs::remove_file(&backup).ok();
+    fs::remove_dir_all(&tmp_dir).ok();
+
+    Ok(())
+}
+
+pub fn update(check_only: bool) {
+    let current = current_version();
+
+    print!("  {} ", "Checking".blue());
+    println!("current version: v{current}");
+
+    let latest = match get_latest_version() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("  {} {e}", "Error:".red());
+            std::process::exit(1);
+        }
+    };
+
+    if latest == current {
+        println!("  {} already on latest (v{current})", "✓".green());
+        return;
+    }
+
+    println!("  {} v{current} → v{latest}", "Update available:".yellow());
+
+    if check_only {
+        println!("\n  Run {} to update.", "graphmind update".bold());
+        return;
+    }
+
+    // Check if installed via Homebrew
+    let bin_path = get_current_binary_path();
+    let bin_str = bin_path.to_string_lossy();
+    if bin_str.contains("homebrew") || bin_str.contains("Cellar") {
+        println!(
+            "  {} Installed via Homebrew. Run: {}",
+            "Note:".yellow(),
+            "brew upgrade graphmind".bold()
+        );
+        return;
+    }
+
+    match download_and_replace(&latest) {
+        Ok(()) => {
+            println!("  {} Updated to v{latest}", "✓".green());
+        }
+        Err(e) => {
+            eprintln!("  {} {e}", "Error:".red());
+            std::process::exit(1);
+        }
+    }
+}
