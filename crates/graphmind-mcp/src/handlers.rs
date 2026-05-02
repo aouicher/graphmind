@@ -326,7 +326,8 @@ fn handle_query(args: &Value) -> Value {
 }
 
 fn compact_edges(gq: &GraphQueries, edges: &[graphmind_db::queries::SymbolWithEdge]) -> Vec<Value> {
-    edges.iter().map(|e| {
+    let mut seen = std::collections::HashSet::new();
+    edges.iter().filter(|e| seen.insert((e.name.clone(), e.file.clone(), e.line_start))).map(|e| {
         let snippet = e.content.as_deref().map(|c| {
             c.lines().take(3).collect::<Vec<_>>().join("\n")
         });
@@ -443,7 +444,7 @@ fn handle_fn(args: &Value) -> Value {
     let file_filter = args.get("file").and_then(|v| v.as_str());
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
-    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(true);
     let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
 
     if project_slug.is_some() {
