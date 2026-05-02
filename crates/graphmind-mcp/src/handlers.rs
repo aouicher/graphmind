@@ -382,6 +382,7 @@ fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::Symb
     }).collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize, include_content: bool, format: &str) -> Value {
     let symbols = gq.find_symbol_filtered(symbol, file, kind);
     let definitions = qualify_definitions(gq, &symbols, include_content);
