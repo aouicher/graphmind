@@ -59,35 +59,21 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     };
 
     let url = format!(
-        "https://github.com/aouicher/graphmind/releases/latest/download/graphmind-{target}.tar.gz"
+        "https://github.com/aouicher/graphmind-dist/releases/latest/download/graphmind-{target}"
     );
 
-    let output = std::process::Command::new("curl")
-        .args(["-fsSL", &url])
-        .output()
+    let bin_path = bin_dir.join("graphmind");
+
+    let status = std::process::Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&bin_path)
+        .arg(&url)
+        .status()
         .map_err(|e| format!("Download failed: {e}"))?;
 
-    if !output.status.success() {
+    if !status.success() {
         return Err("Failed to download CLI binary".to_string());
     }
-
-    let tar_output = std::process::Command::new("tar")
-        .args(["xzf", "-", "-C"])
-        .arg(&bin_dir)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child.stdin.as_mut().unwrap().write_all(&output.stdout)?;
-            child.wait()
-        })
-        .map_err(|e| format!("Extract failed: {e}"))?;
-
-    if !tar_output.success() {
-        return Err("Failed to extract CLI binary".to_string());
-    }
-
-    let bin_path = bin_dir.join("graphmind");
     fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
 
@@ -134,7 +120,7 @@ pub async fn check_cli_update() -> Result<UpdateInfo, String> {
             "-fsSL",
             "-H",
             "Accept: application/vnd.github+json",
-            "https://api.github.com/repos/aouicher/graphmind/releases/latest",
+            "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest",
         ])
         .output()
         .map_err(|e| format!("Failed to check for updates: {e}"))?;
