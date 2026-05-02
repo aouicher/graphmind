@@ -402,7 +402,6 @@ MCP responses are optimized for LLM consumption — minimal tokens, maximum sign
 
 **Hook cache deduplication:** The Claude Code hook skips duplicate searches within a 5-minute window. Same query → instant skip (0 tokens). Cache is per-session at `/tmp/graphmind-hook-cache.txt`.
 
-These optimizations reduce MCP response size by **50-70%** compared to v0.2.50, while preserving all useful signal for the LLM.
 
 ## MCP Tools Reference
 
