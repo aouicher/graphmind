@@ -242,29 +242,60 @@ jobs:
         with:
           path: artifacts
 
-      - name: Publish binaries to homebrew-graphmind and update formula
+      - name: Publish assets to graphmind-dist and update formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           VERSION="${TAG#v}"
-          TAP_REPO="aouicher/homebrew-graphmind"
+          DIST_REPO="aouicher/graphmind-dist"
 
-          # Create release on homebrew-graphmind and upload binaries
-          gh release create "$TAG" --repo "$TAP_REPO" --title "graphmind $TAG" --notes "graphmind $TAG binaries" 2>/dev/null || true
+          # Create release on graphmind-dist and upload binaries
+          gh release create "$TAG" --repo "$DIST_REPO" --title "graphmind $TAG" --notes "graphmind $TAG" 2>/dev/null || true
           for dir in artifacts/graphmind-*-*-darwin artifacts/graphmind-*-linux-*; do
             if [ -d "$dir" ]; then
               binary=$(ls "$dir")
-              gh release upload "$TAG" "$dir/$binary" --repo "$TAP_REPO" --clobber
+              gh release upload "$TAG" "$dir/$binary" --repo "$DIST_REPO" --clobber
             fi
           done
+
+          # Upload desktop DMGs
+          for dir in artifacts/graphmind-desktop-*; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"/*.dmg; do
+                gh release upload "$TAG" "$file" --repo "$DIST_REPO" --clobber
+              done
+            fi
+          done
+
+          # Generate latest.json for auto-updater (Tauri + CLI)
+          cat > /tmp/latest.json << JSON
+          {
+            "version": "${VERSION}",
+            "notes": "graphmind ${TAG}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+              },
+              "darwin-x86_64": {
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+              },
+              "linux-x86_64": {
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+              }
+            }
+          }
+          JSON
+          sed -i 's/^          //' /tmp/latest.json
+          gh release upload "$TAG" /tmp/latest.json --repo "$DIST_REPO" --clobber
 
           # Compute SHA256
           SHA_ARM64=$(shasum -a 256 artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin | cut -d' ' -f1)
           SHA_X64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)
           SHA_LINUX=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)
 
-          # Generate formula pointing to homebrew-graphmind releases
+          # Generate Homebrew formula
           cat > /tmp/graphmind.rb << RUBY
           class Graphmind < Formula
             desc "Local-first code intelligence CLI with MCP server"
@@ -274,16 +305,16 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
                 sha256 "${SHA_ARM64}"
               else
-                url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
                 sha256 "${SHA_X64}"
               end
             end
 
             on_linux do
-              url "https://github.com/${TAP_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+              url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
               sha256 "${SHA_LINUX}"
             end
 
@@ -299,10 +330,10 @@ jobs:
           RUBY
           sed -i 's/^          //' /tmp/graphmind.rb
 
-          # Update formula in tap repo
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-graphmind
-          cp /tmp/graphmind.rb /tmp/homebrew-graphmind/Formula/graphmind.rb
-          cd /tmp/homebrew-graphmind
+          # Update formula in dist repo
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${DIST_REPO}.git" /tmp/graphmind-dist
+          cp /tmp/graphmind.rb /tmp/graphmind-dist/Formula/graphmind.rb
+          cd /tmp/graphmind-dist
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/graphmind.rb

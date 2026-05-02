@@ -59,35 +59,21 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     };
 
     let url = format!(
-        "https://github.com/aouicher/graphmind/releases/latest/download/graphmind-{target}.tar.gz"
+        "https://github.com/aouicher/graphmind-dist/releases/latest/download/graphmind-{target}"
     );
 
-    let output = std::process::Command::new("curl")
-        .args(["-fsSL", &url])
-        .output()
+    let bin_path = bin_dir.join("graphmind");
+
+    let status = std::process::Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&bin_path)
+        .arg(&url)
+        .status()
         .map_err(|e| format!("Download failed: {e}"))?;
 
-    if !output.status.success() {
+    if !status.success() {
         return Err("Failed to download CLI binary".to_string());
     }
-
-    let tar_output = std::process::Command::new("tar")
-        .args(["xzf", "-", "-C"])
-        .arg(&bin_dir)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child.stdin.as_mut().unwrap().write_all(&output.stdout)?;
-            child.wait()
-        })
-        .map_err(|e| format!("Extract failed: {e}"))?;
-
-    if !tar_output.success() {
-        return Err("Failed to extract CLI binary".to_string());
-    }
-
-    let bin_path = bin_dir.join("graphmind");
     fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
 
@@ -114,6 +100,55 @@ pub fn get_cli_path() -> String {
         return local.to_string_lossy().to_string();
     }
     "graphmind".to_string()
+}
+
+#[derive(serde::Serialize)]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: String,
+    pub update_available: bool,
+}
+
+#[tauri::command]
+pub async fn check_cli_update() -> Result<UpdateInfo, String> {
+    let cli_path = get_cli_path();
+
+    let current = get_version(&cli_path).unwrap_or_else(|| "0.0.0".to_string());
+
+    let output = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to check for updates: {e}"))?;
+
+    if !output.status.success() {
+        return Err("Failed to fetch latest release".to_string());
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let latest = body
+        .split("\"tag_name\"")
+        .nth(1)
+        .and_then(|s| s.split('"').nth(1))
+        .map(|s| s.trim_start_matches('v').to_string())
+        .unwrap_or_else(|| current.clone());
+
+    let update_available = latest != current;
+
+    Ok(UpdateInfo {
+        current,
+        latest,
+        update_available,
+    })
+}
+
+#[tauri::command]
+pub async fn update_cli() -> Result<CliStatus, String> {
+    install_cli().await
 }
 
 #[tauri::command]
