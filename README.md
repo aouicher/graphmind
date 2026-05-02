@@ -384,12 +384,12 @@ MCP responses are optimized for LLM consumption — minimal tokens, maximum sign
 
 **Compact format (default):** One-line-per-symbol text output instead of verbose JSON. Example:
 ```
->> 5 result(s) for "payment" [FTS+semantic+graph]:
+>> 5 result(s) for "auth" [FTS+semantic+graph]:
 
-  PaymentService [Class] app/services/payment_service.rb:3 (0.95) [FTS+SEM]
-    < < ApplicationService
-  process_payment [Function] app/services/payment_service.rb:15 (0.82) [FTS+G]
-    (amount, currency, recipient) -> PaymentResult
+  AuthService [Class] src/services/auth.ts:3 (0.95) [FTS+SEM]
+    implements Service
+  validate_token [Function] src/services/auth.ts:15 (0.82) [FTS+G]
+    (token: string, scope?: string) -> TokenResult
 ```
 
 **Field pruning:** No `id`, no null signature/doc/content, no redundant `total_found`/`projects_searched` fields. Only useful information is returned.
