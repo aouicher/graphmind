@@ -41,19 +41,19 @@ fn get_current_binary_path() -> PathBuf {
 }
 
 fn download_and_replace(version: &str) -> Result<(), String> {
-    let target = if cfg!(target_arch = "aarch64") {
-        "aarch64-apple-darwin"
+    let asset = if cfg!(target_arch = "aarch64") {
+        "graphmind-cli-macos-arm64"
     } else if cfg!(target_os = "linux") {
-        "x86_64-unknown-linux-gnu"
+        "graphmind-cli-linux-x64"
     } else {
-        "x86_64-apple-darwin"
+        "graphmind-cli-macos-x64"
     };
 
     let url = format!(
-        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/graphmind-{target}"
+        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/{asset}"
     );
 
-    println!("  {} v{version} for {target}...", "Downloading".blue());
+    println!("  {} v{version} ({asset})...", "Downloading".blue());
 
     let tmp_path = std::env::temp_dir().join("graphmind-update-bin");
 

@@ -52,14 +52,14 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     let bin_dir = home_dir().join(".graphmind").join("bin");
     fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
 
-    let target = if cfg!(target_arch = "aarch64") {
-        "aarch64-apple-darwin"
+    let asset = if cfg!(target_arch = "aarch64") {
+        "graphmind-cli-macos-arm64"
     } else {
-        "x86_64-apple-darwin"
+        "graphmind-cli-macos-x64"
     };
 
     let url = format!(
-        "https://github.com/aouicher/graphmind-dist/releases/latest/download/graphmind-{target}"
+        "https://github.com/aouicher/graphmind-dist/releases/latest/download/{asset}"
     );
 
     let bin_path = bin_dir.join("graphmind");

@@ -233,8 +233,8 @@ jobs:
             fi
           done
 
-  update-homebrew:
-    needs: [release, rust-build]
+  publish-dist:
+    needs: [release, release-assets, rust-build, desktop-build]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -250,20 +250,29 @@ jobs:
           VERSION="${TAG#v}"
           DIST_REPO="aouicher/graphmind-dist"
 
-          # Create release on graphmind-dist and upload binaries
+          # Create release on graphmind-dist
           gh release create "$TAG" --repo "$DIST_REPO" --title "graphmind $TAG" --notes "graphmind $TAG" 2>/dev/null || true
-          for dir in artifacts/graphmind-*-*-darwin artifacts/graphmind-*-linux-*; do
-            if [ -d "$dir" ]; then
-              binary=$(ls "$dir")
-              gh release upload "$TAG" "$dir/$binary" --repo "$DIST_REPO" --clobber
-            fi
-          done
 
-          # Upload desktop DMGs
+          # Upload CLI binaries with clean names
+          cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
+          cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
+          cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
+          gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$DIST_REPO" --clobber
+          gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$DIST_REPO" --clobber
+          gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$DIST_REPO" --clobber
+
+          # Upload desktop DMGs with clean names
           for dir in artifacts/graphmind-desktop-*; do
             if [ -d "$dir" ]; then
+              ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
+              if [ "$ARCH" = "aarch64" ]; then
+                LABEL="arm64"
+              else
+                LABEL="x64"
+              fi
               for file in "$dir"/*.dmg; do
-                gh release upload "$TAG" "$file" --repo "$DIST_REPO" --clobber
+                cp "$file" "/tmp/GraphMind-macos-${LABEL}.dmg"
+                gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$DIST_REPO" --clobber
               done
             fi
           done
@@ -276,13 +285,13 @@ jobs:
             "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "platforms": {
               "darwin-aarch64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
               },
               "darwin-x86_64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
               },
               "linux-x86_64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
               }
             }
           }
@@ -291,9 +300,9 @@ jobs:
           gh release upload "$TAG" /tmp/latest.json --repo "$DIST_REPO" --clobber
 
           # Compute SHA256
-          SHA_ARM64=$(shasum -a 256 artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin | cut -d' ' -f1)
-          SHA_X64=$(shasum -a 256 artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin | cut -d' ' -f1)
-          SHA_LINUX=$(shasum -a 256 artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu | cut -d' ' -f1)
+          SHA_ARM64=$(shasum -a 256 /tmp/graphmind-cli-macos-arm64 | cut -d' ' -f1)
+          SHA_X64=$(shasum -a 256 /tmp/graphmind-cli-macos-x64 | cut -d' ' -f1)
+          SHA_LINUX=$(shasum -a 256 /tmp/graphmind-cli-linux-x64 | cut -d' ' -f1)
 
           # Generate Homebrew formula
           cat > /tmp/graphmind.rb << RUBY
@@ -305,16 +314,16 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-aarch64-apple-darwin"
+                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
                 sha256 "${SHA_ARM64}"
               else
-                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-apple-darwin"
+                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
                 sha256 "${SHA_X64}"
               end
             end
 
             on_linux do
-              url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-x86_64-unknown-linux-gnu"
+              url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
               sha256 "${SHA_LINUX}"
             end
 
