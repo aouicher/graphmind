@@ -215,20 +215,26 @@ jobs:
           TAG: ${{ needs.release.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
-          # Upload CLI binaries
-          for dir in artifacts/graphmind-aarch64-apple-darwin artifacts/graphmind-x86_64-apple-darwin artifacts/graphmind-x86_64-unknown-linux-gnu; do
-            if [ -d "$dir" ]; then
-              for file in "$dir"/*; do
-                gh release upload "$TAG" "$file" --repo "$REPO" --clobber
-              done
-            fi
-          done
+          # Upload CLI binaries with clean names
+          cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
+          cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
+          cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
+          gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$REPO" --clobber
+          gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$REPO" --clobber
+          gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$REPO" --clobber
 
-          # Upload desktop DMGs
+          # Upload desktop DMGs with clean names
           for dir in artifacts/graphmind-desktop-*; do
             if [ -d "$dir" ]; then
+              ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
+              if [ "$ARCH" = "aarch64" ]; then
+                LABEL="arm64"
+              else
+                LABEL="x64"
+              fi
               for file in "$dir"/*.dmg; do
-                gh release upload "$TAG" "$file" --repo "$REPO" --clobber
+                cp "$file" "/tmp/GraphMind-macos-${LABEL}.dmg"
+                gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$REPO" --clobber
               done
             fi
           done
