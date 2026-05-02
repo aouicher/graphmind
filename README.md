@@ -163,7 +163,10 @@ This registers hooks in `~/.claude/settings.json` for:
 - **UserPromptSubmit** — pre-fetches relevant graph context based on the user's prompt
 - **PostToolUse** — enriches results with graph-aware suggestions
 
-The hook automatically bypasses rewriting for exhaustive searches (e.g., "find all occurrences", `grep -c`, pipes to `wc`/`sort`).
+The hook includes built-in intelligence:
+- **Exhaustive search bypass** — detects "find all occurrences", `grep -c`, pipes to `wc`/`sort` and lets them through
+- **Cache deduplication** — identical searches within 5 minutes are skipped (0 tokens cost)
+- **Pattern extraction** — extracts meaningful search terms from grep, find, fd, rg commands and Agent prompts
 
 To uninstall:
 ```bash
@@ -374,6 +377,32 @@ graphmind uninstall hook-git      # remove git hooks
 graphmind sync [slug]             # inject graph context into CLAUDE.md
 graphmind sync --all              # update CLAUDE.md for all projects
 ```
+
+## Token Optimization
+
+MCP responses are optimized for LLM consumption — minimal tokens, maximum signal.
+
+**Compact format (default):** One-line-per-symbol text output instead of verbose JSON. Example:
+```
+>> 5 result(s) for "auth" [FTS+semantic+graph]:
+
+  AuthService [Class] src/services/auth.ts:3 (0.95) [FTS+SEM]
+    implements Service
+  validate_token [Function] src/services/auth.ts:15 (0.82) [FTS+G]
+    (token: string, scope?: string) -> TokenResult
+```
+
+**Field pruning:** No `id`, no null signature/doc/content, no redundant `total_found`/`projects_searched` fields. Only useful information is returned.
+
+**Smart limits:** Default 15 results (not 50). Truncation indicators (`+N more...`) shown only when results are capped.
+
+**Content opt-in:** Symbol source code is omitted by default. Pass `include_content: true` to any tool to get it.
+
+**JSON mode:** Pass `format: "json"` to any tool to get structured JSON output instead of compact text.
+
+**Hook cache deduplication:** The Claude Code hook skips duplicate searches within a 5-minute window. Same query → instant skip (0 tokens). Cache is per-session at `/tmp/graphmind-hook-cache.txt`.
+
+These optimizations reduce MCP response size by **50-70%** compared to v0.2.50, while preserving all useful signal for the LLM.
 
 ## MCP Tools Reference
 
