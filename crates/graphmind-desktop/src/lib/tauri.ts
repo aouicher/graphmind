@@ -30,6 +30,12 @@ export interface CliStatus {
   version: string | null;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  update_available: boolean;
+}
+
 export interface GraphNode {
   id: string;
   name: string;
@@ -90,6 +96,8 @@ export const api = {
   checkCliInstalled: () => invoke<CliStatus>("check_cli_installed"),
   installCli: () => invoke<CliStatus>("install_cli"),
   ensureCliInPath: () => invoke<string>("ensure_cli_in_path"),
+  checkCliUpdate: () => invoke<UpdateInfo>("check_cli_update"),
+  updateCli: () => invoke<CliStatus>("update_cli"),
   getCliPath: () => invoke<string>("get_cli_path"),
   getGraphData: (slug: string, fileFilter?: string, kindFilter?: string, languageFilter?: string, limit?: number) =>
     invoke<GraphData>("get_graph_data", { slug, fileFilter: fileFilter || null, kindFilter: kindFilter || null, languageFilter: languageFilter || null, limit: limit || null }),

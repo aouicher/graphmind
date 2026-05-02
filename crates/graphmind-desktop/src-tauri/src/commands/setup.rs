@@ -116,6 +116,55 @@ pub fn get_cli_path() -> String {
     "graphmind".to_string()
 }
 
+#[derive(serde::Serialize)]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: String,
+    pub update_available: bool,
+}
+
+#[tauri::command]
+pub async fn check_cli_update() -> Result<UpdateInfo, String> {
+    let cli_path = get_cli_path();
+
+    let current = get_version(&cli_path).unwrap_or_else(|| "0.0.0".to_string());
+
+    let output = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "https://api.github.com/repos/aouicher/graphmind/releases/latest",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to check for updates: {e}"))?;
+
+    if !output.status.success() {
+        return Err("Failed to fetch latest release".to_string());
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let latest = body
+        .split("\"tag_name\"")
+        .nth(1)
+        .and_then(|s| s.split('"').nth(1))
+        .map(|s| s.trim_start_matches('v').to_string())
+        .unwrap_or_else(|| current.clone());
+
+    let update_available = latest != current;
+
+    Ok(UpdateInfo {
+        current,
+        latest,
+        update_available,
+    })
+}
+
+#[tauri::command]
+pub async fn update_cli() -> Result<CliStatus, String> {
+    install_cli().await
+}
+
 #[tauri::command]
 pub fn ensure_cli_in_path() -> Result<String, String> {
     // If already in PATH, nothing to do

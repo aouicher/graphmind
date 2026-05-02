@@ -159,6 +159,11 @@ enum Commands {
         #[arg(long)]
         obsidian: Option<String>,
     },
+    /// Update graphmind to the latest version
+    Update {
+        #[arg(long)]
+        check: bool,
+    },
     /// Start MCP server
     Mcp,
 }
@@ -478,6 +483,9 @@ fn main() {
             obsidian,
         } => {
             commands::export::export(slug.as_deref(), &format, cross, obsidian.as_deref());
+        }
+        Commands::Update { check } => {
+            commands::update::update(check);
         }
         Commands::Mcp => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
