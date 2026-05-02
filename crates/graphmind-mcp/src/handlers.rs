@@ -152,6 +152,32 @@ fn err_text(msg: &str) -> Value {
     })
 }
 
+fn compact_symbol_line(s: &Value) -> String {
+    let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+    let kind = s.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+    let file = s.get("file").and_then(|v| v.as_str()).unwrap_or("?");
+    let line = s.get("line_start").and_then(|v| v.as_i64()).unwrap_or(0);
+    let sig = s.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+    if sig.is_empty() {
+        format!("  {name} [{kind}] {file}:{line}")
+    } else {
+        format!("  {name} [{kind}] {file}:{line}\n    ({sig})")
+    }
+}
+
+fn compact_edge_line(e: &Value) -> String {
+    let name = e.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+    let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+    let file = e.get("file").and_then(|v| v.as_str()).unwrap_or("?");
+    let line = e.get("line_start").and_then(|v| v.as_i64()).unwrap_or(0);
+    let sig = e.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+    if sig.is_empty() {
+        format!("  {name} [{kind}] {file}:{line}")
+    } else {
+        format!("  {name} [{kind}] {file}:{line}\n    ({sig})")
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
@@ -226,15 +252,17 @@ fn handle_query(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
     };
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let file_filter = args.get("file").and_then(|v| v.as_str());
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
+    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+    let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
 
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset)
+            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format)
         });
     }
 
@@ -245,7 +273,7 @@ fn handle_query(args: &Value) -> Value {
                 let gq = GraphQueries::new(&conn);
                 let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format);
                 }
             }
         }
@@ -263,18 +291,29 @@ fn handle_query(args: &Value) -> Value {
         let gq = GraphQueries::new(&conn);
         let found = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
         if !found.is_empty() {
+            let defs = qualify_definitions(&gq, &found, include_content);
             let callers = gq.callers_filtered(symbol, file_filter);
             let callees = gq.callees_filtered(symbol, file_filter);
             let compact_callers = compact_edges(&gq, &callers);
             let compact_callees = compact_edges(&gq, &callees);
-            results.push(json!({
+            let callers_truncated = compact_callers.len() > limit;
+            let callees_truncated = compact_callees.len() > limit;
+            let mut entry = json!({
                 "project": slug,
-                "definitions": found,
+                "definitions": defs,
                 "callers": compact_callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
                 "callees": compact_callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "total_callers": compact_callers.len(),
-                "total_callees": compact_callees.len(),
-            }));
+            });
+            let obj = entry.as_object_mut().unwrap();
+            if callers_truncated {
+                obj.insert("callers_truncated".into(), json!(true));
+                obj.insert("total_callers".into(), json!(compact_callers.len()));
+            }
+            if callees_truncated {
+                obj.insert("callees_truncated".into(), json!(true));
+                obj.insert("total_callees".into(), json!(compact_callees.len()));
+            }
+            results.push(entry);
         }
     }
     if results.is_empty() {
@@ -283,14 +322,13 @@ fn handle_query(args: &Value) -> Value {
     json_text(&json!({
         "symbol": symbol,
         "results": results,
-        "projects_searched": slugs.len()
     }))
 }
 
 fn compact_edges(gq: &GraphQueries, edges: &[graphmind_db::queries::SymbolWithEdge]) -> Vec<Value> {
     edges.iter().map(|e| {
         let snippet = e.content.as_deref().map(|c| {
-            c.lines().take(5).collect::<Vec<_>>().join("\n")
+            c.lines().take(3).collect::<Vec<_>>().join("\n")
         });
         let as_row = graphmind_db::queries::SymbolRow {
             id: e.id, name: e.name.clone(), kind: e.kind.clone(),
@@ -298,57 +336,101 @@ fn compact_edges(gq: &GraphQueries, edges: &[graphmind_db::queries::SymbolWithEd
             signature: e.signature.clone(), doc: e.doc.clone(), content: e.content.clone(),
         };
         let qualified = gq.resolve_qualified_name(&as_row);
-        json!({
+        let mut entry = json!({
             "name": e.name,
             "qualified_name": qualified,
             "kind": e.kind,
             "file": e.file,
             "line_start": e.line_start,
-            "signature": e.signature,
             "edge_kind": e.edge_kind,
-            "snippet": snippet,
-        })
+        });
+        let obj = entry.as_object_mut().unwrap();
+        if let Some(ref sig) = e.signature {
+            if !sig.is_empty() { obj.insert("signature".into(), json!(sig)); }
+        }
+        if let Some(ref s) = snippet {
+            if !s.is_empty() { obj.insert("snippet".into(), json!(s)); }
+        }
+        entry
     }).collect()
 }
 
-fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::SymbolRow]) -> Vec<Value> {
+fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::SymbolRow], include_content: bool) -> Vec<Value> {
     symbols.iter().map(|s| {
         let qualified = gq.resolve_qualified_name(s);
-        json!({
-            "id": s.id,
+        let mut entry = json!({
             "name": s.name,
             "qualified_name": qualified,
             "kind": s.kind,
             "file": s.file,
             "line_start": s.line_start,
             "line_end": s.line_end,
-            "signature": s.signature,
-            "doc": s.doc,
-            "content": s.content,
-        })
+        });
+        let obj = entry.as_object_mut().unwrap();
+        if let Some(ref sig) = s.signature {
+            if !sig.is_empty() { obj.insert("signature".into(), json!(sig)); }
+        }
+        if let Some(ref doc) = s.doc {
+            if !doc.is_empty() { obj.insert("doc".into(), json!(doc)); }
+        }
+        if include_content {
+            if let Some(ref content) = s.content {
+                obj.insert("content".into(), json!(content));
+            }
+        }
+        entry
     }).collect()
 }
 
-fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize) -> Value {
+#[allow(clippy::too_many_arguments)]
+fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize, include_content: bool, format: &str) -> Value {
     let symbols = gq.find_symbol_filtered(symbol, file, kind);
-    let definitions = qualify_definitions(gq, &symbols);
+    let definitions = qualify_definitions(gq, &symbols, include_content);
     let all_callers = gq.callers_filtered(symbol, file);
     let all_callees = gq.callees_filtered(symbol, file);
     let compact_callers = compact_edges(gq, &all_callers);
     let compact_callees = compact_edges(gq, &all_callees);
+    let callers_truncated = compact_callers.len() > limit;
+    let callees_truncated = compact_callees.len() > limit;
     let callers: Vec<_> = compact_callers.iter().skip(offset).take(limit).collect();
     let callees: Vec<_> = compact_callees.iter().skip(offset).take(limit).collect();
-    json_text(&json!({
+
+    if format == "compact" {
+        let mut lines = Vec::new();
+        lines.push(format!("# {symbol} [{slug}]"));
+        for d in &definitions {
+            lines.push(compact_symbol_line(d));
+        }
+        if !callers.is_empty() {
+            let trunc = if callers_truncated { format!(" (showing {}/{}", limit, compact_callers.len()) + ")" } else { String::new() };
+            lines.push(format!("\nCallers{}:", trunc));
+            for c in &callers { lines.push(compact_edge_line(c)); }
+        }
+        if !callees.is_empty() {
+            let trunc = if callees_truncated { format!(" (showing {}/{}", limit, compact_callees.len()) + ")" } else { String::new() };
+            lines.push(format!("\nCallees{}:", trunc));
+            for c in &callees { lines.push(compact_edge_line(c)); }
+        }
+        return text_content(&lines.join("\n"));
+    }
+
+    let mut result = json!({
         "project": slug,
         "symbol": symbol,
         "definitions": definitions,
         "callers": callers,
         "callees": callees,
-        "total_callers": compact_callers.len(),
-        "total_callees": compact_callees.len(),
-        "limit": limit,
-        "offset": offset
-    }))
+    });
+    let obj = result.as_object_mut().unwrap();
+    if callers_truncated {
+        obj.insert("callers_truncated".into(), json!(true));
+        obj.insert("total_callers".into(), json!(compact_callers.len()));
+    }
+    if callees_truncated {
+        obj.insert("callees_truncated".into(), json!(true));
+        obj.insert("total_callees".into(), json!(compact_callees.len()));
+    }
+    json_text(&result)
 }
 
 fn handle_fn(args: &Value) -> Value {
@@ -356,15 +438,17 @@ fn handle_fn(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
     };
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let file_filter = args.get("file").and_then(|v| v.as_str());
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
+    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+    let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
 
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset)
+            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format)
         });
     }
 
@@ -375,7 +459,7 @@ fn handle_fn(args: &Value) -> Value {
                 let gq = GraphQueries::new(&conn);
                 let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format);
                 }
             }
         }
@@ -393,18 +477,29 @@ fn handle_fn(args: &Value) -> Value {
         let gq = GraphQueries::new(&conn);
         let found = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
         if !found.is_empty() {
+            let defs = qualify_definitions(&gq, &found, include_content);
             let callers = gq.callers_filtered(symbol, file_filter);
             let callees = gq.callees_filtered(symbol, file_filter);
             let compact_callers = compact_edges(&gq, &callers);
             let compact_callees = compact_edges(&gq, &callees);
-            results.push(json!({
+            let callers_truncated = compact_callers.len() > limit;
+            let callees_truncated = compact_callees.len() > limit;
+            let mut entry = json!({
                 "project": slug,
-                "definitions": found,
+                "definitions": defs,
                 "callers": compact_callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
                 "callees": compact_callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "total_callers": compact_callers.len(),
-                "total_callees": compact_callees.len(),
-            }));
+            });
+            let obj = entry.as_object_mut().unwrap();
+            if callers_truncated {
+                obj.insert("callers_truncated".into(), json!(true));
+                obj.insert("total_callers".into(), json!(compact_callers.len()));
+            }
+            if callees_truncated {
+                obj.insert("callees_truncated".into(), json!(true));
+                obj.insert("total_callees".into(), json!(compact_callees.len()));
+            }
+            results.push(entry);
         }
     }
     if results.is_empty() {
@@ -413,7 +508,6 @@ fn handle_fn(args: &Value) -> Value {
     json_text(&json!({
         "symbol": symbol,
         "results": results,
-        "projects_searched": slugs.len()
     }))
 }
 
@@ -428,14 +522,18 @@ fn handle_deps(args: &Value) -> Value {
         let reverse = gq.file_reverse_deps(file);
         let all_symbols = gq.symbols_in_file(file);
         let symbols: Vec<_> = all_symbols.iter().take(limit).collect();
-        json_text(&json!({
+        let mut result = json!({
             "file": file,
             "dependencies": deps,
             "dependents": reverse,
             "symbols": symbols,
-            "total_symbols": all_symbols.len(),
-            "limit": limit
-        }))
+        });
+        if all_symbols.len() > limit {
+            let obj = result.as_object_mut().unwrap();
+            obj.insert("symbols_truncated".into(), json!(true));
+            obj.insert("total_symbols".into(), json!(all_symbols.len()));
+        }
+        json_text(&result)
     })
 }
 
@@ -852,6 +950,7 @@ fn handle_search(args: &Value) -> Value {
         .unwrap_or(20);
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+    let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
     let project_slug = args.get("project").and_then(|v| v.as_str());
 
     let slugs = if let Some(slug) = project_slug {
@@ -864,7 +963,6 @@ fn handle_search(args: &Value) -> Value {
     let embed_engine = load_embed_engine();
 
     let mut all_results: Vec<Value> = Vec::new();
-    let mut total_found = 0;
 
     for slug in &slugs {
         let db_path = graph_db_path(slug);
@@ -904,20 +1002,25 @@ fn handle_search(args: &Value) -> Value {
         };
 
         if !merged.is_empty() {
-            total_found += merged.len();
             let compact: Vec<Value> = merged.iter().map(|r| {
                 let mut entry = json!({
                     "name": r.name,
                     "kind": r.kind,
                     "file": r.file,
                     "line_start": r.line_start,
-                    "line_end": r.line_end,
-                    "signature": r.signature,
-                    "snippet": r.snippet,
                     "score": r.score,
                 });
+                let obj = entry.as_object_mut().unwrap();
+                if let Some(ref sig) = r.signature {
+                    if !sig.is_empty() { obj.insert("signature".into(), json!(sig)); }
+                }
+                if let Some(ref snippet) = r.snippet {
+                    if !snippet.is_empty() { obj.insert("snippet".into(), json!(snippet)); }
+                }
                 if include_content {
-                    entry.as_object_mut().unwrap().insert("content".to_string(), json!(r.content));
+                    if let Some(ref content) = r.content {
+                        obj.insert("content".into(), json!(content));
+                    }
                 }
                 entry
             }).collect();
@@ -928,13 +1031,22 @@ fn handle_search(args: &Value) -> Value {
         }
     }
 
-    json_text(&json!({
-        "query": raw_query,
-        "results": all_results,
-        "projects_searched": slugs.len(),
-        "total_found": total_found,
-        "limit": limit
-    }))
+    if format == "compact" {
+        let mut lines = vec![format!(">> {} result(s) for \"{}\":\n", all_results.iter().map(|r| r.get("symbols").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)).sum::<usize>(), raw_query)];
+        for r in &all_results {
+            if let Some(symbols) = r.get("symbols").and_then(|v| v.as_array()) {
+                for s in symbols {
+                    lines.push(compact_symbol_line(s));
+                }
+            }
+        }
+        text_content(&lines.join("\n"))
+    } else {
+        json_text(&json!({
+            "query": raw_query,
+            "results": all_results,
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -958,7 +1070,6 @@ struct FusedResult {
     kind: String,
     file: String,
     line_start: i64,
-    line_end: i64,
     signature: Option<String>,
     snippet: Option<String>,
     content: Option<String>,
@@ -968,14 +1079,13 @@ struct FusedResult {
 impl FusedResult {
     fn from_symbol(s: graphmind_db::queries::SymbolRow, score: Option<f64>) -> Self {
         let snippet = s.content.as_deref().map(|c| {
-            c.lines().take(5).collect::<Vec<_>>().join("\n")
+            c.lines().take(3).collect::<Vec<_>>().join("\n")
         });
         Self {
             name: s.name,
             kind: s.kind,
             file: s.file,
             line_start: s.line_start,
-            line_end: s.line_end,
             signature: s.signature,
             snippet,
             content: s.content,
@@ -998,13 +1108,12 @@ fn fuse_fts_and_semantic(
     for (i, s) in fts.iter().enumerate() {
         let key = format!("{}:{}:{}", s.file, s.name, s.line_start);
         let rrf_score = 1.0 / (k + i as f64 + 1.0);
-        let snippet = s.content.as_deref().map(|c| c.lines().take(5).collect::<Vec<_>>().join("\n"));
+        let snippet = s.content.as_deref().map(|c| c.lines().take(3).collect::<Vec<_>>().join("\n"));
         scores.entry(key).or_insert_with(|| FusedResult {
             name: s.name.clone(),
             kind: s.kind.clone(),
             file: s.file.clone(),
             line_start: s.line_start,
-            line_end: s.line_end,
             signature: s.signature.clone(),
             snippet,
             content: s.content.clone(),
@@ -1021,9 +1130,8 @@ fn fuse_fts_and_semantic(
             kind: r.symbol_kind.clone(),
             file: r.file.clone(),
             line_start: 0,
-            line_end: 0,
             signature: None,
-            snippet: Some(r.text.lines().take(5).collect::<Vec<_>>().join("\n")),
+            snippet: Some(r.text.lines().take(3).collect::<Vec<_>>().join("\n")),
             content: None,
             score: 0.0,
         }).score += rrf_score;
@@ -1053,7 +1161,6 @@ fn handle_listeners(args: &Value) -> Value {
     };
 
     let mut all_results: Vec<Value> = Vec::new();
-    let mut total_found = 0;
 
     for slug in &slugs {
         let db_path = graph_db_path(slug);
@@ -1066,22 +1173,26 @@ fn handle_listeners(args: &Value) -> Value {
         let gq = GraphQueries::new(&conn);
         let listeners = gq.find_listeners(event);
         if !listeners.is_empty() {
-            total_found += listeners.len();
             let compact: Vec<Value> = listeners.iter().map(|s| {
                 let qualified = gq.resolve_qualified_name(s);
                 let snippet = s.content.as_deref().map(|c| {
-                    c.lines().take(5).collect::<Vec<_>>().join("\n")
+                    c.lines().take(3).collect::<Vec<_>>().join("\n")
                 });
-                json!({
+                let mut entry = json!({
                     "name": s.name,
                     "qualified_name": qualified,
                     "kind": s.kind,
                     "file": s.file,
                     "line_start": s.line_start,
-                    "line_end": s.line_end,
-                    "signature": s.signature,
-                    "snippet": snippet,
-                })
+                });
+                let obj = entry.as_object_mut().unwrap();
+                if let Some(ref sig) = s.signature {
+                    if !sig.is_empty() { obj.insert("signature".into(), json!(sig)); }
+                }
+                if let Some(ref snip) = snippet {
+                    if !snip.is_empty() { obj.insert("snippet".into(), json!(snip)); }
+                }
+                entry
             }).collect();
             all_results.push(json!({
                 "project": slug,
@@ -1093,8 +1204,6 @@ fn handle_listeners(args: &Value) -> Value {
     json_text(&json!({
         "event": event,
         "results": all_results,
-        "projects_searched": slugs.len(),
-        "total_found": total_found
     }))
 }
 
@@ -1150,7 +1259,7 @@ fn handle_dead_code(args: &Value) -> Value {
 
     with_graph(args, |gq, proj| {
         let dead = gq.dead_code(kind, limit);
-        let qualified = qualify_definitions(gq, &dead);
+        let qualified = qualify_definitions(gq, &dead, false);
         json_text(&json!({
             "project": proj.slug,
             "dead_symbols": qualified,
