@@ -21,8 +21,9 @@ cargo test --workspace        # run tests
 
 ## User-facing setup
 ```bash
-graphmind setup               # one-command: hooks + MCP + skill + register + build
-graphmind setup --skip-build  # everything except build
+graphmind setup               # global one-time: hooks + MCP + skill
+graphmind init                # per-project: register + git hooks + build
+graphmind init --skip-build   # per-project without building
 ```
 
 ## Project Structure

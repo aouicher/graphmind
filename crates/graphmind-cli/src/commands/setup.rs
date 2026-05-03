@@ -7,59 +7,64 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().expect("Cannot determine home directory")
 }
 
-pub fn setup(path: Option<&str>, skip_build: bool) {
+/// Global one-time setup: hooks, MCP configs, skill
+pub fn setup() {
     println!(
         "\n{}  graphmind setup\n",
         "⚡".bold()
     );
 
-    // Step 1: Claude Code hooks
-    print_step(1, "Claude Code hooks");
+    print_step(1, 4, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    // Step 2: Claude Code skill
-    print_step(2, "Claude Code skill");
+    print_step(2, 4, "Claude Code skill");
     super::install_skill::install_skill();
 
-    // Step 3: Claude Desktop MCP
-    print_step(3, "Claude Desktop MCP config");
+    print_step(3, 4, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    // Step 4: MCP server in Claude Code settings
-    print_step(4, "Claude Code MCP server");
+    print_step(4, 4, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    // Step 5: Register project (if in a git repo)
+    println!("\n{}", "─".repeat(50).dimmed());
+    println!("{} Global setup complete.\n", "✓".green().bold());
+    println!("  Now run {} in each project you want to index.", "graphmind init".cyan().bold());
+    println!();
+}
+
+/// Per-project init: register, git hooks, build
+pub fn init(path: Option<&str>, skip_build: bool) {
     let project_path = path.unwrap_or(".");
-    print_step(5, &format!("Register project ({})", project_path));
+
+    println!(
+        "\n{}  graphmind init ({})\n",
+        "⚡".bold(),
+        project_path
+    );
+
+    print_step(1, 3, &format!("Register project ({})", project_path));
     super::register::register(project_path, None, &[]);
 
-    // Step 6: Git hooks
-    print_step(6, "Git hooks (post-commit + pre-push)");
+    print_step(2, 3, "Git hooks (post-commit + pre-push)");
     super::hooks::install(None);
 
-    // Step 7: Build
     if !skip_build {
-        print_step(7, "Build code graph");
+        print_step(3, 3, "Build code graph");
         super::build::build(None, false, false, false);
     } else {
-        print_step(7, "Build code graph (skipped)");
+        print_step(3, 3, "Build code graph (skipped)");
     }
 
-    // Summary
     println!("\n{}", "─".repeat(50).dimmed());
-    println!("{} Setup complete!\n", "✓".green().bold());
+    println!("{} Project ready.\n", "✓".green().bold());
     println!("  {} graphmind search \"<query>\"", "→".cyan());
     println!("  {} graphmind fn <name>", "→".cyan());
     println!("  {} graphmind map", "→".cyan());
-    println!(
-        "\n  AI tools (Claude Code, Claude Desktop) will now use graphmind"
-    );
-    println!("  automatically for code exploration.\n");
+    println!();
 }
 
-fn print_step(n: u8, label: &str) {
-    println!("  {} {}", format!("[{n}/7]").cyan().bold(), label);
+fn print_step(n: u8, total: u8, label: &str) {
+    println!("  {} {}", format!("[{n}/{total}]").cyan().bold(), label);
 }
 
 fn install_claude_desktop_mcp() {
@@ -154,7 +159,6 @@ fn claude_desktop_config_path() -> Option<PathBuf> {
             return Some(p.clone());
         }
     }
-    // Return the first candidate as default creation path on macOS
     if cfg!(target_os = "macos") {
         Some(candidates[0].clone())
     } else {

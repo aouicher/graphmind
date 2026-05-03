@@ -159,8 +159,10 @@ enum Commands {
         #[arg(long)]
         obsidian: Option<String>,
     },
-    /// One-command setup: hooks, MCP, project registration, build
-    Setup {
+    /// Global setup: Claude Code hooks, MCP configs, skill (run once)
+    Setup,
+    /// Initialize a project: register, git hooks, build (run per project)
+    Init {
         #[arg(default_value = ".")]
         path: String,
         #[arg(long)]
@@ -491,8 +493,11 @@ fn main() {
         } => {
             commands::export::export(slug.as_deref(), &format, cross, obsidian.as_deref());
         }
-        Commands::Setup { path, skip_build } => {
-            commands::setup::setup(Some(&path), skip_build);
+        Commands::Setup => {
+            commands::setup::setup();
+        }
+        Commands::Init { path, skip_build } => {
+            commands::setup::init(Some(&path), skip_build);
         }
         Commands::Update { check } => {
             commands::update::update(check);

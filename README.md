@@ -55,35 +55,35 @@ cp target/release/graphmind ~/.local/bin/
 ## Quick Start
 
 ```bash
-# In your project directory:
-graphmind setup
+graphmind setup          # once — configures Claude Code, Claude Desktop, hooks, skill
+cd ~/projects/myapp
+graphmind init           # per project — registers, installs git hooks, builds graph
 ```
 
 That's it. Claude Code and Claude Desktop will use graphmind automatically.
 
-Run `graphmind setup` in each project you want indexed. Global configuration (hooks, MCP, skill) is installed once on first run, then skipped on subsequent calls.
+### `graphmind setup` (once, global)
+
+Configures your machine so all AI tools can use graphmind:
+1. Claude Code hooks (rewrites grep/find, injects session context, pre-fetches on prompts)
+2. Claude Code skill (3-layer rule: graph → memory → raw files)
+3. Claude Desktop MCP (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+4. Claude Code MCP (`~/.claude/settings.json`)
+
+### `graphmind init` (per project)
+
+Registers and indexes a project:
+1. Registers current directory
+2. Installs git hooks (auto-rebuild on commit, impact check on push)
+3. Builds the code graph
 
 ```bash
-# Typical workflow:
-cd ~/projects/api && graphmind setup     # first project — installs everything
-cd ~/projects/web && graphmind setup     # second project — only registers + builds
-cd ~/projects/lib && graphmind setup     # same
+cd ~/projects/api && graphmind init
+cd ~/projects/web && graphmind init
+cd ~/projects/lib && graphmind init
 ```
 
-### What happens on first run (global, once)
-
-1. Claude Code hooks — rewrites grep/find to graphmind, injects session context
-2. Claude Code skill — 3-layer rule (graph → memory → raw files)
-3. Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-4. Claude Code MCP config (`~/.claude/settings.json`)
-
-### What happens every run (per project)
-
-5. Registers current directory as a project
-6. Installs git hooks (auto-rebuild on commit, impact check on push)
-7. Builds the code graph
-
-All steps are idempotent — already-configured items are skipped silently.
+Both commands are idempotent — safe to re-run.
 
 ### Manual setup (if you prefer granular control)
 
@@ -355,10 +355,11 @@ graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
 ```
 
-### Setup
+### Setup & Init
 ```bash
-graphmind setup [path]            # one-command full setup (hooks, MCP, build)
-graphmind setup --skip-build      # setup without building the graph
+graphmind setup                   # global one-time (hooks, MCP, skill)
+graphmind init [path]             # per-project (register, git hooks, build)
+graphmind init --skip-build       # per-project without building
 ```
 
 ### Install / Uninstall
