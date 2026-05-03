@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.69"
+version = "0.2.70"
 dependencies = [
  "chrono",
  "clap",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.69"
+version = "0.2.70"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
