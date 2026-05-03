@@ -13,6 +13,7 @@ graphmind-config = { path = "../../graphmind-config" }
 graphmind-core = { path = "../../graphmind-core" }
 graphmind-db = { path = "../../graphmind-db" }
 graphmind-memory = { path = "../../graphmind-memory" }
+graphmind-embeddings = { path = "../../graphmind-embeddings" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
