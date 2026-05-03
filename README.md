@@ -54,25 +54,36 @@ cp target/release/graphmind ~/.local/bin/
 
 ## Quick Start
 
-One command sets up everything — Claude Code hooks, Claude Desktop MCP, skill, project registration, git hooks, and builds the graph:
-
 ```bash
+# In your project directory:
 graphmind setup
 ```
 
-That's it. Claude Code and Claude Desktop will now use graphmind automatically for all code exploration.
+That's it. Claude Code and Claude Desktop will use graphmind automatically.
 
-### What `graphmind setup` does
+Run `graphmind setup` in each project you want indexed. Global configuration (hooks, MCP, skill) is installed once on first run, then skipped on subsequent calls.
 
-1. Installs Claude Code hooks (grep/find rewriting, session context, prompt pre-fetch)
-2. Installs Claude Code skill (3-layer rule)
-3. Configures MCP server in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-4. Configures MCP server in Claude Code (`~/.claude/settings.json`)
+```bash
+# Typical workflow:
+cd ~/projects/api && graphmind setup     # first project — installs everything
+cd ~/projects/web && graphmind setup     # second project — only registers + builds
+cd ~/projects/lib && graphmind setup     # same
+```
+
+### What happens on first run (global, once)
+
+1. Claude Code hooks — rewrites grep/find to graphmind, injects session context
+2. Claude Code skill — 3-layer rule (graph → memory → raw files)
+3. Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+4. Claude Code MCP config (`~/.claude/settings.json`)
+
+### What happens every run (per project)
+
 5. Registers current directory as a project
 6. Installs git hooks (auto-rebuild on commit, impact check on push)
 7. Builds the code graph
 
-Each step is idempotent — run `graphmind setup` again after updates or in new projects.
+All steps are idempotent — already-configured items are skipped silently.
 
 ### Manual setup (if you prefer granular control)
 
@@ -173,15 +184,11 @@ graphmind install hook-git
 
 ### Multi-project setup
 
-Register multiple projects, then Claude can query across all of them:
+After setting up multiple projects, Claude can query across all of them:
 
 ```bash
-cd ~/projects/api && graphmind setup
-cd ~/projects/web && graphmind setup
-cd ~/projects/shared-lib && graphmind setup
-
-graphmind cross link infer    # auto-detect shared symbols
-graphmind sync --all
+graphmind cross link infer    # auto-detect shared symbols across projects
+graphmind sync --all          # update CLAUDE.md in all projects
 ```
 
 ## Architecture
