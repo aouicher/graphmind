@@ -351,6 +351,10 @@ graphmind cycles [slug]       # circular dependencies
 graphmind search "<query>"          # hybrid FTS + semantic + graph
 graphmind search "<q1>; <q2>"       # multi-query
 graphmind search "<query>" --kind class
+```
+
+### Embeddings
+```bash
 graphmind embed                     # show embedding index status
 graphmind embed --run               # generate embeddings for current project
 graphmind embed --run --all         # generate embeddings for all projects
