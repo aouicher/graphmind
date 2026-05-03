@@ -94,7 +94,7 @@ enum Commands {
         #[arg(long)]
         kind: Option<String>,
     },
-    /// Generate embeddings (coming soon)
+    /// Show embedding index status
     Embed,
     /// Session logging and context
     Session {
