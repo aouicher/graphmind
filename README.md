@@ -223,6 +223,13 @@ graphmind sync --all          # update CLAUDE.md in all projects
 
 ## Commands
 
+### Setup & Init
+```bash
+graphmind setup                   # global one-time (hooks, MCP, skill)
+graphmind init [path]             # per-project (register, git hooks, build)
+graphmind init --skip-build       # per-project without building
+```
+
 ### Registry
 ```bash
 graphmind register [path]     # register current dir
@@ -353,13 +360,6 @@ graphmind diff-impact --depth 3     # limit trace depth
 graphmind session start [slug]      # log session start
 graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
-```
-
-### Setup & Init
-```bash
-graphmind setup                   # global one-time (hooks, MCP, skill)
-graphmind init [path]             # per-project (register, git hooks, build)
-graphmind init --skip-build       # per-project without building
 ```
 
 ### Install / Uninstall
