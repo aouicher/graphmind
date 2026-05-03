@@ -644,7 +644,6 @@ fn handle_memory_add(args: &Value) -> Value {
         Some(c) => c,
         None => return err_text("Missing required parameter: content"),
     };
-    let confirmed = args.get("confirmed").and_then(|v| v.as_bool()).unwrap_or(false);
     let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
     let tags: Vec<String> = args
@@ -667,20 +666,6 @@ fn handle_memory_add(args: &Value) -> Value {
         _ => MemoryType::Context,
     };
 
-    if !confirmed {
-        return json_text(&json!({
-            "confirmation_required": true,
-            "preview": {
-                "content": content,
-                "project": project,
-                "global": global,
-                "type": entry_type_str,
-                "tags": tags,
-            },
-            "message": "Call gm_memory_add again with confirmed: true to save."
-        }));
-    }
-
     let store = MemoryStore::new(&memory_dir());
     let entry = store.add(
         content,
@@ -691,11 +676,7 @@ fn handle_memory_add(args: &Value) -> Value {
             tags,
         },
     );
-    json_text(&json!({
-        "saved": true,
-        "id": entry.id,
-        "created": entry.created
-    }))
+    text_content(&format!("✓ Saved to memory (id: {}, type: {})", entry.id, entry_type_str))
 }
 
 fn handle_memory_list(args: &Value) -> Value {
