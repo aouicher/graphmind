@@ -267,6 +267,45 @@ OpenAI-compatible providers (Azure, proxies) can set a custom base URL:
 }
 ```
 
+## Persistent Memory
+
+graphmind gives Claude persistent memory across sessions — not just code, but decisions, patterns, conventions, and context.
+
+### How it works
+
+Memory is **fully automatic**:
+- **Auto-recall** — at each prompt, the hook searches memory for relevant context and injects it into the conversation. No action needed.
+- **Auto-save** — Claude proactively saves important facts (decisions, patterns, conventions, bugs, context) without asking. You'll see a brief mention of what was saved.
+
+This works for both **Claude Code** (via hooks) and **Claude Desktop** (via MCP instructions).
+
+### What gets saved
+
+| Type | Examples |
+|------|----------|
+| `decision` | Architecture choices, tech decisions, trade-off resolutions |
+| `pattern` | Recurring approaches, solutions, code patterns |
+| `convention` | Naming rules, workflow conventions, style guides |
+| `bug` | Known issues, workarounds, gotchas |
+| `context` | Business context, project goals, user preferences |
+
+### Storage
+
+Memories are stored as JSONL files in `~/.graphmind/memory/`:
+- `global.jsonl` — cross-project knowledge (user preferences, team conventions)
+- `<project-slug>.jsonl` — project-specific facts
+
+### Manual control
+
+```bash
+graphmind memory add "<fact>" [--project <slug>] [--global]
+graphmind memory search "<query>"
+graphmind memory list
+graphmind memory delete <id>
+```
+
+Memories persist indefinitely until explicitly deleted. They are recalled automatically — you never need to ask "do you remember X?".
+
 ## Commands
 
 ### Setup & Init
