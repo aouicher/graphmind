@@ -182,22 +182,13 @@ graphmind install hook-git
 
 </details>
 
-### Multi-project setup
-
-After setting up multiple projects, Claude can query across all of them:
-
-```bash
-graphmind cross link infer    # auto-detect shared symbols across projects
-graphmind sync --all          # update CLAUDE.md in all projects
-```
-
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
 │  Claude Code / MCP Client                    │
 ├─────────────────────────────────────────────┤
-│  MCP Server (rmcp SDK, stdio) — 24 tools      │
+│  MCP Server (rmcp SDK, stdio) — 24 tools     │
 │  gm_query · gm_fn · gm_deps · gm_impact    │
 │  gm_outline · gm_who_calls_chain · gm_dead  │
 │  gm_export · gm_similar · gm_listeners      │
@@ -219,6 +210,61 @@ graphmind sync --all          # update CLAUDE.md in all projects
 │  Rust Core (tree-sitter + napi-rs)           │
 │  Multi-language parsing · Symbol extraction  │
 └─────────────────────────────────────────────┘
+```
+
+## Search & Embeddings
+
+graphmind search combines three retrieval strategies into a single ranked result:
+
+```bash
+graphmind search "<query>"          # hybrid search (FTS + semantic + graph)
+graphmind search "<q1>; <q2>"       # multi-query with RRF ranking
+graphmind search "<query>" --kind function
+```
+
+### How search works
+
+1. **FTS5** — exact text matching on symbol names, signatures, docs
+2. **Semantic embeddings** — cosine similarity finds conceptually related symbols (e.g. "money transfer" → `payment_service`)
+3. **Graph expansion** — top results are expanded with 1-hop callers/callees from the structural graph
+
+Results are fused via Reciprocal Rank Fusion (RRF, k=60). Each result shows its source: `[FTS]`, `[SEM]`, `[GRAPH]`, or combinations like `[FTS+SEM+G]`.
+
+### Embedding providers
+
+Configured in `~/.graphmind/config.json`:
+
+```json
+{
+  "embedding": {
+    "mode": "voyage",
+    "model": "voyage-code-3",
+    "api_keys": {
+      "voyage": "pa-..."
+    }
+  }
+}
+```
+
+| Mode | Model (default) | Notes |
+|------|----------------|-------|
+| `local` | `all-MiniLM-L6-v2` (384d) | ONNX, no API key needed |
+| `openai` | `text-embedding-3-small` (1536d) | Supports custom `openai_base_url` |
+| `voyage` | `voyage-code-3` (1024d) | Code-specialized, recommended |
+| `disabled` | — | No embeddings (default) |
+
+Embeddings are computed automatically during `graphmind build` when a provider is configured. If the model changes, the embedding index is rebuilt automatically.
+
+OpenAI-compatible providers (Azure, proxies) can set a custom base URL:
+```json
+{
+  "embedding": {
+    "mode": "openai",
+    "model": "text-embedding-3-large",
+    "openai_base_url": "https://your-proxy.example.com/v1",
+    "api_keys": { "openai": "sk-..." }
+  }
+}
 ```
 
 ## Commands
@@ -248,23 +294,25 @@ graphmind clean [slug]        # remove graph cache (forces full rebuild)
 graphmind clean --all         # clean all projects
 ```
 
-### Exclude
-```bash
-graphmind exclude list                    # show all patterns
-graphmind exclude add grafana-data        # exclude from current project
-graphmind exclude add grafana-data --global  # exclude from all projects
-graphmind exclude remove grafana-data     # re-include
-```
-
 ### Query
 ```bash
 graphmind query <symbol>      # find symbol + connections
-graphmind fn <symbol>         # call chain + callers
+graphmind fn <symbol>         # full detail with source + callers/callees
 graphmind deps <file>         # file dependency map
 graphmind impact <file>       # transitive reverse deps
 graphmind fn-impact <symbol>  # blast radius
+graphmind diff-impact         # impact of current git changes
+graphmind diff-impact --staged
 graphmind map [slug]          # most-connected files
 graphmind cycles [slug]       # circular dependencies
+```
+
+### Search
+```bash
+graphmind search "<query>"          # hybrid FTS + semantic + graph
+graphmind search "<q1>; <q2>"       # multi-query
+graphmind search "<query>" --kind class
+graphmind embed                     # show embedding index status
 ```
 
 ### Memory
@@ -273,70 +321,6 @@ graphmind memory add "<fact>" [--project <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>
-```
-
-### Search
-```bash
-graphmind search "<query>"          # hybrid search (FTS + semantic + graph)
-graphmind search "<q1>; <q2>"       # multi-query with RRF ranking
-graphmind search "<query>" --kind function
-```
-
-Search uses a 3-stage pipeline:
-1. **FTS5** — exact text matching on symbol names, signatures, docs
-2. **Semantic embeddings** — cosine similarity finds conceptually related symbols (e.g. "money transfer" → `payment_service`)
-3. **Graph expansion** — top results are expanded with 1-hop callers/callees from the structural graph
-
-Results are fused via Reciprocal Rank Fusion (RRF, k=60). Each result shows its source: `[FTS]`, `[SEM]`, `[GRAPH]`, or combinations like `[FTS+SEM+G]`.
-
-### Embeddings
-
-Semantic vector search over symbols. Configured in `~/.graphmind/config.json`:
-
-```json
-{
-  "embedding": {
-    "mode": "voyage",
-    "model": "voyage-code-3",
-    "api_keys": {
-      "voyage": "pa-..."
-    }
-  }
-}
-```
-
-**Providers:**
-
-| Mode | Model (default) | Notes |
-|------|----------------|-------|
-| `local` | `all-MiniLM-L6-v2` (384d) | ONNX, no API key needed |
-| `openai` | `text-embedding-3-small` (1536d) | Supports custom `openai_base_url` |
-| `voyage` | `voyage-code-3` (1024d) | Code-specialized, recommended |
-| `disabled` | — | No embeddings (default) |
-
-Embeddings are computed automatically during `graphmind build` when a provider is configured. If the model changes, the embedding index is rebuilt automatically.
-
-During search, semantic results are enriched with graph context: the structural graph expands top hits with their callers and callees, surfacing related symbols that neither text nor embedding search would find alone.
-
-OpenAI-compatible providers (Azure, proxys) can set a custom base URL:
-```json
-{
-  "embedding": {
-    "mode": "openai",
-    "model": "text-embedding-3-large",
-    "openai_base_url": "https://your-proxy.example.com/v1",
-    "api_keys": { "openai": "sk-..." }
-  }
-}
-```
-
-### Export
-```bash
-graphmind export [slug] -f dot            # Graphviz dot format
-graphmind export [slug] -f mermaid        # Mermaid diagram
-graphmind export [slug] -f json           # JSON graph
-graphmind export --cross -f mermaid       # cross-project diagram
-graphmind export --obsidian ~/vault/      # Obsidian vault with [[wikilinks]]
 ```
 
 ### Cross-Project
@@ -348,11 +332,21 @@ graphmind cross link add <a> <b>    # manual link
 graphmind cross link infer          # auto-detect shared symbols
 ```
 
-### Diff Impact
+### Export
 ```bash
-graphmind diff-impact               # impact of current git changes
-graphmind diff-impact --staged      # staged changes only
-graphmind diff-impact --depth 3     # limit trace depth
+graphmind export [slug] -f dot            # Graphviz dot format
+graphmind export [slug] -f mermaid        # Mermaid diagram
+graphmind export [slug] -f json           # JSON graph
+graphmind export --cross -f mermaid       # cross-project diagram
+graphmind export --obsidian ~/vault/      # Obsidian vault with [[wikilinks]]
+```
+
+### Exclude
+```bash
+graphmind exclude list                    # show all patterns
+graphmind exclude add grafana-data        # exclude from current project
+graphmind exclude add grafana-data --global
+graphmind exclude remove grafana-data
 ```
 
 ### Sessions
@@ -405,7 +399,6 @@ MCP responses are optimized for LLM consumption — minimal tokens, maximum sign
 
 **Hook cache deduplication:** The Claude Code hook skips duplicate searches within a 5-minute window. Same query → instant skip (0 tokens). Cache is per-session at `/tmp/graphmind-hook-cache.txt`.
 
-
 ## MCP Tools Reference
 
 graphmind exposes 24 tools via MCP (Model Context Protocol):
@@ -413,14 +406,14 @@ graphmind exposes 24 tools via MCP (Model Context Protocol):
 | Tool | Description |
 |------|-------------|
 | `gm_query` | Find symbol and its connections |
-| `gm_fn` | Function call chain + callers |
+| `gm_fn` | Function detail with source + callers/callees |
 | `gm_deps` | File-level dependency map |
 | `gm_impact` | Transitive reverse dependencies |
 | `gm_fn_impact` | Blast radius for a symbol |
 | `gm_diff_impact` | Impact of current git changes |
 | `gm_map` | Most-connected files |
 | `gm_cycles` | Circular dependency detection |
-| `gm_search` | Full-text search across symbols |
+| `gm_search` | Hybrid search (FTS + semantic + graph) |
 | `gm_listeners` | Find event listeners by event name |
 | `gm_outline` | Hierarchical file structure with qualified names |
 | `gm_who_calls_chain` | Transitive caller chain (BFS) |
