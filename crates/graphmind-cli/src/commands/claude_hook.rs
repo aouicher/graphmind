@@ -173,7 +173,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind SessionStart hook — auto-loads project context at session start
+# graphmind SessionStart hook — auto-loads project context + memory at session start
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -185,7 +185,16 @@ graphmind status &>/dev/null || exit 0
 STATUS=$(graphmind status 2>/dev/null | head -10)
 MAP=$(graphmind map 2>/dev/null | head -30)
 
+# Load recent memories
+MEMORIES=$(graphmind memory list --limit 10 2>/dev/null | head -20)
+
 MSG="[graphmind] Project indexed and ready. Use MCP tools (gm_search, gm_fn, gm_deps, gm_map, gm_outline, gm_query) for ALL code exploration before grep/find/ls.\n\nProject status:\n$STATUS\n\nTop-level structure:\n$MAP"
+
+if [ -n "$MEMORIES" ]; then
+  MSG="$MSG\n\nRecent memories:\n$MEMORIES"
+fi
+
+MSG="$MSG\n\nAuto-memory is ON: proactively save decisions, patterns, conventions, and context via gm_memory_add (no confirmation needed). Recall with gm_memory_search."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
@@ -196,7 +205,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const USER_PROMPT_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind UserPromptSubmit hook — pre-fetches context for exploration questions
+# graphmind UserPromptSubmit hook — memory recall + code pre-fetch
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -204,10 +213,8 @@ if ! command -v graphmind &>/dev/null; then exit 0; fi
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // .prompt // empty')
 
-# Only activate for exploration-type questions
-if ! echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour'; then
-  exit 0
-fi
+# Skip very short prompts (< 10 chars)
+if [ ${#PROMPT} -lt 10 ]; then exit 0; fi
 
 # Check if we're in a graphmind-registered project
 graphmind status &>/dev/null || exit 0
@@ -217,15 +224,18 @@ SEARCH_TERMS=$(echo "$PROMPT" \
   | tr '[:upper:]' '[:lower:]' \
   | sed -E 's/[^a-z0-9_]+/ /g' \
   | tr ' ' '\n' \
-  | grep -vE '^(comment|how|where|what|who|show|montre|explique|explain|trace|parcour|fonctionne|marche|does|is|me|moi|la|le|les|the|this|that|a|an|de|du|des|un|une|et|ou|en|au|pour|avec|sur|dans|qui|que|ce|ca|il|elle|nous|vous|ils|sont|est|a|ont|fait|faire|peut|doit|from|to|in|of|and|or|but|not|for|with|on|at|by|all|each|can|will|would|should|could|may|might|just|also|very|too|here|there|now|then|be|been|have|has|had|do|it|its|i|you|we|they)$' \
+  | grep -vE '^(comment|how|where|what|who|show|montre|explique|explain|trace|parcour|fonctionne|marche|does|is|me|moi|la|le|les|the|this|that|a|an|de|du|des|un|une|et|ou|en|au|pour|avec|sur|dans|qui|que|ce|ca|il|elle|nous|vous|ils|sont|est|a|ont|fait|faire|peut|doit|from|to|in|of|and|or|but|not|for|with|on|at|by|all|each|can|will|would|should|could|may|might|just|also|very|too|here|there|now|then|be|been|have|has|had|do|it|its|i|you|we|they|je|tu|il|on|ne|pas|plus|aussi|bien|tout|rien|encore|deja|toujours|jamais|trop|peu|maintenant|ici|oui|non|ok|go|fais|veux|peux|dois|bump|version|commit|push|test|build|run|check|fix|add|remove|update|change|make|create|delete|set|get|put)$' \
   | head -5 \
   | tr '\n' ' ' \
   | sed 's/ *$//')
 
-# Cache deduplication: skip search if same terms queried in last 5 minutes
+# Cache deduplication: skip if same terms queried in last 5 minutes
 CACHE_FILE="/tmp/graphmind-hook-cache.txt"
 NOW=$(date +%s)
-RESULTS=""
+
+MEMORY=""
+CODE_RESULTS=""
+
 if [ -n "$SEARCH_TERMS" ]; then
   NORM=$(echo "$SEARCH_TERMS" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
   CACHED=0
@@ -238,17 +248,35 @@ if [ -n "$SEARCH_TERMS" ]; then
     done < <(tail -50 "$CACHE_FILE")
   fi
   if [ "$CACHED" -eq 0 ]; then
-    RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
+    # Memory recall — always search memory for relevant context
+    MEMORY=$(graphmind memory search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -20)
+
+    # Code pre-fetch — only for exploration-type questions
+    if echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look'; then
+      CODE_RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
+    fi
+
     echo "${NOW}|${NORM}" >> "$CACHE_FILE"
     tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
   fi
 fi
 
-if [ -n "$RESULTS" ]; then
-  MSG="[graphmind pre-fetch] Relevant symbols found for this query:\n$RESULTS\n\n→ Use MCP tools (gm_fn, gm_deps, gm_map, gm_outline) to explore further. Avoid grep/find/ls for code navigation."
-else
-  MSG="[graphmind] This project is indexed. Use MCP tools (gm_fn, gm_search, gm_deps, gm_map) for code exploration instead of grep/find/ls."
+# Build context message
+MSG=""
+
+if [ -n "$MEMORY" ]; then
+  MSG="[graphmind memory] Relevant memories for this conversation:\n$MEMORY\n\n"
 fi
+
+if [ -n "$CODE_RESULTS" ]; then
+  MSG="${MSG}[graphmind code] Relevant symbols:\n$CODE_RESULTS\n\n"
+fi
+
+if [ -z "$MSG" ]; then
+  MSG="[graphmind] Project indexed. Use MCP tools for code exploration. Memory is active — decisions and context are auto-saved across sessions."
+fi
+
+MSG="${MSG}→ Auto-memory is ON: save decisions/patterns/conventions via gm_memory_add (no confirmation needed). Recall via gm_memory_search."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {

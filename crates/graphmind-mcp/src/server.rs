@@ -92,15 +92,14 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["query"]
         })),
-        make_tool("gm_memory_add", "Add a fact to memory (requires confirmation). Returns preview before saving.", json!({
+        make_tool("gm_memory_add", "Save a fact to persistent memory. Use proactively when decisions, patterns, conventions, preferences, or important context emerge. No confirmation needed — saves immediately.", json!({
             "type": "object",
             "properties": {
-                "content": { "type": "string", "description": "The fact/decision/pattern to remember" },
+                "content": { "type": "string", "description": "The fact/decision/pattern to remember. Keep atomic: one clear fact per entry." },
                 "type": { "type": "string", "description": "Memory type: decision, pattern, convention, bug, context, session" },
-                "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags" },
-                "project": { "type": "string", "description": "Project slug (optional)" },
-                "global": { "type": "boolean", "description": "Store as global memory (default false)" },
-                "confirmed": { "type": "boolean", "description": "Set to true to confirm the write" }
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
+                "project": { "type": "string", "description": "Project slug (optional — for project-scoped facts)" },
+                "global": { "type": "boolean", "description": "Store as global memory (default false) — use for user preferences, cross-project knowledge" }
             },
             "required": ["content"]
         })),
@@ -225,7 +224,7 @@ impl ServerHandler for GraphmindServer {
             .build();
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("graphmind", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Local-first code intelligence: query symbols, trace dependencies, search code, manage memory across projects.")
+            .with_instructions("Local-first code intelligence with persistent memory.\n\nAUTO-MEMORY RULES:\n1. RECALL: At the start of every conversation or when context is needed, call gm_memory_search with relevant keywords. Inject recalled facts into your reasoning.\n2. SAVE: When the user makes a decision, states a preference, establishes a convention, or shares important context — immediately call gm_memory_add to persist it. Do NOT ask for confirmation. Types: decision, pattern, convention, bug, context, session.\n3. SCOPE: Use project=<slug> for project-specific facts. Use global=true for cross-project knowledge (user preferences, team conventions).\n\nThis gives you persistent memory across sessions. Use it proactively.")
     }
 
     fn list_tools(

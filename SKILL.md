@@ -44,9 +44,25 @@ Query before touching any code:
 - File structure: `graphmind outline <file>` or MCP `gm_outline`
 - Transitive callers: MCP `gm_who_calls_chain`
 
-### Layer 2 — Semantic memory (what was DECIDED)
+### Layer 2 — Persistent memory (what was DECIDED, PREFERRED, KNOWN)
 Query for context, decisions, conventions:
 - `graphmind memory search "<query>"` or MCP `gm_memory_search`
+
+**AUTO-RECALL:** The hook automatically searches memory on each prompt. Use `gm_memory_search` for deeper/targeted recall.
+
+**AUTO-SAVE:** When the conversation reveals any of the following, immediately save via `gm_memory_add`:
+- **Decisions** (type: decision) — architecture choices, tech choices, trade-off resolutions
+- **Patterns** (type: pattern) — recurring approaches, solutions, code patterns
+- **Conventions** (type: convention) — naming, style, workflow rules
+- **Bugs** (type: bug) — known issues, workarounds, gotchas
+- **Context** (type: context) — business context, project goals, stakeholder info, user preferences
+
+Save rules:
+- Do NOT ask "should I save this?" — just save it
+- Use `project=<slug>` for project-specific facts
+- Use `global=true` for user preferences, team conventions, cross-project knowledge
+- Keep entries atomic: one fact per entry, clear and reusable
+- Do NOT save ephemeral task progress or things derivable from code/git
 
 ### Layer 3 — Raw files (only when layers 1-2 are insufficient)
 Read source files only when editing or when the graph doesn't have the answer.
