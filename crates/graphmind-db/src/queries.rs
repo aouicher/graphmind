@@ -154,15 +154,27 @@ impl<'a> GraphQueries<'a> {
     }
 
     pub fn search_symbols(&self, query: &str, limit: i64) -> Vec<SymbolRow> {
-        let mut stmt = self.db.prepare(
+        self.search_symbols_filtered(query, limit, None)
+    }
+
+    pub fn search_symbols_filtered(&self, query: &str, limit: i64, kind: Option<&str>) -> Vec<SymbolRow> {
+        let sql = if kind.is_some() {
+            "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
+             FROM symbols_fts f
+             JOIN symbols s ON s.id = f.rowid
+             WHERE symbols_fts MATCH ?1 AND s.kind = ?3
+             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
+             LIMIT ?2"
+        } else {
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
              FROM symbols_fts f
              JOIN symbols s ON s.id = f.rowid
              WHERE symbols_fts MATCH ?1
              ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
              LIMIT ?2"
-        ).unwrap();
-        stmt.query_map(params![query, limit], |row| {
+        };
+        let mut stmt = self.db.prepare(sql).unwrap();
+        let map_row = |row: &rusqlite::Row| {
             Ok(SymbolRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -174,7 +186,12 @@ impl<'a> GraphQueries<'a> {
                 doc: row.get(7)?,
                 content: row.get(8)?,
             })
-        })
+        };
+        if let Some(k) = kind {
+            stmt.query_map(params![query, limit, k], map_row)
+        } else {
+            stmt.query_map(params![query, limit], map_row)
+        }
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()

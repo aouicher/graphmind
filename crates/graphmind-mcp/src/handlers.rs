@@ -963,7 +963,15 @@ fn handle_search(args: &Value) -> Value {
         .get("limit")
         .and_then(|v| v.as_i64())
         .unwrap_or(20);
-    let kind_filter = args.get("kind").and_then(|v| v.as_str());
+    let kind_raw = args.get("kind").and_then(|v| v.as_str());
+    let kind_normalized: Option<String> = kind_raw.map(|k| {
+        let mut c = k.chars();
+        match c.next() {
+            Some(first) => first.to_uppercase().to_string() + &c.as_str().to_lowercase(),
+            None => String::new(),
+        }
+    });
+    let kind_filter = kind_normalized.as_deref();
     let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
     let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
     let project_slug = args.get("project").and_then(|v| v.as_str());
@@ -990,12 +998,8 @@ fn handle_search(args: &Value) -> Value {
             Err(_) => continue,
         };
         let gq = GraphQueries::new(&conn);
-        let raw_results = gq.search_symbols(query, limit * 5);
-        let fts_results: Vec<_> = if let Some(k) = kind_filter {
-            raw_results.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(limit as usize).collect()
-        } else {
-            raw_results.into_iter().take(limit as usize).collect()
-        };
+        let fts_results: Vec<_> = gq.search_symbols_filtered(query, limit * 3, kind_filter)
+            .into_iter().take(limit as usize).collect();
 
         // Semantic search via embeddings (if available)
         let merged = if let Some(ref engine) = embed_engine {
