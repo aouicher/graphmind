@@ -54,18 +54,32 @@ cp target/release/graphmind ~/.local/bin/
 
 ## Quick Start
 
+One command sets up everything — Claude Code hooks, Claude Desktop MCP, skill, project registration, git hooks, and builds the graph:
+
 ```bash
-graphmind register .          # register your project
-graphmind build               # build the code graph
-graphmind sync                # inject graph context into CLAUDE.md
-graphmind mcp                 # start MCP server for Claude Code
+graphmind setup
 ```
 
-## Setup with Claude Code
+That's it. Claude Code and Claude Desktop will now use graphmind automatically for all code exploration.
 
-### 1. Global MCP server (recommended)
+### What `graphmind setup` does
 
-Add graphmind as a global MCP server so Claude Code can use it in every project:
+1. Installs Claude Code hooks (grep/find rewriting, session context, prompt pre-fetch)
+2. Installs Claude Code skill (3-layer rule)
+3. Configures MCP server in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+4. Configures MCP server in Claude Code (`~/.claude/settings.json`)
+5. Registers current directory as a project
+6. Installs git hooks (auto-rebuild on commit, impact check on push)
+7. Builds the code graph
+
+Each step is idempotent — run `graphmind setup` again after updates or in new projects.
+
+### Manual setup (if you prefer granular control)
+
+<details>
+<summary>Click to expand</summary>
+
+#### MCP server for Claude Code
 
 ```bash
 claude mcp add graphmind -- graphmind mcp
@@ -83,9 +97,9 @@ Or manually in `~/.claude/settings.json`:
 }
 ```
 
-### Setup with Claude Desktop
+#### MCP server for Claude Desktop
 
-Claude Desktop does not inherit your shell PATH. You **must** use the full path to the binary:
+Claude Desktop does not inherit your shell PATH. Use the full path:
 
 ```json
 {
@@ -104,9 +118,8 @@ Config file location:
 
 > **Tip**: Run `which graphmind` to find the correct path on your system.
 
-### Per-project `.mcp.json` (optional)
+#### Per-project `.mcp.json` (optional)
 
-You can also add graphmind per-project by creating a `.mcp.json` at the root of your repo:
 ```json
 {
   "mcpServers": {
@@ -118,91 +131,55 @@ You can also add graphmind per-project by creating a `.mcp.json` at the root of 
 }
 ```
 
-This is picked up automatically by Claude Code when you open the project.
+Picked up automatically by Claude Code when you open the project.
 
-### 2. Per-project CLAUDE.md (recommended)
-
-`graphmind sync` injects a section into your project's `CLAUDE.md` with graph stats and quick-reference commands. Claude reads this automatically at the start of every session.
-
-```bash
-cd your-project
-graphmind sync                # updates CLAUDE.md in current project
-graphmind sync --all          # updates CLAUDE.md for all registered projects
-```
-
-This adds a block like:
-```markdown
-<!-- graphmind:start -->
-## graphmind
-
-Last build: 2026-04-17 | 142 symbols | 87 edges | 34 files
-Languages: typescript (25), javascript (9)
-MCP: `graphmind mcp` (stdio)
-
-### Before editing anything
-- Symbol: `graphmind fn <symbol> --no-tests`
-- File: `graphmind deps <file>`
-- Git changes: `graphmind diff-impact`
-- Find by intent: `graphmind search "handle auth; validate token"`
-
-### Rebuild when
-Structural changes, new modules, after merge.
-Command: `graphmind build`
-<!-- graphmind:end -->
-```
-
-Re-run `graphmind sync` after each build to keep it current.
-
-### 3. Claude Code search hook (recommended)
-
-Installs a Claude Code hook that transparently rewrites `grep`/`find`/`rg` commands to `graphmind search`. Claude gets graph-powered results without changing its workflow.
+#### Claude Code search hook
 
 ```bash
 graphmind install hook-claude
 ```
 
-This registers hooks in `~/.claude/settings.json` for:
+Registers hooks in `~/.claude/settings.json` for:
 - **PreToolUse** — rewrites grep/find/rg to `graphmind search`, provides graph results for Grep/Glob/LS tools
 - **SessionStart** — loads project context (stats, structure) at session start
 - **UserPromptSubmit** — pre-fetches relevant graph context based on the user's prompt
 - **PostToolUse** — enriches results with graph-aware suggestions
 
-The hook includes built-in intelligence:
+Built-in intelligence:
 - **Exhaustive search bypass** — detects "find all occurrences", `grep -c`, pipes to `wc`/`sort` and lets them through
 - **Cache deduplication** — identical searches within 5 minutes are skipped (0 tokens cost)
 - **Pattern extraction** — extracts meaningful search terms from grep, find, fd, rg commands and Agent prompts
 
-To uninstall:
-```bash
-graphmind uninstall hook-claude
-```
-
-### 4. Claude Code skill (optional)
-
-Installs a skill that teaches Claude the 3-layer rule: query the graph first, check memory second, read raw files only when needed.
+#### Claude Code skill
 
 ```bash
 graphmind install skill
 ```
 
-### 5. Git hooks (optional)
+#### CLAUDE.md sync
 
-Auto-rebuild on commit, impact check on push:
+```bash
+graphmind sync                # updates CLAUDE.md in current project
+graphmind sync --all          # updates CLAUDE.md for all registered projects
+```
+
+#### Git hooks
 
 ```bash
 graphmind install hook-git
 ```
+
+</details>
 
 ### Multi-project setup
 
 Register multiple projects, then Claude can query across all of them:
 
 ```bash
-cd ~/projects/api && graphmind register .
-cd ~/projects/web && graphmind register .
-cd ~/projects/shared-lib && graphmind register .
+cd ~/projects/api && graphmind setup
+cd ~/projects/web && graphmind setup
+cd ~/projects/shared-lib && graphmind setup
 
-graphmind build --all
 graphmind cross link infer    # auto-detect shared symbols
 graphmind sync --all
 ```
@@ -369,6 +346,12 @@ graphmind diff-impact --depth 3     # limit trace depth
 graphmind session start [slug]      # log session start
 graphmind session save ["message"]  # save session summary
 graphmind session history [slug]    # recent sessions
+```
+
+### Setup
+```bash
+graphmind setup [path]            # one-command full setup (hooks, MCP, build)
+graphmind setup --skip-build      # setup without building the graph
 ```
 
 ### Install / Uninstall

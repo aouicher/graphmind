@@ -19,6 +19,12 @@ cargo clippy --workspace -- -D warnings # lint
 cargo test --workspace        # run tests
 ```
 
+## User-facing setup
+```bash
+graphmind setup               # one-command: hooks + MCP + skill + register + build
+graphmind setup --skip-build  # everything except build
+```
+
 ## Project Structure
 - `crates/graphmind-core/` — Rust parsing engine (tree-sitter, napi-rs)
 - `crates/graphmind-db/` — SQLite graph (schema, builder, queries, FTS5, cache)
