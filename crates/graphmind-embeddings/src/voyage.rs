@@ -76,12 +76,40 @@ impl EmbeddingEngine for VoyageEngine {
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        let mut all_results = Vec::new();
-        for chunk in texts.chunks(128) {
-            let mut batch = self.call_api(chunk)?;
-            all_results.append(&mut batch);
+        let chunks: Vec<&[&str]> = texts.chunks(128).collect();
+        let concurrency = 10;
+        let mut all_results: Vec<Vec<Vec<f32>>> = vec![Vec::new(); chunks.len()];
+
+        for window_start in (0..chunks.len()).step_by(concurrency) {
+            let window_end = (window_start + concurrency).min(chunks.len());
+            let mut first_error: Option<EmbedError> = None;
+
+            std::thread::scope(|s| {
+                let mut handles = Vec::new();
+                for (i, chunk) in chunks[window_start..window_end].iter().enumerate() {
+                    let idx = window_start + i;
+                    handles.push((idx, s.spawn(move || {
+                        self.call_api(chunk)
+                    })));
+                }
+                for (i, handle) in handles {
+                    match handle.join().unwrap() {
+                        Ok(batch) => all_results[i] = batch,
+                        Err(e) => {
+                            if first_error.is_none() {
+                                first_error = Some(e);
+                            }
+                        }
+                    }
+                }
+            });
+
+            if let Some(e) = first_error {
+                return Err(e);
+            }
         }
-        Ok(all_results)
+
+        Ok(all_results.into_iter().flatten().collect())
     }
 
     fn dimensions(&self) -> usize {
