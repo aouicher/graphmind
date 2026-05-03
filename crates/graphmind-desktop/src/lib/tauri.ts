@@ -84,6 +84,12 @@ export interface EmbeddingSettingsResult {
   projects_needing_embedding: string[];
 }
 
+export interface AppUpdateInfo {
+  update_available: boolean;
+  current_version: string;
+  new_version: string | null;
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -120,4 +126,6 @@ export const api = {
   getEmbeddingSettings: () => invoke<EmbeddingSettings>("get_embedding_settings"),
   setEmbeddingSettings: (settings: EmbeddingSettingsInput) => invoke<EmbeddingSettingsResult>("set_embedding_settings", { settings }),
   embedProjects: (slugs: string[]) => invoke<void>("embed_projects", { slugs }),
+  checkAppUpdate: () => invoke<AppUpdateInfo>("check_app_update"),
+  installAppUpdate: () => invoke<string>("install_app_update"),
 };

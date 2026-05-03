@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { api, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save, Brain } from "lucide-react";
+import { api, AppUpdateInfo, ProjectInfo } from "../lib/tauri";
+import { Plus, X, Save, Brain, Download, RefreshCw } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -16,6 +16,9 @@ export function Settings() {
   const [embOpenaiKey, setEmbOpenaiKey] = useState("");
   const [embVoyageKey, setEmbVoyageKey] = useState("");
   const [embSaving, setEmbSaving] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateDone, setUpdateDone] = useState<string | null>(null);
 
   useEffect(() => {
     api.listProjects().then(setProjects);
@@ -27,6 +30,7 @@ export function Settings() {
       setEmbOpenaiKey(s.openai_key || "");
       setEmbVoyageKey(s.voyage_key || "");
     });
+    api.checkAppUpdate().then(setUpdateInfo).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -334,6 +338,68 @@ export function Settings() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Updates */}
+      <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+        <Download className="w-4 h-4" />
+        Updates
+      </h2>
+
+      <section className="space-y-3">
+        {updateInfo && (
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-text-secondary">
+                Current version: <span className="text-text-primary font-medium">{updateInfo.current_version}</span>
+              </p>
+              {updateInfo.update_available && updateInfo.new_version && (
+                <p className="text-xs text-accent font-medium mt-1">
+                  v{updateInfo.new_version} available
+                </p>
+              )}
+              {!updateInfo.update_available && (
+                <p className="text-xs text-green-500 mt-1">Up to date</p>
+              )}
+              {updateDone && (
+                <p className="text-xs text-green-500 mt-1">
+                  Updated to v{updateDone} — restart to apply
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => api.checkAppUpdate().then(setUpdateInfo).catch(() => {})}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-border rounded-md text-text-secondary hover:text-text-primary"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Check
+              </button>
+              {updateInfo.update_available && (
+                <button
+                  onClick={async () => {
+                    setUpdating(true);
+                    try {
+                      const v = await api.installAppUpdate();
+                      setUpdateDone(v);
+                      setUpdateInfo({ ...updateInfo, update_available: false });
+                    } finally {
+                      setUpdating(false);
+                    }
+                  }}
+                  disabled={updating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+                >
+                  <Download className="w-3 h-3" />
+                  {updating ? "Updating..." : "Update"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        <p className="text-xs text-text-muted">
+          Updates the desktop app and CLI together. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
+        </p>
       </section>
     </div>
   );

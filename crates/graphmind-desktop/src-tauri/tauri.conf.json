@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/core/tauri-config-schema/schema.json",
   "productName": "GraphMind",
-  "version": "0.2.68",
+  "version": "0.2.69",
   "identifier": "com.graphmind.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -57,7 +57,7 @@
       "endpoints": [
         "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyMEMxMTI5Q0I5NTVGRkQKUldUOVg1WExLUkVNSWc3aEtLT2ZXcDNOUTZDMCtTVXovZHBkZTRGRTFFY1lFL1NHRXJ3V2M1eUoK"
     }
   }
 }

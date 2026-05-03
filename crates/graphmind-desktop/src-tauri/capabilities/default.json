@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "shell:default"
+    "shell:default",
+    "updater:default"
   ]
 }

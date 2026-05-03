@@ -137,6 +137,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }}
 
       - name: Upload DMG artifact
@@ -145,6 +146,15 @@ jobs:
           name: graphmind-desktop-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+      - name: Upload updater artifact (tar.gz + sig)
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphmind-updater-${{ matrix.arch }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/macos/*.tar.gz
+            target/${{ matrix.target }}/release/bundle/macos/*.tar.gz.sig
+          if-no-files-found: warn
 
   # --- CD: release on push to main or staging ---
 
@@ -283,21 +293,45 @@ jobs:
             fi
           done
 
-          # Generate latest.json for auto-updater (Tauri + CLI)
+          # Upload updater bundles (.app.tar.gz) if available
+          SIG_ARM64=""
+          SIG_X64=""
+          for dir in artifacts/graphmind-updater-*; do
+            if [ -d "$dir" ]; then
+              ARCH=$(basename "$dir" | sed 's/graphmind-updater-//')
+              for file in "$dir"/*.tar.gz; do
+                [ -f "$file" ] || continue
+                FNAME="GraphMind-macos-${ARCH}.app.tar.gz"
+                cp "$file" "/tmp/${FNAME}"
+                gh release upload "$TAG" "/tmp/${FNAME}" --repo "$DIST_REPO" --clobber
+              done
+              for file in "$dir"/*.tar.gz.sig; do
+                [ -f "$file" ] || continue
+                SIG_CONTENT=$(cat "$file")
+                if [ "$ARCH" = "aarch64" ]; then
+                  SIG_ARM64="$SIG_CONTENT"
+                else
+                  SIG_X64="$SIG_CONTENT"
+                fi
+              done
+            fi
+          done
+
+          # Generate latest.json for Tauri auto-updater
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           cat > /tmp/latest.json << JSON
           {
             "version": "${VERSION}",
             "notes": "graphmind ${TAG}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "pub_date": "${PUB_DATE}",
             "platforms": {
               "darwin-aarch64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/GraphMind-macos-aarch64.app.tar.gz",
+                "signature": "${SIG_ARM64}"
               },
               "darwin-x86_64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
-              },
-              "linux-x86_64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
+                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/GraphMind-macos-x86_64.app.tar.gz",
+                "signature": "${SIG_X64}"
               }
             }
           }

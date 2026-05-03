@@ -11,6 +11,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
             tray::create_tray(app)?;
@@ -51,6 +52,8 @@ pub fn run() {
             commands::settings::get_skill_status,
             commands::settings::get_embedding_settings,
             commands::settings::set_embedding_settings,
+            commands::updater::check_app_update,
+            commands::updater::install_app_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
