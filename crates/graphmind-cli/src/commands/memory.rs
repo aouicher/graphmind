@@ -7,7 +7,7 @@ fn get_store() -> MemoryStore {
     MemoryStore::new(&paths::memory_dir())
 }
 
-pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], entry_type: &str) {
+pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], entry_type: &str, priority: bool) {
     let store = get_store();
     let mem_type = match entry_type {
         "decision" => MemoryType::Decision,
@@ -40,14 +40,17 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
             global,
             entry_type: mem_type,
             tags: tags.to_vec(),
+            priority,
         },
     );
 
+    let prio_str = if priority { " ★priority" } else { "" };
     println!(
-        "{} Memory added: {} ({})",
+        "{} Memory added: {} ({}{})",
         "OK".green().bold(),
         entry.id.dimmed(),
-        entry_type
+        entry_type,
+        prio_str
     );
 }
 
@@ -85,21 +88,30 @@ pub fn search(query: &str, slug: Option<&str>, limit: usize) {
     }
 }
 
-pub fn list(slug: Option<&str>, limit: usize) {
+pub fn list(slug: Option<&str>, limit: usize, priority_only: bool) {
     let store = get_store();
     let project = resolve_project_slug(&[slug]);
-    let entries = store.list(project.as_deref());
+    let entries = if priority_only {
+        store.list_priority(project.as_deref())
+    } else {
+        store.list(project.as_deref())
+    };
 
     if entries.is_empty() {
-        println!("{}", "No memories found.".dimmed());
+        if priority_only {
+            println!("{}", "No priority memories found.".dimmed());
+        } else {
+            println!("{}", "No memories found.".dimmed());
+        }
         return;
     }
 
     let shown = entries.iter().take(limit);
     println!(
-        "{} {} total memories (showing up to {}):\n",
+        "{} {} {}memories (showing up to {}):\n",
         ">>".cyan().bold(),
         entries.len().to_string().green(),
+        if priority_only { "priority " } else { "" },
         limit
     );
 
@@ -108,8 +120,10 @@ pub fn list(slug: Option<&str>, limit: usize) {
             .unwrap_or_default()
             .trim_matches('"')
             .to_string();
+        let prio_marker = if e.priority { "★ " } else { "" };
         println!(
-            "  {} [{}] {}",
+            "  {}{} [{}] {}",
+            prio_marker,
             e.id.get(..8).unwrap_or(&e.id).dimmed(),
             type_str.yellow(),
             e.content

@@ -173,7 +173,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind SessionStart hook — auto-loads project context + memory at session start
+# graphmind SessionStart hook — full project briefing with priority memory
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -183,18 +183,25 @@ graphmind status &>/dev/null || exit 0
 
 # Get project summary
 STATUS=$(graphmind status 2>/dev/null | head -10)
-MAP=$(graphmind map 2>/dev/null | head -30)
+MAP=$(graphmind map 2>/dev/null | head -20)
 
-# Load recent memories
-MEMORIES=$(graphmind memory list --limit 10 2>/dev/null | head -20)
+# Load priority memories (always-inject: conventions, decisions, preferences)
+PRIORITY_MEM=$(graphmind memory list --priority --limit 20 2>/dev/null | head -30)
 
-MSG="[graphmind] Project indexed and ready. Use MCP tools (gm_search, gm_fn, gm_deps, gm_map, gm_outline, gm_query) for ALL code exploration before grep/find/ls.\n\nProject status:\n$STATUS\n\nTop-level structure:\n$MAP"
+# Load recent non-priority memories
+RECENT_MEM=$(graphmind memory list --limit 5 2>/dev/null | head -15)
 
-if [ -n "$MEMORIES" ]; then
-  MSG="$MSG\n\nRecent memories:\n$MEMORIES"
+MSG="[graphmind] Project indexed and ready. Use MCP tools (gm_search, gm_fn, gm_deps, gm_map, gm_outline, gm_query) for ALL code exploration.\n\nProject status:\n$STATUS\n\nStructure:\n$MAP"
+
+if [ -n "$PRIORITY_MEM" ]; then
+  MSG="$MSG\n\n★ Priority context (always active):\n$PRIORITY_MEM"
 fi
 
-MSG="$MSG\n\nAuto-memory is ON: proactively save decisions, patterns, conventions, and context via gm_memory_add (no confirmation needed). Recall with gm_memory_search."
+if [ -n "$RECENT_MEM" ]; then
+  MSG="$MSG\n\nRecent memories:\n$RECENT_MEM"
+fi
+
+MSG="$MSG\n\nAuto-memory is ON: save decisions/patterns/conventions via gm_memory_add. Use --priority for always-injected facts. Recall via gm_memory_search."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
@@ -205,7 +212,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const USER_PROMPT_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind UserPromptSubmit hook — memory recall + code pre-fetch
+# graphmind UserPromptSubmit hook — always-on context injection (memory + code)
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -219,7 +226,10 @@ if [ ${#PROMPT} -lt 10 ]; then exit 0; fi
 # Check if we're in a graphmind-registered project
 graphmind status &>/dev/null || exit 0
 
-# Extract meaningful keywords from prompt
+# --- Priority memories: ALWAYS injected regardless of prompt content ---
+PRIORITY_MEM=$(graphmind memory list --priority --limit 10 2>/dev/null | grep -v "^>>" | grep -v "^$" | head -15)
+
+# --- Extract keywords for contextual memory + code search ---
 SEARCH_TERMS=$(echo "$PROMPT" \
   | tr '[:upper:]' '[:lower:]' \
   | sed -E 's/[^a-z0-9_]+/ /g' \
@@ -229,7 +239,7 @@ SEARCH_TERMS=$(echo "$PROMPT" \
   | tr '\n' ' ' \
   | sed 's/ *$//')
 
-# Cache deduplication: skip if same terms queried in last 5 minutes
+# Cache deduplication: skip contextual search if same terms queried in last 3 minutes
 CACHE_FILE="/tmp/graphmind-hook-cache.txt"
 NOW=$(date +%s)
 
@@ -241,18 +251,18 @@ if [ -n "$SEARCH_TERMS" ]; then
   CACHED=0
   if [ -f "$CACHE_FILE" ]; then
     while IFS='|' read -r TS Q; do
-      if [ "$Q" = "$NORM" ] && [ $((NOW - TS)) -lt 300 ]; then
+      if [ "$Q" = "$NORM" ] && [ $((NOW - TS)) -lt 180 ]; then
         CACHED=1
         break
       fi
     done < <(tail -50 "$CACHE_FILE")
   fi
   if [ "$CACHED" -eq 0 ]; then
-    # Memory recall — always search memory for relevant context
-    MEMORY=$(graphmind memory search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -20)
+    # Memory recall — always search for relevant context (not just exploration)
+    MEMORY=$(graphmind memory search "$SEARCH_TERMS" --limit 5 2>/dev/null | grep -v "^>>" | grep -v "^$" | grep -v "^!" | head -15)
 
-    # Code pre-fetch — only for exploration-type questions
-    if echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look'; then
+    # Code pre-fetch — for exploration OR implementation prompts mentioning code entities
+    if echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|add.*to|modify|change.*in|fix.*in|debug|implémente|créer|create'; then
       CODE_RESULTS=$(graphmind search "$SEARCH_TERMS" --limit 5 2>/dev/null | head -30)
     fi
 
@@ -261,22 +271,25 @@ if [ -n "$SEARCH_TERMS" ]; then
   fi
 fi
 
-# Build context message
+# Build context message — always provide something useful
 MSG=""
 
+if [ -n "$PRIORITY_MEM" ]; then
+  MSG="[graphmind ★ active context]\n$PRIORITY_MEM\n\n"
+fi
+
 if [ -n "$MEMORY" ]; then
-  MSG="[graphmind memory] Relevant memories for this conversation:\n$MEMORY\n\n"
+  MSG="${MSG}[graphmind memory] Relevant:\n$MEMORY\n\n"
 fi
 
 if [ -n "$CODE_RESULTS" ]; then
   MSG="${MSG}[graphmind code] Relevant symbols:\n$CODE_RESULTS\n\n"
 fi
 
+# If nothing found, still confirm graphmind is active
 if [ -z "$MSG" ]; then
-  MSG="[graphmind] Project indexed. Use MCP tools for code exploration. Memory is active — decisions and context are auto-saved across sessions."
+  MSG="[graphmind] Active. Memory: gm_memory_add (--priority for always-on). Code: gm_search, gm_fn, gm_deps."
 fi
-
-MSG="${MSG}→ Auto-memory is ON: save decisions/patterns/conventions via gm_memory_add (no confirmation needed). Recall via gm_memory_search."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
@@ -287,7 +300,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const POST_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind PostToolUse hook — feedback after grep/ls that could have used graphmind
+# graphmind PostToolUse hook — tracks hot files + nudges toward MCP tools
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -295,22 +308,46 @@ if ! command -v graphmind &>/dev/null; then exit 0; fi
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
 
-# Only trigger on tools that could have been replaced
+# Check if we're in a graphmind-registered project
+graphmind status &>/dev/null || exit 0
+
+# --- Track file activity (Read/Edit/Write/Bash) for hot-path detection ---
+HOT_FILE="/tmp/graphmind-hot-files.txt"
+NOW=$(date +%s)
+
+track_file() {
+  local FILE="$1"
+  if [ -n "$FILE" ] && [ "$FILE" != "null" ] && echo "$FILE" | grep -qE '\.(rs|ts|tsx|py|go|rb|js|jsx|sql|toml|json)$'; then
+    echo "${NOW}|${FILE}" >> "$HOT_FILE"
+    tail -100 "$HOT_FILE" > "$HOT_FILE.tmp" 2>/dev/null && mv "$HOT_FILE.tmp" "$HOT_FILE" 2>/dev/null
+  fi
+}
+
+case "$TOOL_NAME" in
+  Read|Edit|Write)
+    FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty')
+    track_file "$FILE"
+    ;;
+  Bash)
+    # Extract file paths from command (common patterns: cargo test FILE, vim FILE, etc.)
+    CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+    FILES=$(echo "$CMD" | grep -oE '[a-zA-Z0-9_/.-]+\.(rs|ts|tsx|py|go|rb|js|jsx)' | head -3)
+    for F in $FILES; do track_file "$F"; done
+    ;;
+esac
+
+# --- Nudge toward graphmind for broad searches ---
 case "$TOOL_NAME" in
   Grep|Bash|Glob|LS) ;;
   *) exit 0 ;;
 esac
 
-# Check if we're in a graphmind-registered project
-graphmind status &>/dev/null || exit 0
-
-# Check output size — only warn on large outputs (>20 lines indicates broad search)
 OUTPUT_LINES=$(echo "$INPUT" | jq -r '.tool_output // .output // empty' | wc -l)
 if [ "$OUTPUT_LINES" -lt 20 ]; then
   exit 0
 fi
 
-MSG="Note: this search returned ${OUTPUT_LINES}+ lines. For code navigation, graphmind MCP tools (gm_search, gm_fn, gm_deps) are faster and more precise. Reserve grep/find for string literals and non-code patterns."
+MSG="Note: ${OUTPUT_LINES}+ lines returned. graphmind MCP tools (gm_search, gm_fn, gm_deps) are faster for code navigation."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {

@@ -196,6 +196,8 @@ enum MemoryAction {
         tags: Vec<String>,
         #[arg(long, default_value = "context")]
         r#type: String,
+        #[arg(long)]
+        priority: bool,
     },
     /// Search memories
     Search {
@@ -211,6 +213,8 @@ enum MemoryAction {
         slug: Option<String>,
         #[arg(long, default_value = "20")]
         limit: usize,
+        #[arg(long)]
+        priority: bool,
     },
     /// Delete a memory entry
     Delete {
@@ -329,6 +333,12 @@ fn main() {
     let cli = Cli::parse();
     graphmind_config::ensure_dirs();
 
+    // Show notices (setup outdated, announcements) except for setup/mcp/update commands
+    if !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
+        commands::notices::check_setup_version();
+        commands::notices::check_announcements();
+    }
+
     match cli.command {
         Commands::Register {
             path,
@@ -426,14 +436,15 @@ fn main() {
                 global,
                 tags,
                 r#type,
+                priority,
             } => {
-                commands::memory::add(&content, slug.as_deref(), global, &tags, &r#type);
+                commands::memory::add(&content, slug.as_deref(), global, &tags, &r#type, priority);
             }
             MemoryAction::Search { query, slug, limit } => {
                 commands::memory::search(&query, slug.as_deref(), limit);
             }
-            MemoryAction::List { slug, limit } => {
-                commands::memory::list(slug.as_deref(), limit);
+            MemoryAction::List { slug, limit, priority } => {
+                commands::memory::list(slug.as_deref(), limit, priority);
             }
             MemoryAction::Delete { id, slug } => {
                 commands::memory::delete(&id, slug.as_deref());

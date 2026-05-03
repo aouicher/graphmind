@@ -62,6 +62,10 @@ pub fn run() {
             commands::settings::set_embedding_settings,
             commands::updater::check_app_update,
             commands::updater::install_app_update,
+            commands::notices::check_setup_status,
+            commands::notices::run_setup,
+            commands::notices::check_announcements,
+            commands::notices::dismiss_announcement,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

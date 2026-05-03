@@ -99,7 +99,8 @@ fn tool_defs() -> Vec<Tool> {
                 "type": { "type": "string", "description": "Memory type: decision, pattern, convention, bug, context, session" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
                 "project": { "type": "string", "description": "Project slug (optional — for project-scoped facts)" },
-                "global": { "type": "boolean", "description": "Store as global memory (default false) — use for user preferences, cross-project knowledge" }
+                "global": { "type": "boolean", "description": "Store as global memory (default false) — use for user preferences, cross-project knowledge" },
+                "priority": { "type": "boolean", "description": "Always-inject memory (shown at every session start and prompt). Use for critical conventions, active decisions, user preferences." }
             },
             "required": ["content"]
         })),

@@ -27,6 +27,8 @@ pub struct MemoryEntry {
     pub content: String,
     pub tags: Vec<String>,
     pub session: String,
+    #[serde(default)]
+    pub priority: bool,
 }
 
 pub struct AddOptions {
@@ -34,6 +36,7 @@ pub struct AddOptions {
     pub global: bool,
     pub entry_type: MemoryType,
     pub tags: Vec<String>,
+    pub priority: bool,
 }
 
 impl Default for AddOptions {
@@ -43,6 +46,7 @@ impl Default for AddOptions {
             global: false,
             entry_type: MemoryType::Context,
             tags: Vec::new(),
+            priority: false,
         }
     }
 }
@@ -71,6 +75,7 @@ impl MemoryStore {
             content: content.to_string(),
             tags: options.tags,
             session: now[..10].to_string(),
+            priority: options.priority,
         };
 
         let file_path = if entry.global {
@@ -102,6 +107,13 @@ impl MemoryStore {
 
         entries.sort_by(|a, b| b.created.cmp(&a.created));
         entries
+    }
+
+    pub fn list_priority(&self, project: Option<&str>) -> Vec<MemoryEntry> {
+        self.list(project)
+            .into_iter()
+            .filter(|e| e.priority)
+            .collect()
     }
 
     pub fn delete(&self, id: &str, project: Option<&str>) -> bool {

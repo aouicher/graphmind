@@ -5,8 +5,8 @@ import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
 import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
-import { api, AppUpdateInfo } from "./lib/tauri";
-import { ArrowUp, X, Loader2 } from "lucide-react";
+import { api, AppUpdateInfo, Announcement } from "./lib/tauri";
+import { ArrowUp, X, Loader2, RefreshCw, AlertTriangle, Info } from "lucide-react";
 
 type Page = "projects" | "integrations" | "settings";
 
@@ -73,10 +73,93 @@ function UpdateBanner({
   );
 }
 
+function SetupBanner({ onDismiss }: { onDismiss: () => void }) {
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleSetup = async () => {
+    setRunning(true);
+    try {
+      await api.runSetup();
+      setDone(true);
+    } catch (e) {
+      console.error(e);
+    }
+    setRunning(false);
+  };
+
+  if (done) {
+    return (
+      <div className="flex items-center justify-between px-4 py-2 bg-success/10 border-b border-success/20 text-xs">
+        <span className="text-success font-medium">Hooks & skills updated.</span>
+        <button onClick={onDismiss} className="text-success/60 hover:text-success">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-2 bg-warning/10 border-b border-warning/20 text-xs">
+      <span className="text-text-secondary">
+        <AlertTriangle className="w-3 h-3 inline mr-1" />
+        Hooks/skills outdated. Update to get the latest features.
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleSetup}
+          disabled={running}
+          className="flex items-center gap-1 px-2 py-1 rounded bg-warning text-white font-medium hover:bg-warning/80 disabled:opacity-50 transition-colors"
+        >
+          {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+          {running ? "Updating..." : "Update"}
+        </button>
+        <button onClick={onDismiss} className="text-text-muted hover:text-text-secondary">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AnnouncementBanner({
+  announcement,
+  onDismiss,
+}: {
+  announcement: Announcement;
+  onDismiss: () => void;
+}) {
+  const colors = {
+    breaking: "bg-red-500/10 border-red-500/20 text-red-400",
+    warning: "bg-warning/10 border-warning/20 text-warning",
+    info: "bg-accent/5 border-accent/10 text-accent",
+  };
+  const colorClass = colors[announcement.level] || colors.info;
+
+  return (
+    <div className={`flex items-center justify-between px-4 py-2 border-b text-xs ${colorClass}`}>
+      <span className="flex items-center gap-1">
+        <Info className="w-3 h-3" />
+        {announcement.message}
+        {announcement.url && (
+          <a href={announcement.url} target="_blank" rel="noreferrer" className="underline ml-1 opacity-80">
+            Learn more
+          </a>
+        )}
+      </span>
+      <button onClick={onDismiss} className="opacity-60 hover:opacity-100">
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("projects");
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [setupOutdated, setSetupOutdated] = useState(false);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   useEffect(() => {
     const done = localStorage.getItem(ONBOARDING_KEY);
@@ -92,6 +175,10 @@ export default function App() {
       api.checkAppUpdate().then((info) => {
         if (info.update_available) setUpdateInfo(info);
       }).catch(() => {});
+      api.checkSetupStatus().then((status) => {
+        if (status.outdated) setSetupOutdated(true);
+      }).catch(() => {});
+      api.checkAnnouncements().then(setAnnouncements).catch(() => {});
     }
   }, [needsSetup]);
 
@@ -115,6 +202,19 @@ export default function App() {
         {updateInfo && (
           <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />
         )}
+        {setupOutdated && (
+          <SetupBanner onDismiss={() => setSetupOutdated(false)} />
+        )}
+        {announcements.map((a) => (
+          <AnnouncementBanner
+            key={a.id}
+            announcement={a}
+            onDismiss={() => {
+              api.dismissAnnouncement(a.id);
+              setAnnouncements((prev) => prev.filter((x) => x.id !== a.id));
+            }}
+          />
+        ))}
         <main className="flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">
             <motion.div

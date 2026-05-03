@@ -8,6 +8,7 @@ pub mod export;
 pub mod hooks;
 pub mod install_skill;
 pub mod memory;
+pub mod notices;
 pub mod query;
 pub mod register;
 pub mod search;

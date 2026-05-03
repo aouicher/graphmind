@@ -26,6 +26,11 @@ pub fn setup() {
     print_step(4, 4, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
+    // Stamp setup version so CLI/desktop can detect outdated config
+    let mut config = graphmind_config::load_config();
+    config.setup_version = graphmind_config::SETUP_VERSION;
+    graphmind_config::save_config(&config);
+
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Global setup complete.\n", "✓".green().bold());
     println!("  Now run {} in each project you want to index.", "graphmind init".cyan().bold());

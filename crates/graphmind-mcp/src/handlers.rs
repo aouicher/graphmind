@@ -666,6 +666,8 @@ fn handle_memory_add(args: &Value) -> Value {
         _ => MemoryType::Context,
     };
 
+    let priority = args.get("priority").and_then(|v| v.as_bool()).unwrap_or(false);
+
     let store = MemoryStore::new(&memory_dir());
     let entry = store.add(
         content,
@@ -674,9 +676,11 @@ fn handle_memory_add(args: &Value) -> Value {
             global,
             entry_type,
             tags,
+            priority,
         },
     );
-    text_content(&format!("✓ Saved to memory (id: {}, type: {})", entry.id, entry_type_str))
+    let prio_str = if priority { " ★priority" } else { "" };
+    text_content(&format!("✓ Saved to memory (id: {}, type: {}{})", entry.id, entry_type_str, prio_str))
 }
 
 fn handle_memory_list(args: &Value) -> Value {

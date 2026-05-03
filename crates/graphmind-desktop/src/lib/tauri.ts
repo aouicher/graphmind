@@ -90,6 +90,19 @@ export interface AppUpdateInfo {
   new_version: string | null;
 }
 
+export interface SetupStatus {
+  outdated: boolean;
+  local_version: number;
+  expected_version: number;
+}
+
+export interface Announcement {
+  id: string;
+  message: string;
+  level: "info" | "warning" | "breaking";
+  url: string | null;
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -128,4 +141,8 @@ export const api = {
   embedProjects: (slugs: string[]) => invoke<void>("embed_projects", { slugs }),
   checkAppUpdate: () => invoke<AppUpdateInfo>("check_app_update"),
   installAppUpdate: () => invoke<string>("install_app_update"),
+  checkSetupStatus: () => invoke<SetupStatus>("check_setup_status"),
+  runSetup: () => invoke<string>("run_setup"),
+  checkAnnouncements: () => invoke<Announcement[]>("check_announcements"),
+  dismissAnnouncement: (id: string) => invoke<void>("dismiss_announcement", { id }),
 };
