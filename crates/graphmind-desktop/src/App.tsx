@@ -5,7 +5,7 @@ import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
 import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
-import { api, UpdateInfo } from "./lib/tauri";
+import { api, AppUpdateInfo } from "./lib/tauri";
 import { ArrowUp, X, Loader2 } from "lucide-react";
 
 type Page = "projects" | "integrations" | "settings";
@@ -16,7 +16,7 @@ function UpdateBanner({
   info,
   onDismiss,
 }: {
-  info: UpdateInfo;
+  info: AppUpdateInfo;
   onDismiss: () => void;
 }) {
   const [updating, setUpdating] = useState(false);
@@ -25,7 +25,7 @@ function UpdateBanner({
   const handleUpdate = async () => {
     setUpdating(true);
     try {
-      await api.updateCli();
+      await api.installAppUpdate();
       setDone(true);
     } catch (e) {
       console.error(e);
@@ -37,7 +37,7 @@ function UpdateBanner({
     return (
       <div className="flex items-center justify-between px-4 py-2 bg-success/10 border-b border-success/20 text-xs">
         <span className="text-success font-medium">
-          Updated to v{info.latest}. Restart to apply.
+          Updated to v{info.new_version}. Restart to apply.
         </span>
         <button onClick={onDismiss} className="text-success/60 hover:text-success">
           <X className="w-3.5 h-3.5" />
@@ -49,8 +49,8 @@ function UpdateBanner({
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-accent/5 border-b border-accent/10 text-xs">
       <span className="text-text-secondary">
-        <span className="font-medium text-accent">v{info.latest}</span> available
-        (current: v{info.current})
+        <span className="font-medium text-accent">v{info.new_version}</span> available
+        (current: v{info.current_version})
       </span>
       <div className="flex items-center gap-2">
         <button
@@ -76,7 +76,7 @@ function UpdateBanner({
 export default function App() {
   const [page, setPage] = useState<Page>("projects");
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
     const done = localStorage.getItem(ONBOARDING_KEY);
@@ -89,7 +89,7 @@ export default function App() {
 
   useEffect(() => {
     if (needsSetup === false) {
-      api.checkCliUpdate().then((info) => {
+      api.checkAppUpdate().then((info) => {
         if (info.update_available) setUpdateInfo(info);
       }).catch(() => {});
     }

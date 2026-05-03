@@ -53,6 +53,10 @@ pub async fn install_app_update(app: AppHandle) -> Result<String, String> {
     Ok(new_version)
 }
 
+pub fn update_cli_after_app(version: &str) {
+    update_cli_if_needed(version);
+}
+
 fn update_cli_if_needed(version: &str) {
     let cli_path = which_graphmind();
     let Some(path) = cli_path else { return };

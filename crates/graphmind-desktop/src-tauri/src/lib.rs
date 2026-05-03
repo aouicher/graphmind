@@ -5,6 +5,8 @@ mod types;
 
 use state::AppState;
 use std::sync::Mutex;
+use tauri::Manager;
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,6 +17,12 @@ pub fn run() {
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
             tray::create_tray(app)?;
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                auto_update(handle).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -57,4 +65,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn auto_update(app: tauri::AppHandle) {
+    // Small delay to let the app finish loading
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        _ => return,
+    };
+
+    let new_version = update.version.clone();
+
+    // Auto-install the app update
+    if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+        // Also update CLI
+        commands::updater::update_cli_after_app(&new_version);
+
+        // Notify frontend
+        if let Some(window) = app.get_webview_window("main") {
+            use tauri::Emitter;
+            window.emit("app-updated", &new_version).ok();
+        }
+    }
 }
