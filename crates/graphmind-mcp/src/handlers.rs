@@ -1027,14 +1027,77 @@ fn handle_search(args: &Value) -> Value {
         }
     }
 
+    let total_count: usize = all_results.iter().map(|r| r.get("symbols").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)).sum();
+
+    // Auto-expand: if exactly 1 result, add callers/callees (like gm_fn)
+    if total_count == 1 {
+        if let Some(first_project) = all_results.first() {
+            let slug = first_project.get("project").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(symbols) = first_project.get("symbols").and_then(|v| v.as_array()) {
+                if let Some(sym) = symbols.first() {
+                    let sym_name = sym.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let sym_file = sym.get("file").and_then(|v| v.as_str());
+                    if !sym_name.is_empty() {
+                        let db_path = graph_db_path(slug);
+                        if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
+                            let gq = GraphQueries::new(&conn);
+                            let callers = gq.callers_filtered(sym_name, sym_file);
+                            let callees = gq.callees_filtered(sym_name, sym_file);
+                            let compact_callers = compact_edges(&gq, &callers);
+                            let compact_callees = compact_edges(&gq, &callees);
+
+                            if format == "compact" {
+                                let mut lines = vec![format!(">> 1 result for \"{}\" (auto-expanded):\n", raw_query)];
+                                lines.push(compact_symbol_line(sym));
+                                if !compact_callers.is_empty() {
+                                    lines.push(format!("\n  Callers ({}):", compact_callers.len()));
+                                    for c in compact_callers.iter().take(10) {
+                                        lines.push(format!("    ← {}", compact_edge_line(c)));
+                                    }
+                                    if compact_callers.len() > 10 {
+                                        lines.push(format!("    ... and {} more (use gm_fn for full list)", compact_callers.len() - 10));
+                                    }
+                                }
+                                if !compact_callees.is_empty() {
+                                    lines.push(format!("\n  Callees ({}):", compact_callees.len()));
+                                    for c in compact_callees.iter().take(10) {
+                                        lines.push(format!("    → {}", compact_edge_line(c)));
+                                    }
+                                    if compact_callees.len() > 10 {
+                                        lines.push(format!("    ... and {} more (use gm_fn for full list)", compact_callees.len() - 10));
+                                    }
+                                }
+                                return text_content(&lines.join("\n"));
+                            } else {
+                                let mut result = all_results.into_iter().next().unwrap();
+                                let obj = result.as_object_mut().unwrap();
+                                obj.insert("callers".into(), json!(compact_callers.iter().take(15).collect::<Vec<_>>()));
+                                obj.insert("callees".into(), json!(compact_callees.iter().take(15).collect::<Vec<_>>()));
+                                return json_text(&json!({
+                                    "query": raw_query,
+                                    "auto_expanded": true,
+                                    "results": [result],
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if format == "compact" {
-        let mut lines = vec![format!(">> {} result(s) for \"{}\":\n", all_results.iter().map(|r| r.get("symbols").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)).sum::<usize>(), raw_query)];
+        let mut lines = vec![format!(">> {} result(s) for \"{}\":\n", total_count, raw_query)];
         for r in &all_results {
             if let Some(symbols) = r.get("symbols").and_then(|v| v.as_array()) {
                 for s in symbols {
                     lines.push(compact_symbol_line(s));
                 }
             }
+        }
+        // Hint to use gm_fn for drill-down
+        if total_count > 1 && total_count <= 5 {
+            lines.push("\n→ Use gm_fn <name> to get callers/callees for a specific symbol.".to_string());
         }
         text_content(&lines.join("\n"))
     } else {

@@ -32,7 +32,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_fn", "Get full function detail with source code, callers and callees. Use file and kind to disambiguate common names (e.g. create, resolve). Callers/callees return compact snippets (5 lines) instead of full source.", json!({
+        make_tool("gm_fn", "Drill into a specific symbol: full source code + callers + callees. Use AFTER gm_search when you know the exact name, or directly when the user mentions a specific function. Gives you the call graph that gm_search doesn't.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
@@ -152,7 +152,7 @@ fn tool_defs() -> Vec<Tool> {
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
-        make_tool("gm_search", "Find symbols by name or keyword. Returns name, kind, file, signature, and a 5-line snippet. Set include_content=true for full source code, or use gm_fn for a single symbol with callers/callees.", json!({
+        make_tool("gm_search", "Find symbols by name or keyword. Auto-expands with callers/callees when exactly 1 result matches. For multiple results, use gm_fn to drill into a specific one.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
