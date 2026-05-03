@@ -28,6 +28,14 @@ fn claude_config_path() -> PathBuf {
     home_dir().join(".claude").join("settings.json")
 }
 
+fn claude_desktop_config_path() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home_dir().join("Library/Application Support/Claude/claude_desktop_config.json")
+    } else {
+        home_dir().join(".config/claude/claude_desktop_config.json")
+    }
+}
+
 fn cursor_config_path() -> PathBuf {
     home_dir().join(".cursor").join("mcp.json")
 }
@@ -38,6 +46,11 @@ fn is_claude_detected() -> bool {
             .arg("claude")
             .output()
             .is_ok_and(|o| o.status.success())
+}
+
+fn is_claude_desktop_detected() -> bool {
+    let config = claude_desktop_config_path();
+    config.parent().is_some_and(|p| p.exists())
 }
 
 fn is_cursor_detected() -> bool {
@@ -64,6 +77,7 @@ fn is_mcp_configured(config_path: &PathBuf, key: &str) -> bool {
 #[tauri::command]
 pub fn detect_clients() -> Vec<AiClient> {
     let claude_path = claude_config_path();
+    let claude_desktop_path = claude_desktop_config_path();
     let cursor_path = cursor_config_path();
 
     vec![
@@ -76,20 +90,20 @@ pub fn detect_clients() -> Vec<AiClient> {
             config_path: Some(claude_path.to_string_lossy().to_string()),
         },
         AiClient {
+            id: "claude-desktop".to_string(),
+            name: "Claude Desktop".to_string(),
+            icon: "app-window".to_string(),
+            detected: is_claude_desktop_detected(),
+            mcp_configured: is_mcp_configured(&claude_desktop_path, "graphmind"),
+            config_path: Some(claude_desktop_path.to_string_lossy().to_string()),
+        },
+        AiClient {
             id: "cursor".to_string(),
             name: "Cursor".to_string(),
             icon: "mouse-pointer".to_string(),
             detected: is_cursor_detected(),
             mcp_configured: is_mcp_configured(&cursor_path, "graphmind"),
             config_path: Some(cursor_path.to_string_lossy().to_string()),
-        },
-        AiClient {
-            id: "openclaw".to_string(),
-            name: "OpenClaw".to_string(),
-            icon: "claw".to_string(),
-            detected: false,
-            mcp_configured: false,
-            config_path: None,
         },
     ]
 }
@@ -100,6 +114,7 @@ pub fn install_mcp_for_client(client_id: String) -> Result<(), String> {
 
     match client_id.as_str() {
         "claude-code" => install_claude_mcp(&binary_path),
+        "claude-desktop" => install_claude_desktop_mcp(&binary_path),
         "cursor" => install_cursor_mcp(&binary_path),
         _ => Err(format!("Unsupported client: {client_id}")),
     }
@@ -109,6 +124,7 @@ pub fn install_mcp_for_client(client_id: String) -> Result<(), String> {
 pub fn uninstall_mcp_for_client(client_id: String) -> Result<(), String> {
     match client_id.as_str() {
         "claude-code" => uninstall_claude_mcp(),
+        "claude-desktop" => uninstall_claude_desktop_mcp(),
         "cursor" => uninstall_cursor_mcp(),
         _ => Err(format!("Unsupported client: {client_id}")),
     }
@@ -131,6 +147,28 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
             "command": binary_path,
             "args": ["mcp"],
             "type": "stdio"
+        }),
+    );
+
+    write_json(&config_path, &json)
+}
+
+fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
+    let config_path = claude_desktop_config_path();
+    let mut json = read_or_create_json(&config_path)?;
+
+    let servers = json
+        .as_object_mut()
+        .ok_or("Invalid config format")?
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+
+    let servers_obj = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+    servers_obj.insert(
+        "graphmind".to_string(),
+        serde_json::json!({
+            "command": binary_path,
+            "args": ["mcp"]
         }),
     );
 
@@ -162,6 +200,10 @@ fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
 
 fn uninstall_claude_mcp() -> Result<(), String> {
     remove_mcp_entry(&claude_config_path())
+}
+
+fn uninstall_claude_desktop_mcp() -> Result<(), String> {
+    remove_mcp_entry(&claude_desktop_config_path())
 }
 
 fn uninstall_cursor_mcp() -> Result<(), String> {

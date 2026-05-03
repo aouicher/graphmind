@@ -12,5 +12,6 @@ pub mod query;
 pub mod register;
 pub mod search;
 pub mod session;
+pub mod setup;
 pub mod sync;
 pub mod update;

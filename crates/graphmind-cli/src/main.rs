@@ -159,6 +159,13 @@ enum Commands {
         #[arg(long)]
         obsidian: Option<String>,
     },
+    /// One-command setup: hooks, MCP, project registration, build
+    Setup {
+        #[arg(default_value = ".")]
+        path: String,
+        #[arg(long)]
+        skip_build: bool,
+    },
     /// Update graphmind to the latest version
     Update {
         #[arg(long)]
@@ -483,6 +490,9 @@ fn main() {
             obsidian,
         } => {
             commands::export::export(slug.as_deref(), &format, cross, obsidian.as_deref());
+        }
+        Commands::Setup { path, skip_build } => {
+            commands::setup::setup(Some(&path), skip_build);
         }
         Commands::Update { check } => {
             commands::update::update(check);
