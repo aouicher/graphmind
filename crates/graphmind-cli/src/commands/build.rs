@@ -269,6 +269,61 @@ fn run_embedding_step(
     }
 }
 
+pub fn embed_only(slug: Option<&str>, all: bool) {
+    let global_config = load_config();
+    if global_config.embedding.mode == EmbeddingMode::Disabled {
+        eprintln!("{} Embeddings are disabled. Configure in ~/.graphmind/config.json", "Error:".red().bold());
+        std::process::exit(1);
+    }
+
+    if all {
+        let projects = Registry::list();
+        if projects.is_empty() {
+            eprintln!("{} No projects registered", "Error:".red().bold());
+            std::process::exit(1);
+        }
+        let mut count = 0;
+        for p in &projects {
+            let db_path = paths::graph_db_path(&p.slug);
+            if db_path.exists() {
+                embed_single(&p.slug, &global_config.embedding);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            println!("{} No projects with a graph found. Run 'graphmind build' first.", "!".yellow());
+        }
+        return;
+    }
+
+    let slug = match resolve_project_slug(&[slug]) {
+        Some(s) => s,
+        None => {
+            eprintln!("{} No project specified", "Error:".red().bold());
+            std::process::exit(1);
+        }
+    };
+
+    let db_path = paths::graph_db_path(&slug);
+    if !db_path.exists() {
+        eprintln!("{} No graph for {}. Run 'graphmind build' first.", "Error:".red().bold(), slug);
+        std::process::exit(1);
+    }
+
+    embed_single(&slug, &global_config.embedding);
+}
+
+fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConfig) {
+    let db_path = paths::graph_db_path(slug);
+    let db_path_str = db_path.to_string_lossy().to_string();
+    let db = graphmind_db::schema::init_database(&db_path_str).unwrap_or_else(|e| {
+        eprintln!("{} Failed to open database: {}", "Error:".red().bold(), e);
+        std::process::exit(1);
+    });
+    let queries = GraphQueries::new(&db);
+    run_embedding_step(slug, &queries, emb_config);
+}
+
 fn watch_project(slug: &str) {
     let project = match Registry::get(slug) {
         Some(p) => p,

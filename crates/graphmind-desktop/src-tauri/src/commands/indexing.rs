@@ -2,6 +2,7 @@ use graphmind_config::{paths, Registry};
 use graphmind_config::config::{EmbeddingMode, load_config};
 use graphmind_db::builder::{BuildOptions, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
+use graphmind_db::schema::init_database;
 use graphmind_embeddings::factory::create_engine;
 use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
 use serde_json::json;
@@ -98,6 +99,39 @@ pub async fn build_all_projects(full: bool, app: AppHandle) -> Result<(), String
     }
     for p in &projects {
         build_project(p.slug.clone(), full, app.clone()).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn embed_projects(slugs: Vec<String>, app: AppHandle) -> Result<(), String> {
+    let config = load_config();
+    if config.embedding.mode == EmbeddingMode::Disabled {
+        return Err("Embeddings are disabled".to_string());
+    }
+
+    for slug in &slugs {
+        app.emit("embedding-started", slug).ok();
+
+        let slug_clone = slug.clone();
+        let emb_config = config.embedding.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let db_path = paths::graph_db_path(&slug_clone);
+            if !db_path.exists() {
+                return Err(format!("No graph for project {slug_clone}"));
+            }
+            let db_path_str = db_path.to_string_lossy().to_string();
+            let db = init_database(&db_path_str)
+                .map_err(|e| format!("DB error: {e}"))?;
+            let queries = GraphQueries::new(&db);
+            run_embedding_step(&slug_clone, &queries, &emb_config);
+            Ok(slug_clone)
+        })
+        .await
+        .map_err(|e| format!("Embed failed: {e}"))??;
+
+        app.emit("embedding-complete", &result).ok();
     }
     Ok(())
 }

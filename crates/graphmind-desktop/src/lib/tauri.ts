@@ -80,6 +80,10 @@ export interface EmbeddingSettingsInput {
   voyage_key: string | null;
 }
 
+export interface EmbeddingSettingsResult {
+  projects_needing_embedding: string[];
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -114,5 +118,6 @@ export const api = {
   getSkillStatus: () => invoke<boolean>("get_skill_status"),
   installSkill: () => invoke<void>("install_skill"),
   getEmbeddingSettings: () => invoke<EmbeddingSettings>("get_embedding_settings"),
-  setEmbeddingSettings: (settings: EmbeddingSettingsInput) => invoke<void>("set_embedding_settings", { settings }),
+  setEmbeddingSettings: (settings: EmbeddingSettingsInput) => invoke<EmbeddingSettingsResult>("set_embedding_settings", { settings }),
+  embedProjects: (slugs: string[]) => invoke<void>("embed_projects", { slugs }),
 };

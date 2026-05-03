@@ -23,6 +23,7 @@ pub fn run() {
             commands::projects::get_project_status,
             commands::indexing::build_project,
             commands::indexing::build_all_projects,
+            commands::indexing::embed_projects,
             commands::watcher::start_watching,
             commands::watcher::stop_watching,
             commands::watcher::get_watch_status,

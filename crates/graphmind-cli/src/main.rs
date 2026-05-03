@@ -94,8 +94,14 @@ enum Commands {
         #[arg(long)]
         kind: Option<String>,
     },
-    /// Show embedding index status
-    Embed,
+    /// Show embedding index status or generate embeddings
+    Embed {
+        #[arg(long)]
+        run: bool,
+        #[arg(long)]
+        all: bool,
+        slug: Option<String>,
+    },
     /// Session logging and context
     Session {
         #[command(subcommand)]
@@ -376,8 +382,12 @@ fn main() {
         Commands::Search { query, slug, limit, kind } => {
             commands::search::search(&query, slug.as_deref(), limit, kind.as_deref());
         }
-        Commands::Embed => {
-            commands::search::embed_status(None);
+        Commands::Embed { run, all, slug } => {
+            if run {
+                commands::build::embed_only(slug.as_deref(), all);
+            } else {
+                commands::search::embed_status(slug.as_deref());
+            }
         }
         Commands::Session { action } => match action {
             SessionAction::Start { slug } => {

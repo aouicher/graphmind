@@ -1,4 +1,4 @@
-use graphmind_config::{load_config, save_config, Registry};
+use graphmind_config::{load_config, paths, save_config, Registry};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -195,17 +195,24 @@ pub struct EmbeddingSettingsInput {
     pub voyage_key: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct EmbeddingSettingsResult {
+    pub projects_needing_embedding: Vec<String>,
+}
+
 #[tauri::command]
-pub fn set_embedding_settings(settings: EmbeddingSettingsInput) -> Result<(), String> {
+pub fn set_embedding_settings(settings: EmbeddingSettingsInput) -> Result<EmbeddingSettingsResult, String> {
     use graphmind_config::config::EmbeddingMode;
 
     let mut config = load_config();
-    config.embedding.mode = match settings.mode.as_str() {
+    let new_mode = match settings.mode.as_str() {
         "local" => EmbeddingMode::Local,
         "openai" => EmbeddingMode::Openai,
         "voyage" => EmbeddingMode::Voyage,
         _ => EmbeddingMode::Disabled,
     };
+
+    config.embedding.mode = new_mode.clone();
     config.embedding.model = settings.model.filter(|s| !s.is_empty());
     config.embedding.openai_base_url = settings.openai_base_url.filter(|s| !s.is_empty());
 
@@ -221,5 +228,19 @@ pub fn set_embedding_settings(settings: EmbeddingSettingsInput) -> Result<(), St
     }
 
     save_config(&config);
-    Ok(())
+
+    let mut projects_needing_embedding = Vec::new();
+    if new_mode != EmbeddingMode::Disabled {
+        for project in Registry::list() {
+            let graph_db = paths::graph_db_path(&project.slug);
+            if graph_db.exists() {
+                let emb_db = paths::embedding_db_path(&project.slug);
+                if !emb_db.exists() {
+                    projects_needing_embedding.push(project.slug.clone());
+                }
+            }
+        }
+    }
+
+    Ok(EmbeddingSettingsResult { projects_needing_embedding })
 }

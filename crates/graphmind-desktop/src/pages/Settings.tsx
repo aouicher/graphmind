@@ -66,9 +66,12 @@ export function Settings() {
     }
   };
 
+  const [embPrompt, setEmbPrompt] = useState<string[] | null>(null);
+  const [embRunning, setEmbRunning] = useState(false);
+
   const saveEmbeddings = async () => {
     setEmbSaving(true);
-    await api.setEmbeddingSettings({
+    const result = await api.setEmbeddingSettings({
       mode: embMode,
       model: embModel || null,
       openai_base_url: embBaseUrl || null,
@@ -76,6 +79,20 @@ export function Settings() {
       voyage_key: embVoyageKey || null,
     });
     setEmbSaving(false);
+    if (result.projects_needing_embedding.length > 0) {
+      setEmbPrompt(result.projects_needing_embedding);
+    }
+  };
+
+  const runEmbeddings = async () => {
+    if (!embPrompt) return;
+    setEmbRunning(true);
+    try {
+      await api.embedProjects(embPrompt);
+    } finally {
+      setEmbRunning(false);
+      setEmbPrompt(null);
+    }
   };
 
   return (
@@ -287,6 +304,36 @@ export function Settings() {
             </div>
           )}
         </div>
+
+        {embPrompt && (
+          <div className="p-4 rounded-lg border border-accent/40 bg-accent/5 space-y-3">
+            <p className="text-sm text-text-primary">
+              {embPrompt.length} project{embPrompt.length > 1 ? "s" : ""} already built but missing embeddings:
+            </p>
+            <ul className="text-xs text-text-secondary space-y-0.5 pl-4 list-disc">
+              {embPrompt.map((slug) => (
+                <li key={slug}>{slug}</li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <button
+                onClick={runEmbeddings}
+                disabled={embRunning}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+              >
+                <Brain className="w-3 h-3" />
+                {embRunning ? "Generating..." : "Generate embeddings now"}
+              </button>
+              <button
+                onClick={() => setEmbPrompt(null)}
+                disabled={embRunning}
+                className="px-3 py-1.5 text-xs font-medium border border-border rounded-md text-text-secondary hover:text-text-primary disabled:opacity-50"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
