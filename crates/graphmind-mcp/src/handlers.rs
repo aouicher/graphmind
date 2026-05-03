@@ -39,16 +39,13 @@ fn cross_links_path() -> PathBuf {
         .join("links.jsonl")
 }
 
-fn meta_path(slug: &str) -> PathBuf {
-    graphs_dir().join(slug).join("meta.json")
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct ProjectConfig {
     path: String,
     slug: String,
     last_build: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     languages: Vec<String>,
 }
 
@@ -595,12 +592,13 @@ fn handle_map(args: &Value) -> Value {
         .get("limit")
         .and_then(|v| v.as_i64())
         .unwrap_or(20);
-    with_graph(args, |gq, _proj| {
+    with_graph(args, |gq, proj| {
         let top = gq.top_connected(limit);
-        json_text(&json!({
-            "top_connected_files": top,
-            "count": top.len()
-        }))
+        let mut lines = vec![format!(">> {} top connected files [{}]:\n", top.len(), proj.slug)];
+        for entry in &top {
+            lines.push(format!("  {} ({} connections)", entry.file, entry.connections));
+        }
+        text_content(&lines.join("\n"))
     })
 }
 
@@ -632,11 +630,13 @@ fn handle_memory_search(args: &Value) -> Value {
     let store = MemoryStore::new(&memory_dir());
     let entries = store.list(project_slug);
     let results = memory_search(&entries, query, limit);
-    json_text(&json!({
-        "query": query,
-        "results": results,
-        "count": results.len()
-    }))
+    let mut lines = vec![format!(">> {} memory results for \"{}\":\n", results.len(), query)];
+    for r in &results {
+        let preview: String = r.content.lines().next().unwrap_or("").chars().take(100).collect();
+        let r_type = format!("{:?}", r.entry_type).to_lowercase();
+        lines.push(format!("  [{r_type}] {preview}"));
+    }
+    text_content(&lines.join("\n"))
 }
 
 fn handle_memory_add(args: &Value) -> Value {
@@ -708,10 +708,13 @@ fn handle_memory_list(args: &Value) -> Value {
     let store = MemoryStore::new(&memory_dir());
     let entries = store.list(project_slug);
     let truncated: Vec<_> = entries.into_iter().take(limit).collect();
-    json_text(&json!({
-        "entries": truncated,
-        "count": truncated.len()
-    }))
+    let mut lines = vec![format!(">> {} memory entries:\n", truncated.len())];
+    for e in &truncated {
+        let preview: String = e.content.lines().next().unwrap_or("").chars().take(80).collect();
+        let e_type = format!("{:?}", e.entry_type).to_lowercase();
+        lines.push(format!("  [{e_type}] {preview} (id: {})", e.id));
+    }
+    text_content(&lines.join("\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -720,22 +723,12 @@ fn handle_memory_list(args: &Value) -> Value {
 
 fn handle_list_projects(_args: &Value) -> Value {
     let config = load_config();
-    let projects: Vec<Value> = config
-        .projects
-        .values()
-        .map(|p| {
-            json!({
-                "slug": p.slug,
-                "path": p.path,
-                "last_build": p.last_build,
-                "languages": p.languages
-            })
-        })
-        .collect();
-    json_text(&json!({
-        "projects": projects,
-        "count": projects.len()
-    }))
+    let mut lines = vec![format!(">> {} registered projects:\n", config.projects.len())];
+    for p in config.projects.values() {
+        let last = p.last_build.as_deref().unwrap_or("never");
+        lines.push(format!("  {} — {} (built: {})", p.slug, p.path, last));
+    }
+    text_content(&lines.join("\n"))
 }
 
 fn handle_status(args: &Value) -> Value {
@@ -743,23 +736,22 @@ fn handle_status(args: &Value) -> Value {
         let stats = gq.stats();
         let langs = gq.language_breakdown();
 
-        let meta: Value = if meta_path(&proj.slug).exists() {
-            std::fs::read_to_string(meta_path(&proj.slug))
-                .ok()
-                .and_then(|c| serde_json::from_str(&c).ok())
-                .unwrap_or(Value::Null)
-        } else {
-            Value::Null
-        };
+        let symbols = stats.symbols;
+        let edges = stats.edges;
+        let files = stats.files;
 
-        json_text(&json!({
-            "project": proj.slug,
-            "path": proj.path,
-            "stats": stats,
-            "languages": langs,
-            "last_build": proj.last_build,
-            "meta": meta
-        }))
+        let lang_str: String = langs.iter()
+            .map(|l| format!("{} ({})", l.language, l.count))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let last_build = proj.last_build.as_deref().unwrap_or("never");
+
+        let text = format!(
+            ">> Project: {}\n  Path: {}\n  Last build: {}\n  Graph: {} symbols, {} edges, {} files\n  Languages: {}",
+            proj.slug, proj.path, last_build, symbols, edges, files, lang_str
+        );
+        text_content(&text)
     })
 }
 
@@ -1226,10 +1218,28 @@ fn handle_listeners(args: &Value) -> Value {
         }
     }
 
-    json_text(&json!({
-        "event": event,
-        "results": all_results,
-    }))
+    let mut lines = vec![format!(">> Listeners for \"{}\":\n", event)];
+    for r in &all_results {
+        let proj = r.get("project").and_then(|v| v.as_str()).unwrap_or("?");
+        if let Some(listeners) = r.get("listeners").and_then(|v| v.as_array()) {
+            for l in listeners {
+                let name = l.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let kind = l.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                let file = l.get("file").and_then(|v| v.as_str()).unwrap_or("?");
+                let line = l.get("line_start").and_then(|v| v.as_i64()).unwrap_or(0);
+                let sig = l.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                if sig.is_empty() {
+                    lines.push(format!("  {name} [{kind}] {file}:{line} ({proj})"));
+                } else {
+                    lines.push(format!("  {name} [{kind}] {file}:{line} ({proj})\n    ({sig})"));
+                }
+            }
+        }
+    }
+    if lines.len() == 1 {
+        lines.push("  (none found)".to_string());
+    }
+    text_content(&lines.join("\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,13 +1295,12 @@ fn handle_dead_code(args: &Value) -> Value {
     with_graph(args, |gq, proj| {
         let dead = gq.dead_code(kind, limit);
         let qualified = qualify_definitions(gq, &dead, false);
-        json_text(&json!({
-            "project": proj.slug,
-            "dead_symbols": qualified,
-            "count": qualified.len(),
-            "kind_filter": kind,
-            "limit": limit
-        }))
+        let kind_label = kind.unwrap_or("all");
+        let mut lines = vec![format!(">> {} dead symbols [{}] (kind: {}):\n", qualified.len(), proj.slug, kind_label)];
+        for s in &qualified {
+            lines.push(compact_symbol_line(s));
+        }
+        text_content(&lines.join("\n"))
     })
 }
 
@@ -1381,11 +1390,10 @@ fn handle_similar(args: &Value) -> Value {
             return err_text(&format!("Symbol '{}' not found", symbol));
         }
         let results = gq.similar_symbols(found[0].id, limit);
-        json_text(&json!({
-            "project": proj.slug,
-            "symbol": symbol,
-            "similar": results,
-            "count": results.len()
-        }))
+        let mut lines = vec![format!(">> {} similar to \"{}\" [{}]:\n", results.len(), symbol, proj.slug)];
+        for s in &results {
+            lines.push(format!("  {} [{}] {}:{} ({:.2})", s.name, s.kind, s.file, s.line_start, s.score));
+        }
+        text_content(&lines.join("\n"))
     })
 }
