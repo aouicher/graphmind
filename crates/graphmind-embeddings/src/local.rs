@@ -26,6 +26,13 @@ impl LocalEngine {
             .unwrap_or_else(|| std::path::PathBuf::from(".graphmind/models"));
         std::fs::create_dir_all(&cache_dir).ok();
 
+        // Cap ONNX intra-op threads to avoid saturating CPU on large projects
+        if std::env::var("OMP_NUM_THREADS").is_err() {
+            let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+            let threads = (cores / 2).clamp(2, 4);
+            std::env::set_var("OMP_NUM_THREADS", threads.to_string());
+        }
+
         eprintln!("Loading local embedding model ({name})... (first run downloads ~30MB)");
         let model = TextEmbedding::try_new(
             InitOptions::new(model_enum)

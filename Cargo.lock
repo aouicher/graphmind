@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "chrono",
  "clap",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "napi",
  "napi-build",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "dirs 5.0.1",
  "fastembed",
@@ -1960,7 +1960,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "dirs 5.0.1",
  "graphmind-config",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "chrono",
  "graphmind-db",
