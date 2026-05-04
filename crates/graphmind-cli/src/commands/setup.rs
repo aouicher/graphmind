@@ -190,7 +190,7 @@ fn find_graphmind_binary() -> String {
 }
 
 const GM_BLOCK: &str = r#"<!-- GM:START -->
-<!-- GM:VERSION:0.2.79 -->
+<!-- GM:VERSION:0.2.80 -->
 
 # graphmind — code intelligence
 In any graphmind-registered project, use `/gm` (invoke Skill tool with `skill: "graphmind"`) for ALL code exploration before grep, find, or spawning Explore agents.
