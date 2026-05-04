@@ -9,7 +9,7 @@ pub struct LocalEngine {
 
 impl LocalEngine {
     pub fn new(model_name: Option<&str>) -> Result<Self, EmbedError> {
-        let name = model_name.unwrap_or("all-MiniLM-L6-v2");
+        let name = model_name.unwrap_or("bge-small-en-v1.5");
         let (model_enum, dims) = match name {
             "all-MiniLM-L6-v2" => (EmbeddingModel::AllMiniLML6V2, 384),
             "bge-small-en-v1.5" => (EmbeddingModel::BGESmallENV15, 384),
