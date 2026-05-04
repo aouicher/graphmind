@@ -149,8 +149,7 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   exit 0
 fi
 
-# For Grep/Glob/LS/Agent: execute graphmind and return results as additionalContext
-# (we can't rewrite these tools' input format, so we provide results + advice)
+# Execute graphmind search
 RESULTS=$(graphmind search "$PATTERN" --limit 15 2>/dev/null | head -60)
 
 # Record in cache
@@ -158,18 +157,30 @@ NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
 echo "${NOW}|${NORM}" >> "$CACHE_FILE"
 tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
 
-if [ -n "$RESULTS" ]; then
-  MSG="⚡ graphmind results for \"$PATTERN\" (use these instead of grep/ls):\n$RESULTS\n\n→ For more detail, use MCP gm_fn <symbol> or gm_deps <file>."
-else
-  MSG="⚡ graphmind found no results for \"$PATTERN\". Proceeding with original tool."
+if [ -z "$RESULTS" ]; then
+  exit 0
 fi
 
-jq -n --arg msg "$MSG" '{
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "additionalContext": $msg
-  }
-}'
+# For Agent (sub-agents): BLOCK and return graphmind results — prevents grep/find exploration
+if [ "$TOOL_NAME" = "Agent" ]; then
+  MSG="⚡ graphmind already has this indexed:\n$RESULTS\n\nUse these results directly. For more detail: graphmind fn <symbol> or graphmind deps <file>."
+  jq -n --arg msg "$MSG" '{
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "permissionDecision": "deny",
+      "permissionDecisionReason": $msg
+    }
+  }'
+else
+  # For Grep/Glob/LS: inject results as context (don't block — may be legitimate)
+  MSG="⚡ graphmind results for \"$PATTERN\" (prefer these over grep/find):\n$RESULTS"
+  jq -n --arg msg "$MSG" '{
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "additionalContext": $msg
+    }
+  }'
+fi
 "#;
 
 const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
