@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-mcp"
-version = "0.2.104"
+version = "0.2.105"
 edition = "2021"
 license = "MIT"
 description = "MCP server for graphmind"

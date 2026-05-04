@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "chrono",
  "clap",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "napi",
  "napi-build",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "dirs 5.0.1",
  "fastembed",
@@ -1960,7 +1960,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "dirs 5.0.1",
  "graphmind-config",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.104"
+version = "0.2.105"
 dependencies = [
  "chrono",
  "graphmind-db",
@@ -5902,9 +5902,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.52.1"
+version = "1.52.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67dee974fe86fd92cc45b7a95fdd2f99a36a6d7b0d431a231178d3d670bbcc6"
+checksum = "110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386"
 dependencies = [
  "bytes",
  "libc",
