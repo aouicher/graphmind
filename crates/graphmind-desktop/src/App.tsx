@@ -26,6 +26,7 @@ function UpdateBanner({
     setUpdating(true);
     try {
       await api.installAppUpdate();
+      api.updateCli().catch(() => {});
       setDone(true);
     } catch (e) {
       console.error(e);

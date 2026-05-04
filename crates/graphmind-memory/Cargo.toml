@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-memory"
-version = "0.2.94"
+version = "0.2.95"
 edition = "2021"
 license = "MIT"
 description = "JSONL memory and cross-link stores for graphmind"
