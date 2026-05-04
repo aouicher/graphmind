@@ -528,24 +528,47 @@ fn handle_deps(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: file"),
     };
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
     with_graph(args, |gq, _proj| {
         let deps = gq.file_deps(file);
         let reverse = gq.file_reverse_deps(file);
         let all_symbols = gq.symbols_in_file(file);
-        let symbols: Vec<_> = all_symbols.iter().take(limit).collect();
-        let mut result = json!({
-            "file": file,
-            "dependencies": deps,
-            "dependents": reverse,
-            "symbols": symbols,
-        });
-        if all_symbols.len() > limit {
-            let obj = result.as_object_mut().unwrap();
-            obj.insert("symbols_truncated".into(), json!(true));
-            obj.insert("total_symbols".into(), json!(all_symbols.len()));
+
+        let mut lines = vec![format!(">> deps: {}\n", file)];
+
+        if !deps.is_empty() {
+            lines.push(format!("  Imports ({}):", deps.len()));
+            for d in deps.iter().take(limit) {
+                lines.push(format!("    → {} [{}] ({}x)", d.file, d.kind, d.count));
+            }
+            if deps.len() > limit {
+                lines.push(format!("    ... +{} more", deps.len() - limit));
+            }
         }
-        json_text(&result)
+
+        if !reverse.is_empty() {
+            lines.push(format!("\n  Imported by ({}):", reverse.len()));
+            for d in reverse.iter().take(limit) {
+                lines.push(format!("    ← {} [{}] ({}x)", d.file, d.kind, d.count));
+            }
+            if reverse.len() > limit {
+                lines.push(format!("    ... +{} more", reverse.len() - limit));
+            }
+        }
+
+        if !all_symbols.is_empty() {
+            lines.push(format!("\n  Symbols ({}):", all_symbols.len()));
+            for s in all_symbols.iter().take(limit) {
+                let sig = s.signature.as_deref().unwrap_or("");
+                let sig_part = if sig.is_empty() { String::new() } else { format!("({})", sig) };
+                lines.push(format!("    {} {}{} :{}", s.kind, s.name, sig_part, s.line_start));
+            }
+            if all_symbols.len() > limit {
+                lines.push(format!("    ... +{} more", all_symbols.len() - limit));
+            }
+        }
+
+        text_content(&lines.join("\n"))
     })
 }
 
@@ -1301,10 +1324,20 @@ fn handle_outline(args: &Value) -> Value {
     };
     with_graph(args, |gq, _proj| {
         let outline = gq.outline(file);
-        json_text(&json!({
-            "file": file,
-            "outline": outline
-        }))
+        let mut lines = vec![format!(">> outline: {}\n", file)];
+        fn render_tree(nodes: &[graphmind_db::queries::OutlineNode], lines: &mut Vec<String>, depth: usize) {
+            for node in nodes {
+                let indent = "  ".repeat(depth);
+                let sig = node.signature.as_deref().unwrap_or("");
+                let sig_part = if sig.is_empty() { String::new() } else { format!("({})", sig) };
+                lines.push(format!("{}{} {}{} :{}", indent, node.kind, node.name, sig_part, node.line_start));
+                if !node.children.is_empty() {
+                    render_tree(&node.children, lines, depth + 1);
+                }
+            }
+        }
+        render_tree(&outline, &mut lines, 1);
+        text_content(&lines.join("\n"))
     })
 }
 
@@ -1319,16 +1352,17 @@ fn handle_who_calls_chain(args: &Value) -> Value {
     };
     let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
 
-    with_graph(args, |gq, proj| {
+    with_graph(args, |gq, _proj| {
         let (chain, max_reached) = gq.who_calls_chain(symbol, depth);
-        json_text(&json!({
-            "project": proj.slug,
-            "symbol": symbol,
-            "chain": chain,
-            "total_callers": chain.len(),
-            "max_depth": depth,
-            "max_depth_reached": max_reached
-        }))
+        let mut lines = vec![format!(">> who calls {} (depth {}, {} callers):\n", symbol, depth, chain.len())];
+        for node in &chain {
+            let indent = "  ".repeat(node.depth + 1);
+            lines.push(format!("{}← {} [{}] {}:{}", indent, node.name, node.kind, node.file, node.line_start));
+        }
+        if max_reached {
+            lines.push(format!("\n  (max depth {} reached — increase depth for more)", depth));
+        }
+        text_content(&lines.join("\n"))
     })
 }
 
