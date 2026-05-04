@@ -204,7 +204,7 @@ In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY 
 - Understanding code before making changes
 - Exploring architecture or blast radius
 
-**Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first. This overrides OMC delegation rules for code exploration tasks.
+**Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first.
 
 Only fall back to grep for: string literals, config values, env vars, non-code patterns.
 
@@ -228,10 +228,10 @@ fn install_claude_md_block() {
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
         format!("{}{}{}", &content[..re_start], GM_BLOCK, &content[re_end..])
-    } else if content.contains("<!-- OMC:END -->") {
-        // Insert right after OMC block for maximum attention weight
-        let omc_end = content.find("<!-- OMC:END -->").unwrap() + "<!-- OMC:END -->".len();
-        format!("{}\n\n{}\n{}", &content[..omc_end], GM_BLOCK, &content[omc_end..])
+    } else if content.contains("<!-- OMC:START -->") {
+        // Insert before OMC block — highest attention weight position
+        let omc_start = content.find("<!-- OMC:START -->").unwrap();
+        format!("{}{}\n\n{}", &content[..omc_start], GM_BLOCK, &content[omc_start..])
     } else {
         // No OMC block — prepend before other content
         format!("{}\n\n{}", GM_BLOCK, content)
