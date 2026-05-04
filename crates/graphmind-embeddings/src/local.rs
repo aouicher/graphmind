@@ -55,10 +55,14 @@ impl EmbeddingEngine for LocalEngine {
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        let input: Vec<&str> = texts.to_vec();
-        self.model
-            .embed(input, None)
-            .map_err(|e| EmbedError::ModelError(e.to_string()))
+        let mut all_results = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(128) {
+            let mut batch = self.model
+                .embed(chunk.to_vec(), None)
+                .map_err(|e| EmbedError::ModelError(e.to_string()))?;
+            all_results.append(&mut batch);
+        }
+        Ok(all_results)
     }
 
     fn dimensions(&self) -> usize {

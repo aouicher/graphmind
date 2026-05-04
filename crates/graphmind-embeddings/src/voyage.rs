@@ -76,7 +76,7 @@ impl EmbeddingEngine for VoyageEngine {
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        let chunks: Vec<&[&str]> = texts.chunks(128).collect();
+        let chunks: Vec<&[&str]> = texts.chunks(1024).collect();
         let concurrency = 10;
         let mut all_results: Vec<Vec<Vec<f32>>> = vec![Vec::new(); chunks.len()];
 
