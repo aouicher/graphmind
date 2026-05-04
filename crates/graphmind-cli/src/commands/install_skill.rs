@@ -29,14 +29,11 @@ You MUST query graphmind first. Only fall back to grep/find if graphmind cannot 
 | Project overview | `gm_map` | Top connected files |
 | Cross-project | `gm_cross_query` | Search across all projects |
 
-### When to use gm_fn (and when NOT to)
+### gm_fn vs gm_search
 
-**USE gm_fn when:** you need full source code or the call graph (callers/callees) for debugging, refactoring, or impact analysis. Pass `file=` to disambiguate.
+`gm_search` is the default entry point. It returns name, file, signature, and auto-expands callers/callees when exactly 1 result matches.
 
-**DO NOT use gm_fn when:**
-- gm_search already answered your question (name, file, signature visible)
-- gm_search returned 1 result — it auto-expands with callers/callees already
-- You just need to know WHERE something is defined — gm_search is enough
+`gm_fn` is for when you need the **full source code** or a **complete call graph** — typically during debugging, refactoring, or impact analysis. Pass `file=` to disambiguate.
 
 ## Is this project registered?
 Check: `graphmind status`
