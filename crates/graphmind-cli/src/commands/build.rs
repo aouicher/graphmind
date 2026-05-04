@@ -235,36 +235,44 @@ fn run_embedding_step(
         })
         .collect();
 
-    let text_refs: Vec<&str> = texts.iter().map(|t| t.as_str()).collect();
-
-    // Embed in batches
-    match engine.embed_batch(&text_refs) {
-        Ok(embeddings) => {
-            let rows: Vec<NewEmbeddingRow> = new_symbols
-                .iter()
-                .zip(embeddings.iter())
-                .map(|(sym, emb)| NewEmbeddingRow {
-                    symbol_name: sym.name.clone(),
-                    symbol_kind: sym.kind.clone(),
-                    file: sym.file.clone(),
-                    text: texts[new_symbols.iter().position(|s| s.id == sym.id).unwrap()].clone(),
-                    embedding: float32_to_bytes(emb),
-                })
-                .collect();
-
-            if let Err(e) = store.insert_batch(&rows) {
-                eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
-            } else {
-                println!(
-                    "{} Embedded {} symbols ({})",
-                    "OK".green().bold(),
-                    rows.len(),
-                    current_model.dimmed()
-                );
+    const CHUNK_SIZE: usize = 256;
+    for (chunk_idx, chunk) in new_symbols.chunks(CHUNK_SIZE).enumerate() {
+        let chunk_texts: Vec<String> = chunk
+            .iter()
+            .map(|s| {
+                let idx = chunk_idx * CHUNK_SIZE + chunk.iter().position(|x| x.id == s.id).unwrap();
+                texts[idx].clone()
+            })
+            .collect();
+        let text_refs: Vec<&str> = chunk_texts.iter().map(|t| t.as_str()).collect();
+        match engine.embed_batch(&text_refs) {
+            Ok(embeddings) => {
+                let rows: Vec<NewEmbeddingRow> = chunk
+                    .iter()
+                    .zip(embeddings.iter())
+                    .map(|(sym, emb)| NewEmbeddingRow {
+                        symbol_name: sym.name.clone(),
+                        symbol_kind: sym.kind.clone(),
+                        file: sym.file.clone(),
+                        text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].clone(),
+                        embedding: float32_to_bytes(emb),
+                    })
+                    .collect();
+                if let Err(e) = store.insert_batch(&rows) {
+                    eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
+                } else {
+                    println!(
+                        "{} Embedded {}/{} symbols ({})",
+                        "OK".green().bold(),
+                        rows.len(),
+                        new_symbols.len(),
+                        current_model.dimmed()
+                    );
+                }
             }
-        }
-        Err(e) => {
-            eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e);
+            Err(e) => {
+                eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e);
+            }
         }
     }
 }

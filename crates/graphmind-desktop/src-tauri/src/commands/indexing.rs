@@ -197,21 +197,28 @@ fn run_embedding_step(
         })
         .collect();
 
-    let text_refs: Vec<&str> = texts.iter().map(|t| t.as_str()).collect();
-
-    if let Ok(embeddings) = engine.embed_batch(&text_refs) {
-        let rows: Vec<NewEmbeddingRow> = new_symbols
+    const CHUNK_SIZE: usize = 256;
+    for (chunk_idx, chunk) in new_symbols.chunks(CHUNK_SIZE).enumerate() {
+        let chunk_texts: Vec<&str> = chunk
             .iter()
-            .zip(embeddings.iter())
-            .map(|(sym, emb)| NewEmbeddingRow {
-                symbol_name: sym.name.clone(),
-                symbol_kind: sym.kind.clone(),
-                file: sym.file.clone(),
-                text: texts[new_symbols.iter().position(|s| s.id == sym.id).unwrap()].clone(),
-                embedding: float32_to_bytes(emb),
+            .map(|s| {
+                let idx = chunk_idx * CHUNK_SIZE + chunk.iter().position(|x| x.id == s.id).unwrap();
+                texts[idx].as_str()
             })
             .collect();
-
-        store.insert_batch(&rows).ok();
+        if let Ok(embeddings) = engine.embed_batch(&chunk_texts) {
+            let rows: Vec<NewEmbeddingRow> = chunk
+                .iter()
+                .zip(embeddings.iter())
+                .map(|(sym, emb)| NewEmbeddingRow {
+                    symbol_name: sym.name.clone(),
+                    symbol_kind: sym.kind.clone(),
+                    file: sym.file.clone(),
+                    text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].to_string(),
+                    embedding: float32_to_bytes(emb),
+                })
+                .collect();
+            store.insert_batch(&rows).ok();
+        }
     }
 }
