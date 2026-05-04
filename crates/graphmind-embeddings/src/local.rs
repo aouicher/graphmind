@@ -19,9 +19,17 @@ impl LocalEngine {
                 )))
             }
         };
+
+        let cache_dir = dirs::home_dir()
+            .map(|h| h.join(".graphmind").join("models"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".graphmind/models"));
+        std::fs::create_dir_all(&cache_dir).ok();
+
         eprintln!("Loading local embedding model ({name})... (first run downloads ~30MB)");
         let model = TextEmbedding::try_new(
-            InitOptions::new(model_enum).with_show_download_progress(true),
+            InitOptions::new(model_enum)
+                .with_cache_dir(cache_dir)
+                .with_show_download_progress(true),
         )
         .map_err(|e| EmbedError::ModelError(e.to_string()))?;
 

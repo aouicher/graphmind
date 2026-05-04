@@ -1947,6 +1947,7 @@ dependencies = [
 name = "graphmind-embeddings"
 version = "0.2.97"
 dependencies = [
+ "dirs 5.0.1",
  "fastembed",
  "graphmind-config",
  "reqwest 0.12.28",
