@@ -21,27 +21,35 @@ Everything is 100% local. No cloud. No open ports by default. No telemetry.
 
 ## Install
 
-### Homebrew (macOS/Linux)
+### Desktop app (macOS) — recommended
 
-```bash
-brew install aouicher/graphmind/graphmind
-```
+Download the `.dmg` from [Releases](https://github.com/aouicher/graphmind/releases). The app installs the CLI for you and runs a guided onboarding that configures MCP, hooks, skill, and embeddings — no terminal needed.
 
-### Cargo
+| Platform | Asset |
+|----------|-------|
+| macOS (Apple Silicon) | `GraphMind-macos-arm64.dmg` |
+| macOS (Intel) | `GraphMind-macos-x64.dmg` |
 
-```bash
-cargo install --git https://github.com/aouicher/graphmind graphmind-cli
-```
-
-### Shell script
+### CLI — shell script (macOS/Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/install.sh | bash
 ```
 
-### Desktop app (macOS)
+Then run `graphmind setup` once to configure Claude Code, hooks, and skill.
 
-Download the `.dmg` from [Releases](https://github.com/aouicher/graphmind/releases). The app includes a guided onboarding that installs the CLI, configures PATH, sets up MCP/hooks/skill, and configures embeddings — no terminal needed.
+### CLI — Homebrew (macOS/Linux)
+
+```bash
+brew install aouicher/graphmind/graphmind
+```
+
+### CLI — Linux (direct download)
+
+```bash
+curl -fsSL https://github.com/aouicher/graphmind-dist/releases/latest/download/graphmind-cli-linux-x64 -o ~/.local/bin/graphmind
+chmod +x ~/.local/bin/graphmind
+```
 
 ### From source
 
@@ -248,7 +256,7 @@ Configured in `~/.graphmind/config.json`:
 
 | Mode | Model (default) | Notes |
 |------|----------------|-------|
-| `local` | `all-MiniLM-L6-v2` (384d) | ONNX, no API key needed |
+| `local` | `nomic-embed-text-v1.5` (768d) | ONNX, no API key needed |
 | `openai` | `text-embedding-3-small` (1536d) | Supports custom `openai_base_url` |
 | `voyage` | `voyage-code-3` (1024d) | Code-specialized, recommended |
 | `disabled` | — | No embeddings (default) |
