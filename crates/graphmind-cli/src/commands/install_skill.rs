@@ -16,16 +16,26 @@ allowed-tools: Bash, Read, Write
 **Before using Grep, find, rg, ag, or reading files to understand code:**
 You MUST query graphmind first. Only fall back to grep/find if graphmind cannot answer (e.g., string literals, config values, non-code patterns).
 
-| Need | Command | MCP tool |
-|------|---------|----------|
-| Find a symbol | `graphmind fn <symbol>` | `gm_fn` |
-| Search by intent | `graphmind search "<query>"` | `gm_search` |
-| File dependencies | `graphmind deps <file>` | `gm_deps` |
-| Who calls X | `graphmind query <symbol>` | `gm_query` |
-| Blast radius | `graphmind fn-impact <symbol>` | `gm_fn_impact` |
-| Git change impact | `graphmind diff-impact` | `gm_diff_impact` |
-| Project overview | `graphmind map` | `gm_map` |
-| Cross-project | `graphmind cross query <symbol>` | `gm_cross_query` |
+## Tool selection — pick the right one
+
+| Situation | Tool | Why |
+|-----------|------|-----|
+| Don't know the exact name | `gm_search` | Broad discovery by keyword/intent |
+| Know the function name, need source + callers/callees | `gm_fn` | Deep dive with call graph |
+| Need file structure overview | `gm_outline` | Tree of symbols in a file |
+| Need imports/dependents of a file | `gm_deps` | File-level dependency map |
+| Need blast radius of a change | `gm_fn_impact` | All callers of a function |
+| Git diff impact | `gm_diff_impact` | Files affected by current changes |
+| Project overview | `gm_map` | Top connected files |
+| Cross-project | `gm_cross_query` | Search across all projects |
+
+### When to use gm_fn (and when NOT to)
+
+**USE gm_fn when:** you need callers/callees for debugging, refactoring, or impact analysis.
+Pass `file=` to disambiguate common names like `create`, `init`, `handle`.
+
+**DO NOT use gm_fn when:** gm_search already gave you enough info (name, file, signature).
+A simple lookup doesn't need the call graph. gm_search results are often sufficient.
 
 ## Is this project registered?
 Check: `graphmind status`

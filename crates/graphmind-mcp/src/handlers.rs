@@ -1078,7 +1078,7 @@ fn handle_search(args: &Value) -> Value {
                                         lines.push(format!("    ← {}", compact_edge_line(c)));
                                     }
                                     if compact_callers.len() > 10 {
-                                        lines.push(format!("    ... and {} more (use gm_fn for full list)", compact_callers.len() - 10));
+                                        lines.push(format!("    ... and {} more", compact_callers.len() - 10));
                                     }
                                 }
                                 if !compact_callees.is_empty() {
@@ -1087,7 +1087,7 @@ fn handle_search(args: &Value) -> Value {
                                         lines.push(format!("    → {}", compact_edge_line(c)));
                                     }
                                     if compact_callees.len() > 10 {
-                                        lines.push(format!("    ... and {} more (use gm_fn for full list)", compact_callees.len() - 10));
+                                        lines.push(format!("    ... and {} more", compact_callees.len() - 10));
                                     }
                                 }
                                 return text_content(&lines.join("\n"));
@@ -1118,15 +1118,15 @@ fn handle_search(args: &Value) -> Value {
                 }
             }
         }
-        // Actionable gm_fn hints with file for disambiguation
+        // Compact symbol index for disambiguation
         if total_count > 1 && total_count <= 5 {
-            lines.push("\n→ Drill down:".to_string());
+            lines.push("\n→ Symbols:".to_string());
             for r in &all_results {
                 if let Some(symbols) = r.get("symbols").and_then(|v| v.as_array()) {
                     for s in symbols {
                         let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                         let file = s.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                        lines.push(format!("  gm_fn \"{}\" file=\"{}\"", name, file));
+                        lines.push(format!("  {}: {}", name, file));
                     }
                 }
             }
