@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.83"
+version = "0.2.84"
 dependencies = [
  "chrono",
  "clap",
