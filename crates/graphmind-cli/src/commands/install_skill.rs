@@ -31,11 +31,12 @@ You MUST query graphmind first. Only fall back to grep/find if graphmind cannot 
 
 ### When to use gm_fn (and when NOT to)
 
-**USE gm_fn when:** you need callers/callees for debugging, refactoring, or impact analysis.
-Pass `file=` to disambiguate common names like `create`, `init`, `handle`.
+**USE gm_fn when:** you need full source code or the call graph (callers/callees) for debugging, refactoring, or impact analysis. Pass `file=` to disambiguate.
 
-**DO NOT use gm_fn when:** gm_search already gave you enough info (name, file, signature).
-A simple lookup doesn't need the call graph. gm_search results are often sufficient.
+**DO NOT use gm_fn when:**
+- gm_search already answered your question (name, file, signature visible)
+- gm_search returned 1 result — it auto-expands with callers/callees already
+- You just need to know WHERE something is defined — gm_search is enough
 
 ## Is this project registered?
 Check: `graphmind status`
