@@ -25,6 +25,7 @@ pub fn run() {
             commands::indexing::build_project,
             commands::indexing::build_all_projects,
             commands::indexing::embed_projects,
+            commands::indexing::cancel_build,
             commands::watcher::start_watching,
             commands::watcher::stop_watching,
             commands::watcher::get_watch_status,

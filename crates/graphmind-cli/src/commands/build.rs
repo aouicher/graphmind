@@ -8,6 +8,8 @@ use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_by
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde_json::json;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -134,7 +136,7 @@ fn build_single(slug: &str, full: bool) {
     // Embedding step
     let global_config = load_config();
     if global_config.embedding.mode != EmbeddingMode::Disabled {
-        run_embedding_step(slug, &queries, &global_config.embedding);
+        run_embedding_step(slug, &queries, &global_config.embedding, None);
     }
 
     println!(
@@ -154,6 +156,7 @@ fn run_embedding_step(
     slug: &str,
     queries: &GraphQueries,
     config: &graphmind_config::config::EmbeddingConfig,
+    cancel: Option<Arc<AtomicBool>>,
 ) {
     let engine = match create_engine(config) {
         Ok(e) => e,
@@ -237,6 +240,10 @@ fn run_embedding_step(
 
     const CHUNK_SIZE: usize = 256;
     for (chunk_idx, chunk) in new_symbols.chunks(CHUNK_SIZE).enumerate() {
+        if cancel.as_ref().map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
+            eprintln!("Embedding cancelled.");
+            return;
+        }
         let chunk_texts: Vec<String> = chunk
             .iter()
             .map(|s| {
@@ -329,7 +336,7 @@ fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConf
         std::process::exit(1);
     });
     let queries = GraphQueries::new(&db);
-    run_embedding_step(slug, &queries, emb_config);
+    run_embedding_step(slug, &queries, emb_config, None);
 }
 
 fn watch_project(slug: &str) {

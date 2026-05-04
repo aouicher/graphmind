@@ -110,6 +110,7 @@ export const api = {
   getProjectStatus: (slug: string) => invoke<ProjectInfo>("get_project_status", { slug }),
   buildProject: (slug: string, full: boolean) => invoke<void>("build_project", { slug, full }),
   buildAllProjects: (full: boolean) => invoke<void>("build_all_projects", { full }),
+  cancelBuild: (slug: string) => invoke<void>("cancel_build", { slug }),
   startWatching: (slug: string) => invoke<void>("start_watching", { slug }),
   stopWatching: (slug: string) => invoke<void>("stop_watching", { slug }),
   getWatchStatus: () => invoke<Record<string, boolean>>("get_watch_status"),

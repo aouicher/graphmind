@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FolderPlus, RotateCcw, Eye, EyeOff, Trash2, Zap } from "lucide-react";
+import { FolderPlus, RotateCcw, Eye, EyeOff, Trash2, Zap, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjects } from "../hooks/useProjects";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -27,6 +27,13 @@ export function Projects() {
     refresh();
   }, [refresh]));
 
+  useTauriEvent<string>("indexing-cancelled", useCallback(() => {
+    setBuilding(null);
+    setBuildingPhase("indexing");
+    setBuildingAll(false);
+    refresh();
+  }, [refresh]));
+
   const handleAdd = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
@@ -41,6 +48,14 @@ export function Projects() {
       await api.buildProject(slug, false);
     } catch {
       setBuilding(null);
+    }
+  };
+
+  const handleCancel = async (slug: string) => {
+    try {
+      await api.cancelBuild(slug);
+    } catch {
+      // best-effort
     }
   };
 
@@ -122,6 +137,7 @@ export function Projects() {
               isBuilding={building === p.slug}
               buildingPhase={building === p.slug ? buildingPhase : "indexing"}
               onBuild={() => handleBuild(p.slug)}
+              onCancel={() => handleCancel(p.slug)}
               onRemove={() => handleRemove(p.slug)}
               onToggleWatch={() => handleWatch(p)}
             />
@@ -137,6 +153,7 @@ function ProjectCard({
   isBuilding,
   buildingPhase,
   onBuild,
+  onCancel,
   onRemove,
   onToggleWatch,
 }: {
@@ -144,6 +161,7 @@ function ProjectCard({
   isBuilding: boolean;
   buildingPhase: "indexing" | "embedding";
   onBuild: () => void;
+  onCancel: () => void;
   onRemove: () => void;
   onToggleWatch: () => void;
 }) {
@@ -176,9 +194,15 @@ function ProjectCard({
           <Button variant="ghost" size="sm" onClick={onToggleWatch} title={project.is_watching ? "Stop watching" : "Start watching"}>
             {project.is_watching ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onBuild} disabled={isBuilding} title="Rebuild index">
-            <RotateCcw className={`w-3.5 h-3.5 ${isBuilding ? "animate-spin" : ""}`} />
-          </Button>
+          {isBuilding ? (
+            <Button variant="ghost" size="sm" onClick={onCancel} title="Cancel build">
+              <X className="w-3.5 h-3.5 text-danger" />
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={onBuild} title="Rebuild index">
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={onRemove} title="Remove project">
             <Trash2 className="w-3.5 h-3.5 text-danger" />
           </Button>

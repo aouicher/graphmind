@@ -41,7 +41,7 @@ pub async fn add_project(path: String, app: AppHandle) -> Result<ProjectInfo, St
 
     let app_clone = app.clone();
     tokio::spawn(async move {
-        super::indexing::build_project(slug, true, app_clone).await.ok();
+        super::indexing::build_project_uncancelled(slug, true, app_clone).await.ok();
     });
 
     Ok(info)

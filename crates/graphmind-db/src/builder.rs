@@ -6,6 +6,8 @@ use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const LANGUAGE_MAP: &[(&str, &str)] = &[
     (".ts", "typescript"),
@@ -105,6 +107,7 @@ pub struct BuildResult {
 pub struct BuildOptions {
     pub full: bool,
     pub exclude: Vec<String>,
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for BuildOptions {
@@ -112,6 +115,7 @@ impl Default for BuildOptions {
         Self {
             full: false,
             exclude: DEFAULT_EXCLUDE.iter().map(|s| s.to_string()).collect(),
+            cancel: None,
         }
     }
 }
@@ -202,6 +206,10 @@ impl GraphBuilder {
         let log_interval = (files.len() / 10).max(1);
 
         for (idx, file) in files.iter().enumerate() {
+            if options.cancel.as_ref().map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
+                eprintln!("Build cancelled.");
+                break;
+            }
             if (idx + 1) % log_interval == 0 || idx + 1 == files.len() {
                 eprintln!("Parsing {}/{}...", idx + 1, files.len());
             }
