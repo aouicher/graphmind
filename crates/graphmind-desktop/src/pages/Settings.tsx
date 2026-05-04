@@ -266,7 +266,7 @@ export function Settings() {
               className="w-full text-xs bg-bg-card px-3 py-2 rounded border border-border text-text-primary focus:outline-none focus:border-accent"
             >
               <option value="disabled">Disabled</option>
-              <option value="local">Local (bge-small-en-v1.5, no API key)</option>
+              <option value="local">Local (nomic-embed-text-v1.5, no API key)</option>
               <option value="openai">OpenAI</option>
               <option value="voyage">Voyage AI (code-specialized)</option>
             </select>
@@ -279,7 +279,7 @@ export function Settings() {
                       ? "text-embedding-3-small"
                       : embMode === "voyage"
                       ? "voyage-code-3"
-                      : "bge-small-en-v1.5")}
+                      : "nomic-embed-text-v1.5")}
                 </code>
               </p>
             )}
@@ -287,7 +287,7 @@ export function Settings() {
 
           {embMode === "local" && (
             <div className="p-3 rounded-md border border-border bg-bg-card text-xs text-text-muted space-y-1">
-              <p>The ONNX model (<code className="text-text-secondary">bge-small-en-v1.5</code>) is downloaded automatically on first <code className="text-text-secondary">graphmind build</code>. No API key needed.</p>
+              <p>The ONNX model (<code className="text-text-secondary">nomic-embed-text-v1.5</code>) is downloaded automatically on first <code className="text-text-secondary">graphmind build</code>. No API key needed.</p>
               <p>Model is cached at <code className="text-text-secondary">~/.graphmind/models/</code>.</p>
             </div>
           )}
@@ -299,7 +299,7 @@ export function Settings() {
                 type="text"
                 value={embModel}
                 onChange={(e) => setEmbModel(e.target.value)}
-                placeholder={embMode === "openai" ? "text-embedding-3-small" : embMode === "voyage" ? "voyage-code-3" : "bge-small-en-v1.5"}
+                placeholder={embMode === "openai" ? "text-embedding-3-small" : embMode === "voyage" ? "voyage-code-3" : "nomic-embed-text-v1.5"}
                 className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
               />
             </div>
