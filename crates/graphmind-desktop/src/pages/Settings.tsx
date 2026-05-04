@@ -266,22 +266,44 @@ export function Settings() {
               className="w-full text-xs bg-bg-card px-3 py-2 rounded border border-border text-text-primary focus:outline-none focus:border-accent"
             >
               <option value="disabled">Disabled</option>
-              <option value="local">Local (all-MiniLM-L6-v2, no API key)</option>
+              <option value="local">Local (no API key)</option>
               <option value="openai">OpenAI</option>
               <option value="voyage">Voyage AI (code-specialized)</option>
             </select>
+            {embMode !== "disabled" && (
+              <p className="text-xs text-text-muted mt-1">
+                Using:{" "}
+                <code className="text-text-secondary">
+                  {embModel ||
+                    (embMode === "openai"
+                      ? "text-embedding-3-small"
+                      : embMode === "voyage"
+                      ? "voyage-code-3"
+                      : "all-MiniLM-L6-v2")}
+                </code>
+              </p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Model override (optional)</label>
-            <input
-              type="text"
-              value={embModel}
-              onChange={(e) => setEmbModel(e.target.value)}
-              placeholder={embMode === "openai" ? "text-embedding-3-small" : embMode === "voyage" ? "voyage-code-3" : "all-MiniLM-L6-v2"}
-              className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
-            />
-          </div>
+          {embMode === "local" && (
+            <div className="p-3 rounded-md border border-border bg-bg-card text-xs text-text-muted space-y-1">
+              <p>The ONNX model (<code className="text-text-secondary">all-MiniLM-L6-v2</code>) is downloaded automatically on first <code className="text-text-secondary">graphmind build</code>. No API key needed.</p>
+              <p>Model is cached at <code className="text-text-secondary">~/.graphmind/models/</code>.</p>
+            </div>
+          )}
+
+          {embMode !== "disabled" && (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Model override (optional)</label>
+              <input
+                type="text"
+                value={embModel}
+                onChange={(e) => setEmbModel(e.target.value)}
+                placeholder={embMode === "openai" ? "text-embedding-3-small" : embMode === "voyage" ? "voyage-code-3" : "all-MiniLM-L6-v2"}
+                className="w-full text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+              />
+            </div>
+          )}
 
           {embMode === "openai" && (
             <>
