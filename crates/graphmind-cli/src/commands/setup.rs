@@ -221,8 +221,9 @@ fn install_claude_md_block() {
 
     let content = if claude_md.exists() {
         let c = fs::read_to_string(&claude_md).unwrap_or_default();
-        // Backup before modifying
-        let backup = claude_md.with_extension("md.bak");
+        // Backup before modifying (timestamped)
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = claude_md.with_extension(format!("md.{ts}.bak"));
         fs::write(&backup, &c).ok();
         c
     } else {
