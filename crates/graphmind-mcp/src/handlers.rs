@@ -1118,18 +1118,8 @@ fn handle_search(args: &Value) -> Value {
                 }
             }
         }
-        // Compact symbol index for disambiguation
-        if total_count > 1 && total_count <= 5 {
-            lines.push("\n→ Symbols:".to_string());
-            for r in &all_results {
-                if let Some(symbols) = r.get("symbols").and_then(|v| v.as_array()) {
-                    for s in symbols {
-                        let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let file = s.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                        lines.push(format!("  {}: {}", name, file));
-                    }
-                }
-            }
+        if total_count > 1 {
+            lines.push(format!("\n({} matches — specify file= to narrow)", total_count));
         }
         text_content(&lines.join("\n"))
     } else {
