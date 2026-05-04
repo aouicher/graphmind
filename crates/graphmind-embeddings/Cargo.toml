@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-embeddings"
-version = "0.2.91"
+version = "0.2.92"
 edition = "2021"
 license = "MIT"
 description = "Optional embedding engine for graphmind semantic search"
