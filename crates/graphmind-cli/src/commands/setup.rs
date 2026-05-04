@@ -220,7 +220,11 @@ fn install_claude_md_block() {
     let claude_md = home_dir().join(".claude").join("CLAUDE.md");
 
     let content = if claude_md.exists() {
-        fs::read_to_string(&claude_md).unwrap_or_default()
+        let c = fs::read_to_string(&claude_md).unwrap_or_default();
+        // Backup before modifying
+        let backup = claude_md.with_extension("md.bak");
+        fs::write(&backup, &c).ok();
+        c
     } else {
         String::new()
     };

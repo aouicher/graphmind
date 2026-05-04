@@ -58,6 +58,7 @@ pub fn run() {
             commands::settings::uninstall_git_hook,
             commands::settings::install_skill,
             commands::settings::get_skill_status,
+            commands::settings::get_claude_md_status,
             commands::settings::get_embedding_settings,
             commands::settings::set_embedding_settings,
             commands::updater::check_app_update,

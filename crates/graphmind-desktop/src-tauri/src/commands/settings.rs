@@ -152,6 +152,16 @@ pub fn get_skill_status() -> bool {
     skill_path.map(|p| p.exists()).unwrap_or(false)
 }
 
+#[tauri::command]
+pub fn get_claude_md_status() -> bool {
+    let claude_md_path = dirs::home_dir()
+        .map(|h| h.join(".claude/CLAUDE.md"));
+    claude_md_path
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.contains("<!-- GM:START -->"))
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Embedding settings
 // ---------------------------------------------------------------------------

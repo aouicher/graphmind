@@ -136,6 +136,7 @@ export const api = {
   uninstallGitHook: (slug?: string) => invoke<void>("uninstall_git_hook", { slug: slug || null }),
   getSkillStatus: () => invoke<boolean>("get_skill_status"),
   installSkill: () => invoke<void>("install_skill"),
+  getClaudeMdStatus: () => invoke<boolean>("get_claude_md_status"),
   getEmbeddingSettings: () => invoke<EmbeddingSettings>("get_embedding_settings"),
   setEmbeddingSettings: (settings: EmbeddingSettingsInput) => invoke<EmbeddingSettingsResult>("set_embedding_settings", { settings }),
   embedProjects: (slugs: string[]) => invoke<void>("embed_projects", { slugs }),

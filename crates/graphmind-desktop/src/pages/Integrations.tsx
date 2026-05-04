@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Check, X, Download, Trash2, Terminal, MousePointer, Cog, Zap, GitBranch, BookOpen } from "lucide-react";
+import { Check, X, Download, Trash2, Terminal, MousePointer, Cog, Zap, GitBranch, BookOpen, FileText, RefreshCw } from "lucide-react";
 import { useClients } from "../hooks/useClients";
 import { api } from "../lib/tauri";
 import { Button } from "../components/ui/Button";
@@ -29,12 +29,31 @@ export function Integrations() {
   const [hookEnabled, setHookEnabled] = useState(false);
   const [gitHookEnabled, setGitHookEnabled] = useState(false);
   const [skillInstalled, setSkillInstalled] = useState(false);
+  const [claudeMdInstalled, setClaudeMdInstalled] = useState(false);
+  const [settingUpAll, setSettingUpAll] = useState(false);
 
-  useEffect(() => {
+  const refreshStatuses = () => {
     api.getHookStatus().then(setHookEnabled);
     api.getGitHookStatus().then(setGitHookEnabled);
     api.getSkillStatus().then(setSkillInstalled);
+    api.getClaudeMdStatus().then(setClaudeMdInstalled);
+    refresh();
+  };
+
+  useEffect(() => {
+    refreshStatuses();
   }, []);
+
+  const handleSetupAll = async () => {
+    setSettingUpAll(true);
+    try {
+      await api.runSetup();
+    } catch (e) {
+      console.error(e);
+    }
+    refreshStatuses();
+    setSettingUpAll(false);
+  };
 
   const act = async (id: string, fn: () => Promise<void>) => {
     setActing(id);
@@ -99,15 +118,32 @@ export function Integrations() {
       onInstall: async () => { await api.installSkill(); setSkillInstalled(true); },
       onUninstall: async () => {},
     },
+    {
+      id: "claude-md",
+      name: "Claude Code Instructions",
+      description: "Injects graphmind usage rules into Claude Code global context",
+      icon: <FileText className="w-5 h-5" />,
+      installed: claudeMdInstalled,
+      detected: true,
+      configPath: "~/.claude/CLAUDE.md",
+      onInstall: async () => { await api.runSetup(); setClaudeMdInstalled(true); },
+      onUninstall: async () => {},
+    },
   ];
 
   return (
     <div className="p-6 space-y-6">
-      <header>
-        <h1 className="text-lg font-semibold text-text-primary">Integrations</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Connect GraphMind to your AI coding tools and development workflow.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-text-primary">Integrations</h1>
+          <p className="text-sm text-text-secondary mt-0.5">
+            Connect GraphMind to your AI coding tools and development workflow.
+          </p>
+        </div>
+        <Button size="sm" onClick={handleSetupAll} disabled={settingUpAll}>
+          {settingUpAll ? <Spinner size={14} /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Setup All
+        </Button>
       </header>
 
       <div className="grid gap-3">
