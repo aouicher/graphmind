@@ -23,7 +23,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
   return (
     <aside className="w-56 h-full bg-bg-sidebar border-r border-border flex flex-col">
-      <div className="h-12 flex items-center gap-2 pl-20 pr-4 border-b border-border drag-region">
+      <div data-tauri-drag-region className="h-12 flex items-center gap-2 pl-20 pr-4 border-b border-border">
         <img src={logo} alt="GraphMind" className="w-5 h-5 rounded" />
         <span className="font-semibold text-sm text-text-primary">GraphMind</span>
       </div>
