@@ -61,7 +61,8 @@ pub fn get_hook_status() -> bool {
 
 #[tauri::command]
 pub fn install_claude_hook() -> Result<(), String> {
-    let output = std::process::Command::new("graphmind")
+    let bin = super::updater::find_graphmind_binary();
+    let output = std::process::Command::new(&bin)
         .args(["install", "hook-claude"])
         .output()
         .map_err(|e| format!("Failed to run graphmind: {}", e))?;
@@ -75,7 +76,8 @@ pub fn install_claude_hook() -> Result<(), String> {
 
 #[tauri::command]
 pub fn uninstall_claude_hook() -> Result<(), String> {
-    let output = std::process::Command::new("graphmind")
+    let bin = super::updater::find_graphmind_binary();
+    let output = std::process::Command::new(&bin)
         .args(["uninstall", "hook-claude"])
         .output()
         .map_err(|e| format!("Failed to run graphmind: {}", e))?;
@@ -104,7 +106,8 @@ pub fn get_git_hook_status(slug: Option<String>) -> bool {
 
 #[tauri::command]
 pub fn install_git_hook(slug: Option<String>) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("graphmind");
+    let bin = super::updater::find_graphmind_binary();
+    let mut cmd = std::process::Command::new(&bin);
     cmd.args(["install", "hook-git"]);
     if let Some(s) = &slug {
         cmd.arg(s);
@@ -119,7 +122,8 @@ pub fn install_git_hook(slug: Option<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn uninstall_git_hook(slug: Option<String>) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("graphmind");
+    let bin = super::updater::find_graphmind_binary();
+    let mut cmd = std::process::Command::new(&bin);
     cmd.args(["uninstall", "hook-git"]);
     if let Some(s) = &slug {
         cmd.arg(s);
@@ -134,7 +138,8 @@ pub fn uninstall_git_hook(slug: Option<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn install_skill() -> Result<(), String> {
-    let output = std::process::Command::new("graphmind")
+    let bin = super::updater::find_graphmind_binary();
+    let output = std::process::Command::new(&bin)
         .args(["install", "skill"])
         .output()
         .map_err(|e| format!("Failed to run graphmind: {}", e))?;

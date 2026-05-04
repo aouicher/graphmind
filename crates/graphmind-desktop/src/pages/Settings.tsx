@@ -16,7 +16,10 @@ export function Settings() {
   const [embOpenaiKey, setEmbOpenaiKey] = useState("");
   const [embVoyageKey, setEmbVoyageKey] = useState("");
   const [embSaving, setEmbSaving] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateDone, setUpdateDone] = useState<string | null>(null);
 
@@ -30,7 +33,12 @@ export function Settings() {
       setEmbOpenaiKey(s.openai_key || "");
       setEmbVoyageKey(s.voyage_key || "");
     });
-    api.checkAppUpdate().then(setUpdateInfo).catch(() => {});
+    api.getAppVersion().then(setAppVersion).catch(() => {});
+    setUpdateChecking(true);
+    api.checkAppUpdate()
+      .then((info) => { setUpdateInfo(info); setUpdateError(null); })
+      .catch((e) => setUpdateError(String(e)))
+      .finally(() => setUpdateChecking(false));
   }, []);
 
   useEffect(() => {
@@ -347,58 +355,73 @@ export function Settings() {
       </h2>
 
       <section className="space-y-3">
-        {updateInfo && (
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-text-secondary">
-                Current version: <span className="text-text-primary font-medium">{updateInfo.current_version}</span>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-text-secondary">
+              Current version:{" "}
+              <span className="text-text-primary font-medium">
+                {appVersion ?? updateInfo?.current_version ?? "—"}
+              </span>
+            </p>
+            {updateDone && (
+              <p className="text-xs text-green-500 mt-1">
+                Updated to v{updateDone} — restart to apply
               </p>
-              {updateInfo.update_available && updateInfo.new_version && (
-                <p className="text-xs text-accent font-medium mt-1">
-                  v{updateInfo.new_version} available
-                </p>
-              )}
-              {!updateInfo.update_available && (
-                <p className="text-xs text-green-500 mt-1">Up to date</p>
-              )}
-              {updateDone && (
-                <p className="text-xs text-green-500 mt-1">
-                  Updated to v{updateDone} — restart to apply
-                </p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => api.checkAppUpdate().then(setUpdateInfo).catch(() => {})}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-border rounded-md text-text-secondary hover:text-text-primary"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Check
-              </button>
-              {updateInfo.update_available && (
-                <button
-                  onClick={async () => {
-                    setUpdating(true);
-                    try {
-                      const v = await api.installAppUpdate();
-                      setUpdateDone(v);
-                      setUpdateInfo({ ...updateInfo, update_available: false });
-                    } finally {
-                      setUpdating(false);
-                    }
-                  }}
-                  disabled={updating}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
-                >
-                  <Download className="w-3 h-3" />
-                  {updating ? "Updating..." : "Update"}
-                </button>
-              )}
-            </div>
+            )}
+            {!updateDone && updateInfo && updateInfo.update_available && updateInfo.new_version && (
+              <p className="text-xs text-accent font-medium mt-1">
+                v{updateInfo.new_version} available
+              </p>
+            )}
+            {!updateDone && updateInfo && !updateInfo.update_available && (
+              <p className="text-xs text-green-500 mt-1">Up to date</p>
+            )}
+            {updateError && (
+              <p className="text-xs text-red-400 mt-1">Check failed: {updateError}</p>
+            )}
           </div>
-        )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setUpdateChecking(true);
+                setUpdateError(null);
+                api.checkAppUpdate()
+                  .then((info) => { setUpdateInfo(info); })
+                  .catch((e) => setUpdateError(String(e)))
+                  .finally(() => setUpdateChecking(false));
+              }}
+              disabled={updateChecking}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-border rounded-md text-text-secondary hover:text-text-primary disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${updateChecking ? "animate-spin" : ""}`} />
+              {updateChecking ? "Checking..." : "Check"}
+            </button>
+            {updateInfo?.update_available && (
+              <button
+                onClick={async () => {
+                  setUpdating(true);
+                  setUpdateError(null);
+                  try {
+                    const v = await api.installAppUpdate();
+                    setUpdateDone(v);
+                    setUpdateInfo({ ...updateInfo, update_available: false });
+                  } catch (e) {
+                    setUpdateError(String(e));
+                  } finally {
+                    setUpdating(false);
+                  }
+                }}
+                disabled={updating}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+              >
+                <Download className="w-3 h-3" />
+                {updating ? "Updating..." : "Update app"}
+              </button>
+            )}
+          </div>
+        </div>
         <p className="text-xs text-text-muted">
-          Updates the desktop app and CLI together. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
+          Updates the desktop app. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
         </p>
       </section>
     </div>

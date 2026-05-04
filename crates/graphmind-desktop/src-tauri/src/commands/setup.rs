@@ -13,29 +13,12 @@ fn local_bin_path() -> PathBuf {
 
 #[tauri::command]
 pub fn check_cli_installed() -> CliStatus {
-    // Check via which
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("graphmind")
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let version = get_version(&path);
-            return CliStatus {
-                installed: true,
-                path: Some(path),
-                version,
-            };
-        }
-    }
-
-    // Check local install
-    let local = local_bin_path();
-    if local.exists() {
-        let version = get_version(&local.to_string_lossy());
+    let path = super::updater::find_graphmind_binary();
+    if path != "graphmind" {
+        let version = get_version(&path);
         return CliStatus {
             installed: true,
-            path: Some(local.to_string_lossy().to_string()),
+            path: Some(path),
             version,
         };
     }
@@ -63,10 +46,11 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     );
 
     let bin_path = bin_dir.join("graphmind");
+    let tmp_path = bin_dir.join("graphmind.tmp");
 
     let status = std::process::Command::new("curl")
         .args(["-fsSL", "-o"])
-        .arg(&bin_path)
+        .arg(&tmp_path)
         .arg(&url)
         .status()
         .map_err(|e| format!("Download failed: {e}"))?;
@@ -74,8 +58,28 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     if !status.success() {
         return Err("Failed to download CLI binary".to_string());
     }
-    fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755))
+
+    fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
+
+    // Verify the downloaded binary works before replacing
+    let verify = std::process::Command::new(&tmp_path).arg("--version").output();
+    if !verify.map(|o| o.status.success()).unwrap_or(false) {
+        fs::remove_file(&tmp_path).ok();
+        return Err("Downloaded binary failed verification".to_string());
+    }
+
+    fs::rename(&tmp_path, &bin_path).map_err(|e| e.to_string())?;
+
+    // Re-sign on macOS to avoid Gatekeeper issues
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("codesign")
+            .args(["-s", "-"])
+            .arg(&bin_path)
+            .output()
+            .ok();
+    }
 
     let version = get_version(&bin_path.to_string_lossy());
     Ok(CliStatus {
@@ -87,19 +91,7 @@ pub async fn install_cli() -> Result<CliStatus, String> {
 
 #[tauri::command]
 pub fn get_cli_path() -> String {
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("graphmind")
-        .output()
-    {
-        if output.status.success() {
-            return String::from_utf8_lossy(&output.stdout).trim().to_string();
-        }
-    }
-    let local = local_bin_path();
-    if local.exists() {
-        return local.to_string_lossy().to_string();
-    }
-    "graphmind".to_string()
+    super::updater::find_graphmind_binary()
 }
 
 #[derive(serde::Serialize)]
@@ -111,15 +103,14 @@ pub struct UpdateInfo {
 
 #[tauri::command]
 pub async fn check_cli_update() -> Result<UpdateInfo, String> {
-    let cli_path = get_cli_path();
-
+    let cli_path = super::updater::find_graphmind_binary();
     let current = get_version(&cli_path).unwrap_or_else(|| "0.0.0".to_string());
 
     let output = std::process::Command::new("curl")
         .args([
             "-fsSL",
-            "-H",
-            "Accept: application/vnd.github+json",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "User-Agent: graphmind-desktop",
             "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest",
         ])
         .output()
@@ -153,17 +144,9 @@ pub async fn update_cli() -> Result<CliStatus, String> {
 
 #[tauri::command]
 pub fn ensure_cli_in_path() -> Result<String, String> {
-    // If already in PATH, nothing to do
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("graphmind")
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(path);
-            }
-        }
+    let path = super::updater::find_graphmind_binary();
+    if path != "graphmind" {
+        return Ok(path);
     }
 
     let local = local_bin_path();
@@ -186,9 +169,11 @@ pub fn ensure_cli_in_path() -> Result<String, String> {
                 }
             }
         }
-        // Also export for current process
         let current_path = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), current_path));
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", bin_dir.display(), current_path),
+        );
         return Ok(local.to_string_lossy().to_string());
     }
 
