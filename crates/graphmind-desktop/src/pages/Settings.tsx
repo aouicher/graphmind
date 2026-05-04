@@ -18,6 +18,8 @@ export function Settings() {
   const [embSaving, setEmbSaving] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [cliVersion, setCliVersion] = useState<string | null>(null);
+  const [cliUpdateAvailable, setCliUpdateAvailable] = useState(false);
+  const [cliUpdating, setCliUpdating] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -36,6 +38,7 @@ export function Settings() {
     });
     api.getAppVersion().then(setAppVersion).catch(() => {});
     api.checkCliInstalled().then((s) => setCliVersion(s.version ?? null)).catch(() => {});
+    api.checkCliUpdate().then((u) => { if (u.update_available) setCliUpdateAvailable(true); }).catch(() => {});
     setUpdateChecking(true);
     api.checkAppUpdate()
       .then((info) => { setUpdateInfo(info); setUpdateError(null); })
@@ -369,6 +372,12 @@ export function Settings() {
               <p className="text-xs text-text-secondary mt-0.5">
                 CLI:{" "}
                 <span className="text-text-primary font-medium">{cliVersion}</span>
+                {cliUpdateAvailable && (
+                  <span className="text-accent font-medium ml-1">— update available</span>
+                )}
+                {cliUpdating && (
+                  <span className="text-text-muted ml-1">— updating...</span>
+                )}
               </p>
             )}
             {updateDone && (
@@ -413,6 +422,12 @@ export function Settings() {
                     const v = await api.installAppUpdate();
                     setUpdateDone(v);
                     setUpdateInfo({ ...updateInfo, update_available: false });
+                    // Also update CLI
+                    setCliUpdating(true);
+                    api.updateCli()
+                      .then((s) => { setCliVersion(s.version ?? null); setCliUpdateAvailable(false); })
+                      .catch(() => {})
+                      .finally(() => setCliUpdating(false));
                   } catch (e) {
                     setUpdateError(String(e));
                   } finally {
@@ -426,10 +441,36 @@ export function Settings() {
                 {updating ? "Updating..." : "Update app"}
               </button>
             )}
+            {cliUpdateAvailable && !updateInfo?.update_available && (
+              <button
+                onClick={async () => {
+                  setCliUpdating(true);
+                  try {
+                    const s = await api.updateCli();
+                    setCliVersion(s.version ?? null);
+                    setCliUpdateAvailable(false);
+                  } catch (e) {
+                    setUpdateError(String(e));
+                  } finally {
+                    setCliUpdating(false);
+                  }
+                }}
+                disabled={cliUpdating}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+              >
+                <Download className="w-3 h-3" />
+                {cliUpdating ? "Updating..." : "Update CLI"}
+              </button>
+            )}
           </div>
         </div>
+        {cliUpdating && (
+          <p className="text-xs text-text-muted flex items-center gap-1">
+            <RefreshCw className="w-3 h-3 animate-spin" /> Updating CLI...
+          </p>
+        )}
         <p className="text-xs text-text-muted">
-          Updates the desktop app. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
+          Updates the desktop app and CLI. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
         </p>
       </section>
     </div>
