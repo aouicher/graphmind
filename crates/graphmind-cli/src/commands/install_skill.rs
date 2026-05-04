@@ -110,19 +110,28 @@ pub fn install_skill() {
         std::process::exit(1);
     });
 
-    println!(
-        "{} /gm skill → {}",
-        "OK".green().bold(),
-        skill_path.display()
-    );
-
     // Sub-skills
+    let mut installed = 0;
+    let mut failed = Vec::new();
     for (name, content) in SUB_SKILLS {
         let dir = skills_base.join(name);
         fs::create_dir_all(&dir).ok();
-        fs::write(dir.join("SKILL.md"), content).unwrap_or_else(|e| {
-            eprintln!("{} Failed to write {}/SKILL.md: {}", "Error:".red().bold(), name, e);
-        });
-        println!("    {} /{}", "OK".green().bold(), name);
+        match fs::write(dir.join("SKILL.md"), content) {
+            Ok(_) => installed += 1,
+            Err(e) => failed.push(format!("{name}: {e}")),
+        }
+    }
+
+    println!(
+        "    {} /gm + {} sub-skills installed ({})",
+        "✓".green().bold(),
+        installed,
+        skills_base.display()
+    );
+
+    if !failed.is_empty() {
+        for f in &failed {
+            eprintln!("    {} {}", "✗".red(), f);
+        }
     }
 }

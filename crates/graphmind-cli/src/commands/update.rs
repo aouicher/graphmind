@@ -68,16 +68,53 @@ fn download_and_replace(version: &str) -> Result<(), String> {
         return Err(format!("Failed to download v{version} from {url}"));
     }
 
+    // Verify downloaded binary is valid
     fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to set permissions: {e}"))?;
+
+    let verify = Command::new(&tmp_path)
+        .arg("--version")
+        .output();
+
+    match verify {
+        Ok(output) if output.status.success() => {
+            let out = String::from_utf8_lossy(&output.stdout);
+            if !out.contains(version) {
+                return Err(format!(
+                    "Downloaded binary version mismatch (expected v{version}, got: {})",
+                    out.trim()
+                ));
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Downloaded binary failed verification: {}", stderr.trim()));
+        }
+        Err(e) => {
+            return Err(format!("Cannot execute downloaded binary: {e}"));
+        }
+    }
+
+    println!("  {} Binary verified", "✓".green());
 
     let bin_path = get_current_binary_path();
     let backup = bin_path.with_extension("old");
     fs::rename(&bin_path, &backup).map_err(|e| format!("Failed to backup current binary: {e}"))?;
 
     if let Err(e) = fs::rename(&tmp_path, &bin_path) {
+        // Restore backup on failure
         fs::rename(&backup, &bin_path).ok();
         return Err(format!("Failed to install new binary: {e}"));
+    }
+
+    // Sign on macOS to prevent Gatekeeper kill
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("codesign")
+            .args(["-s", "-"])
+            .arg(&bin_path)
+            .output()
+            .ok();
     }
 
     fs::remove_file(&backup).ok();
@@ -88,26 +125,26 @@ fn download_and_replace(version: &str) -> Result<(), String> {
 pub fn update(check_only: bool) {
     let current = current_version();
 
-    print!("  {} ", "Checking".blue());
-    println!("current version: v{current}");
+    println!("  {} v{current}", "Current:".dimmed());
 
     let latest = match get_latest_version() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("  {} {e}", "Error:".red());
+            eprintln!("  Check your network or try again later.");
             std::process::exit(1);
         }
     };
 
     if latest == current {
-        println!("  {} already on latest (v{current})", "✓".green());
+        println!("  {} Already on latest (v{current})", "✓".green().bold());
         return;
     }
 
-    println!("  {} v{current} → v{latest}", "Update available:".yellow());
+    println!("  {} v{current} → v{latest}", "Update available:".yellow().bold());
 
     if check_only {
-        println!("\n  Run {} to update.", "graphmind update".bold());
+        println!("\n  Run {} to install.", "graphmind update".bold());
         return;
     }
 
@@ -125,10 +162,13 @@ pub fn update(check_only: bool) {
 
     match download_and_replace(&latest) {
         Ok(()) => {
-            println!("  {} Updated to v{latest}", "✓".green());
+            println!("  {} Updated to v{latest}", "✓".green().bold());
+            println!();
+            println!("  Run {} to refresh hooks and skills.", "graphmind setup".dimmed());
         }
         Err(e) => {
-            eprintln!("  {} {e}", "Error:".red());
+            eprintln!("  {} {e}", "Error:".red().bold());
+            eprintln!("  Your current version (v{current}) is unchanged.");
             std::process::exit(1);
         }
     }

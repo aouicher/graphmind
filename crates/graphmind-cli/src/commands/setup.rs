@@ -17,7 +17,7 @@ pub fn setup() {
     print_step(1, 5, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(2, 5, "Claude Code skill");
+    print_step(2, 5, "Claude Code skills");
     super::install_skill::install_skill();
 
     print_step(3, 5, "Claude Desktop MCP config");
@@ -35,8 +35,14 @@ pub fn setup() {
     graphmind_config::save_config(&config);
 
     println!("\n{}", "─".repeat(50).dimmed());
-    println!("{} Global setup complete.\n", "✓".green().bold());
-    println!("  Now run {} in each project you want to index.", "graphmind init".cyan().bold());
+    println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
+    println!("  {} 4 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse)", "✓".green());
+    println!("  {} /gm skill + 18 sub-skills installed", "✓".green());
+    println!("  {} MCP server configured (Claude Desktop + Claude Code)", "✓".green());
+    println!("  {} CLAUDE.md instruction block updated", "✓".green());
+    println!();
+    println!("  Next: run {} in each project to index.", "graphmind init".cyan().bold());
+    println!("  Update later with {}.", "graphmind update".dimmed());
     println!();
 }
 
@@ -60,14 +66,12 @@ pub fn init(path: Option<&str>, skip_build: bool) {
         print_step(3, 3, "Build code graph");
         super::build::build(None, false, false, false);
     } else {
-        print_step(3, 3, "Build code graph (skipped)");
+        println!("  {} Build skipped (use {} to index later)", "[3/3]".cyan().bold(), "graphmind build".dimmed());
     }
 
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Project ready.\n", "✓".green().bold());
-    println!("  {} graphmind search \"<query>\"", "→".cyan());
-    println!("  {} graphmind fn <name>", "→".cyan());
-    println!("  {} graphmind map", "→".cyan());
+    println!("  Try: {} or {} or {}", "graphmind search \"<query>\"".cyan(), "graphmind fn <name>".cyan(), "graphmind map".cyan());
     println!();
 }
 
@@ -190,7 +194,7 @@ fn find_graphmind_binary() -> String {
 }
 
 const GM_BLOCK: &str = r#"<!-- GM:START -->
-<!-- GM:VERSION:0.2.80 -->
+<!-- GM:VERSION:0.2.82 -->
 
 # graphmind — code intelligence
 In any graphmind-registered project, use `/gm` (invoke Skill tool with `skill: "graphmind"`) for ALL code exploration before grep, find, or spawning Explore agents.
