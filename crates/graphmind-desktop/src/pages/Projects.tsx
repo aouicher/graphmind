@@ -12,10 +12,17 @@ import { Spinner } from "../components/ui/Spinner";
 export function Projects() {
   const { projects, loading, refresh } = useProjects();
   const [building, setBuilding] = useState<string | null>(null);
+  const [buildingPhase, setBuildingPhase] = useState<"indexing" | "embedding">("indexing");
   const [buildingAll, setBuildingAll] = useState(false);
+
+  useTauriEvent<string>("embedding-started", useCallback((slug) => {
+    setBuilding(slug);
+    setBuildingPhase("embedding");
+  }, []));
 
   useTauriEvent<string>("indexing-complete", useCallback(() => {
     setBuilding(null);
+    setBuildingPhase("indexing");
     setBuildingAll(false);
     refresh();
   }, [refresh]));
@@ -113,6 +120,7 @@ export function Projects() {
               key={p.slug}
               project={p}
               isBuilding={building === p.slug}
+              buildingPhase={building === p.slug ? buildingPhase : "indexing"}
               onBuild={() => handleBuild(p.slug)}
               onRemove={() => handleRemove(p.slug)}
               onToggleWatch={() => handleWatch(p)}
@@ -127,12 +135,14 @@ export function Projects() {
 function ProjectCard({
   project,
   isBuilding,
+  buildingPhase,
   onBuild,
   onRemove,
   onToggleWatch,
 }: {
   project: ProjectInfo;
   isBuilding: boolean;
+  buildingPhase: "indexing" | "embedding";
   onBuild: () => void;
   onRemove: () => void;
   onToggleWatch: () => void;
@@ -177,7 +187,7 @@ function ProjectCard({
 
       {isBuilding && (
         <div className="mt-3">
-          <ProgressBar label="Indexing..." />
+          <ProgressBar label={buildingPhase === "embedding" ? "Embedding..." : "Indexing..."} />
         </div>
       )}
 

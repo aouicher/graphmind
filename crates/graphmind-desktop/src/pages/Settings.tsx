@@ -289,6 +289,7 @@ export function Settings() {
             <div className="p-3 rounded-md border border-border bg-bg-card text-xs text-text-muted space-y-1">
               <p>The ONNX model (<code className="text-text-secondary">nomic-embed-text-v1.5</code>) is downloaded automatically on first <code className="text-text-secondary">graphmind build</code>. No API key needed.</p>
               <p>Model is cached at <code className="text-text-secondary">~/.graphmind/models/</code>.</p>
+              <p className="text-warning">⚠ On large projects, the first embedding build can take several minutes. Subsequent builds only process new files.</p>
             </div>
           )}
 

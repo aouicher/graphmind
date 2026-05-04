@@ -76,16 +76,29 @@ pub async fn build_project(slug: String, full: bool, app: AppHandle) -> Result<(
         let meta_path = paths::meta_path(&slug);
         std::fs::write(meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()).ok();
 
-        // Embedding step
-        let global_config = load_config();
-        if global_config.embedding.mode != EmbeddingMode::Disabled {
-            run_embedding_step(&slug, &queries, &global_config.embedding);
-        }
-
         slug
     })
     .await
     .map_err(|e| format!("Build failed: {e}"))?;
+
+    // Embedding step — emit separate event so UI can show distinct phase
+    let global_config = load_config();
+    if global_config.embedding.mode != EmbeddingMode::Disabled {
+        app.emit("embedding-started", &result).ok();
+        let slug_clone = result.clone();
+        let emb_config = global_config.embedding.clone();
+        tokio::task::spawn_blocking(move || {
+            let db_path = paths::graph_db_path(&slug_clone);
+            let db_path_str = db_path.to_string_lossy().to_string();
+            if let Ok(db) = graphmind_db::schema::init_database(&db_path_str) {
+                let queries = graphmind_db::queries::GraphQueries::new(&db);
+                run_embedding_step(&slug_clone, &queries, &emb_config);
+            }
+        })
+        .await
+        .map_err(|e| format!("Embed failed: {e}"))?;
+        app.emit("embedding-complete", &result).ok();
+    }
 
     app.emit("indexing-complete", &result).ok();
     Ok(())
