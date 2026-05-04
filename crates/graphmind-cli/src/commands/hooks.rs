@@ -4,9 +4,21 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-const POST_COMMIT_HOOK: &str = "#!/bin/sh\n# graphmind: auto-rebuild\ngraphmind build 2>/dev/null &\n";
+const POST_COMMIT_HOOK: &str = r#"#!/bin/sh
+# graphmind: auto-rebuild + memory
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
-const PRE_PUSH_HOOK: &str = "#!/bin/sh\n# graphmind: diff-impact\necho \"\"\necho \"  graphmind diff-impact:\"\ngraphmind diff-impact 2>/dev/null\necho \"\"\n";
+graphmind build 2>/dev/null &
+
+# Save commit context to memory
+MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null)
+FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | head -5 | tr '\n' ', ' | sed 's/,$//')
+if [ -n "$MSG" ] && [ -n "$FILES" ]; then
+  graphmind memory add "[commit] $MSG ($FILES)" 2>/dev/null &
+fi
+"#;
+
+const PRE_PUSH_HOOK: &str = "#!/bin/sh\n# graphmind: diff-impact\nexport PATH=\"$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH\"\necho \"\"\necho \"  graphmind diff-impact:\"\ngraphmind diff-impact 2>/dev/null\necho \"\"\n";
 
 fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
     let hook_path = hooks_dir.join(name);

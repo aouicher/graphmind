@@ -210,6 +210,8 @@ Only fall back to grep for: string literals, config values, env vars, non-code p
 
 Invoke: `Skill(skill: "graphmind", args: "<your query>")`
 
+**Auto-memory**: After making architectural decisions, discovering important patterns, or establishing conventions, save them with `/gm-memory add <fact>`. Use `--priority` for facts that should always be injected (e.g. "auth tokens go through middleware X").
+
 <!-- GM:END -->"#;
 
 fn install_claude_md_block() {
