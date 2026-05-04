@@ -7,24 +7,27 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().expect("Cannot determine home directory")
 }
 
-/// Global one-time setup: hooks, MCP configs, skill
+/// Global one-time setup: hooks, MCP configs, skill, CLAUDE.md instruction
 pub fn setup() {
     println!(
         "\n{}  graphmind setup\n",
         "⚡".bold()
     );
 
-    print_step(1, 4, "Claude Code hooks");
+    print_step(1, 5, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(2, 4, "Claude Code skill");
+    print_step(2, 5, "Claude Code skill");
     super::install_skill::install_skill();
 
-    print_step(3, 4, "Claude Desktop MCP config");
+    print_step(3, 5, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(4, 4, "Claude Code MCP server");
+    print_step(4, 5, "Claude Code MCP server");
     register_mcp_in_claude_code();
+
+    print_step(5, 5, "CLAUDE.md instruction");
+    install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
     let mut config = graphmind_config::load_config();
@@ -184,4 +187,42 @@ fn find_graphmind_binary() -> String {
         }
     }
     "graphmind".to_string()
+}
+
+const GM_BLOCK: &str = r#"<!-- GM:START -->
+<!-- GM:VERSION:0.2.77 -->
+
+# graphmind — code intelligence
+In any graphmind-registered project, use `/gm` (invoke Skill tool with `skill: "graphmind"`) for ALL code exploration before grep, find, or spawning Explore agents.
+- Find symbols, trace callers, view dependencies, file outlines, impact analysis
+- Works via CLI — no MCP loading needed
+- If you need to understand code structure, call `/gm` first. Only fall back to grep for string literals or config values.
+
+<!-- GM:END -->"#;
+
+fn install_claude_md_block() {
+    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+
+    let content = if claude_md.exists() {
+        fs::read_to_string(&claude_md).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Replace existing block or append
+    let new_content = if content.contains("<!-- GM:START -->") {
+        let re_start = content.find("<!-- GM:START -->").unwrap();
+        let re_end = content.find("<!-- GM:END -->")
+            .map(|i| i + "<!-- GM:END -->".len())
+            .unwrap_or(content.len());
+        format!("{}{}{}", &content[..re_start], GM_BLOCK, &content[re_end..])
+    } else {
+        format!("{}\n{}\n", content.trim_end(), GM_BLOCK)
+    };
+
+    fs::create_dir_all(claude_md.parent().unwrap()).ok();
+    fs::write(&claude_md, new_content).unwrap_or_else(|e| {
+        println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
+    });
+    println!("    {} block updated in {}", "✓".green(), claude_md.display());
 }

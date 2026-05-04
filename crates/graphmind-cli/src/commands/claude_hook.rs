@@ -3,8 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 const PRE_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind PreToolUse hook — rewrites grep/find to graphmind search (like rtk)
-# For Bash: rewrites command. For Grep/Glob/LS/Agent: provides results and skips.
+# graphmind PreToolUse hook — lightweight safety net
+# Reminds Claude to use /gm skill instead of grep/find/Explore agents.
+# Does NOT rewrite commands — just nudges via additionalContext.
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -15,172 +16,44 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
 # Check if we're in a graphmind-registered project
 graphmind status &>/dev/null || exit 0
 
-# Extract search pattern from the tool call
-extract_pattern() {
-  case "$TOOL_NAME" in
-    Grep)
-      echo "$INPUT" | jq -r '.tool_input.pattern // .tool_input.regex // empty'
-      ;;
-    Bash)
-      CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      # Extract pattern from grep/rg/ag commands (may be prefixed with rtk)
-      if echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag)\b'; then
-        # Try quoted pattern first, then unquoted
-        PAT=$(echo "$CMD" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
-        if [ -z "$PAT" ]; then
-          PAT=$(echo "$CMD" | grep -oE "'[^']+'" | head -1 | tr -d "'")
-        fi
-        if [ -z "$PAT" ]; then
-          # Last word before path/flags that looks like a pattern
-          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(rtk[[:space:]]+)?(grep|rg|ag)[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*//' | awk '{print $1}')
-        fi
-        echo "$PAT"
-      elif echo "$CMD" | grep -qE '^\s*(rtk\s+)?(sed|awk)\b'; then
-        # Extract pattern from sed -n '/pattern/p' or awk '/pattern/'
-        PAT=$(echo "$CMD" | grep -oE '/[^/]+/' | head -1 | tr -d '/')
-        echo "$PAT"
-      elif echo "$CMD" | grep -qE '^\s*(rtk\s+)?(find|fd)\b'; then
-        # Extract -name pattern or fd pattern
-        PAT=$(echo "$CMD" | grep -oE '\-name[[:space:]]+"?[^"]+' | sed 's/-name[[:space:]]*//' | tr -d '"')
-        if [ -z "$PAT" ]; then
-          PAT=$(echo "$CMD" | sed -E 's/^[[:space:]]*(find|fd)[[:space:]]+[^[:space:]]+[[:space:]]*//' | awk '{print $1}')
-        fi
-        echo "$PAT"
-      fi
-      ;;
-    Glob)
-      echo "$INPUT" | jq -r '.tool_input.pattern // empty' | sed -E 's/.*\///' | sed 's/\*//g'
-      ;;
-    LS)
-      # For LS, use the directory name as context
-      echo "$INPUT" | jq -r '.tool_input.path // empty' | sed 's|.*/||'
-      ;;
-    Agent)
-      echo "$INPUT" | jq -r '.tool_input.prompt // empty' \
-        | tr '[:upper:]' '[:lower:]' \
-        | sed -E 's/[^a-z0-9_]+/ /g' \
-        | tr ' ' '\n' \
-        | grep -vE '^(the|a|an|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|could|should|may|might|shall|can|need|must|if|then|else|when|where|which|what|how|who|why|that|this|these|those|it|its|i|you|we|they|he|she|my|your|our|their|his|her|and|or|but|not|no|so|as|at|by|for|from|in|of|on|to|with|about|into|through|during|before|after|above|below|between|under|over|up|down|out|off|all|each|every|both|few|more|most|some|any|other|such|only|just|also|very|too|quite|rather|already|still|yet|even|much|well|here|there|now|then|again|once|always|never|often|sometimes|usually|find|search|explore|look|check|show|get|make|use|see|go|come|take|give|tell|say|know|think|want|try|ask|work|call|run|read|write|set|put|let|keep|start|turn|help|talk|begin|seem|leave|play|move|live|believe|hold|bring|happen|provide|include|continue|change|watch|follow|stop|create|speak|allow|add|grow|open|walk|win|offer|remember|consider|appear|buy|wait|serve|die|send|expect|build|stay|fall|cut|reach|kill|remain|file|files|code|source|project|codebase|repository|repo|directory|function|functions|class|module|component)$' \
-        | head -5 \
-        | tr '\n' ' ' \
-        | sed 's/ *$//'
-      ;;
-  esac
-}
-
-should_intercept() {
+should_nudge() {
   case "$TOOL_NAME" in
     Grep) return 0 ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag|find|fd|sed|awk)\b' && return 0
+      # Only nudge for search-like commands, not graphmind itself
+      echo "$CMD" | grep -q "graphmind" && return 1
+      echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag|find|fd)\b' && return 0
       ;;
-    Glob|LS) return 0 ;;
     Agent)
       SUBAGENT=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
       [ "$SUBAGENT" = "Explore" ] && return 0
       PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
-      echo "$PROMPT" | grep -qiE 'search|find|explore|locate|where is|which file|architecture|structure' && return 0
+      echo "$PROMPT" | grep -qiE 'search|find|explore|locate|where is|which file' && return 0
       ;;
   esac
   return 1
 }
 
-if ! should_intercept; then exit 0; fi
+if ! should_nudge; then exit 0; fi
 
-# Skip rewriting for exhaustive searches — grep is better for "find all occurrences"
-# Detect via: description field, recursive grep with -l (file listing), or wc/count patterns
+# Skip for exhaustive searches — grep is legitimately better
 CMD_CHECK=$(echo "$INPUT" | jq -r '(.tool_input.command // "") + " " + (.tool_input.description // "")')
-if echo "$CMD_CHECK" | grep -qiE 'partout|tous les|toutes les|every|everywhere|all (usages|occurrences|references|places|files|instances)|exhaustive|each (usage|occurrence|reference|place|instance)|list all|find all|chercher partout|chaque|l.ensemble|la totalit|tout le|complete list|comprehensive|thoroughly'; then
+if echo "$CMD_CHECK" | grep -qiE 'all (usages|occurrences|references|instances)|find all|list all|exhaustive'; then
   exit 0
 fi
-# If grep uses -c (count) or pipes to wc, it's an exhaustive count — let it through
 if echo "$CMD_CHECK" | grep -qE '\s-[a-zA-Z]*c|\|\s*wc\s|\|\s*sort\s|\|\s*uniq\s'; then
   exit 0
 fi
 
-PATTERN=$(extract_pattern)
+MSG="⚡ This project is graphmind-indexed. Use /gm <query> for code exploration (symbols, callers, deps, outlines). Grep only for string literals/config values."
 
-# Cache deduplication: skip if same query was searched in last 5 minutes
-CACHE_FILE="/tmp/graphmind-hook-cache.txt"
-NOW=$(date +%s)
-if [ -n "$PATTERN" ] && [ -f "$CACHE_FILE" ]; then
-  NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
-  while IFS='|' read -r TS Q; do
-    if [ "$Q" = "$NORM" ] && [ $((NOW - TS)) -lt 300 ]; then
-      exit 0
-    fi
-  done < <(tail -50 "$CACHE_FILE")
-fi
-
-# If no pattern extracted, just provide advice
-if [ -z "$PATTERN" ] || [ ${#PATTERN} -gt 200 ]; then
-  MSG="⚡ graphmind is indexed. Use MCP gm_search, gm_fn, gm_deps, gm_query instead of grep/find for code patterns."
-  jq -n --arg msg "$MSG" '{
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "additionalContext": $msg
-    }
-  }'
-  exit 0
-fi
-
-# For Bash tools: rewrite the command to use graphmind search
-if [ "$TOOL_NAME" = "Bash" ]; then
-  REWRITTEN="graphmind search \"$PATTERN\" --limit 15"
-  ORIGINAL_INPUT=$(echo "$INPUT" | jq -c '.tool_input')
-  UPDATED_INPUT=$(echo "$ORIGINAL_INPUT" | jq --arg cmd "$REWRITTEN" '.command = $cmd')
-
-  # Record in cache
-  NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
-  echo "${NOW}|${NORM}" >> "$CACHE_FILE"
-  tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
-
-  jq -n \
-    --argjson updated "$UPDATED_INPUT" \
-    '{
-      "hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "allow",
-        "permissionDecisionReason": "graphmind hook: rewritten to graphmind search (code graph indexed)",
-        "updatedInput": $updated
-      }
-    }'
-  exit 0
-fi
-
-# Execute graphmind search
-RESULTS=$(graphmind search "$PATTERN" --limit 15 2>/dev/null | head -60)
-
-# Record in cache
-NORM=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
-echo "${NOW}|${NORM}" >> "$CACHE_FILE"
-tail -50 "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
-
-if [ -z "$RESULTS" ]; then
-  exit 0
-fi
-
-# For Agent (sub-agents): BLOCK and return graphmind results — prevents grep/find exploration
-if [ "$TOOL_NAME" = "Agent" ]; then
-  MSG="⚡ graphmind already has this indexed:\n$RESULTS\n\nUse these results directly. For more detail: graphmind fn <symbol> or graphmind deps <file>."
-  jq -n --arg msg "$MSG" '{
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "permissionDecision": "deny",
-      "permissionDecisionReason": $msg
-    }
-  }'
-else
-  # For Grep/Glob/LS: inject results as context (don't block — may be legitimate)
-  MSG="⚡ graphmind results for \"$PATTERN\" (prefer these over grep/find):\n$RESULTS"
-  jq -n --arg msg "$MSG" '{
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "additionalContext": $msg
-    }
-  }'
-fi
+jq -n --arg msg "$MSG" '{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "additionalContext": $msg
+  }
+}'
 "#;
 
 const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
