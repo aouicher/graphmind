@@ -32,8 +32,20 @@ pub fn check_cli_installed() -> CliStatus {
 
 #[tauri::command]
 pub async fn install_cli() -> Result<CliStatus, String> {
-    let bin_dir = home_dir().join(".graphmind").join("bin");
-    fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+    // Install to existing location, or fall back to ~/.graphmind/bin
+    let existing = super::updater::find_graphmind_binary();
+    let bin_path = if existing != "graphmind" {
+        std::path::PathBuf::from(&existing)
+    } else {
+        let bin_dir = home_dir().join(".graphmind").join("bin");
+        fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+        bin_dir.join("graphmind")
+    };
+
+    // Ensure parent dir exists
+    if let Some(parent) = bin_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
 
     let asset = if cfg!(target_arch = "aarch64") {
         "graphmind-cli-macos-arm64"
@@ -45,8 +57,7 @@ pub async fn install_cli() -> Result<CliStatus, String> {
         "https://github.com/aouicher/graphmind-dist/releases/latest/download/{asset}"
     );
 
-    let bin_path = bin_dir.join("graphmind");
-    let tmp_path = bin_dir.join("graphmind.tmp");
+    let tmp_path = bin_path.with_extension("tmp");
 
     let status = std::process::Command::new("curl")
         .args(["-fsSL", "-o"])
