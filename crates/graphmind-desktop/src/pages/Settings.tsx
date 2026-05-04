@@ -17,6 +17,7 @@ export function Settings() {
   const [embVoyageKey, setEmbVoyageKey] = useState("");
   const [embSaving, setEmbSaving] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [cliVersion, setCliVersion] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export function Settings() {
       setEmbVoyageKey(s.voyage_key || "");
     });
     api.getAppVersion().then(setAppVersion).catch(() => {});
+    api.checkCliInstalled().then((s) => setCliVersion(s.version ?? null)).catch(() => {});
     setUpdateChecking(true);
     api.checkAppUpdate()
       .then((info) => { setUpdateInfo(info); setUpdateError(null); })
@@ -358,11 +360,17 @@ export function Settings() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs text-text-secondary">
-              Current version:{" "}
+              App:{" "}
               <span className="text-text-primary font-medium">
                 {appVersion ?? updateInfo?.current_version ?? "—"}
               </span>
             </p>
+            {cliVersion && (
+              <p className="text-xs text-text-secondary mt-0.5">
+                CLI:{" "}
+                <span className="text-text-primary font-medium">{cliVersion}</span>
+              </p>
+            )}
             {updateDone && (
               <p className="text-xs text-green-500 mt-1">
                 Updated to v{updateDone} — restart to apply
