@@ -7,6 +7,8 @@ const PRE_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
 # Reminds Claude to use /gm skill instead of grep/find/Explore agents.
 # Does NOT rewrite commands — just nudges via additionalContext.
 
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
 
@@ -59,6 +61,8 @@ jq -n --arg msg "$MSG" '{
 const SESSION_START_HOOK: &str = r#"#!/usr/bin/env bash
 # graphmind SessionStart hook — full project briefing with priority memory
 
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
 
@@ -97,6 +101,8 @@ jq -n --arg msg "$MSG" '{
 
 const USER_PROMPT_HOOK: &str = r#"#!/usr/bin/env bash
 # graphmind UserPromptSubmit hook — always-on context injection (memory + code)
+
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
@@ -185,6 +191,8 @@ jq -n --arg msg "$MSG" '{
 
 const POST_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
 # graphmind PostToolUse hook — tracks hot files + nudges toward MCP tools
+
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
