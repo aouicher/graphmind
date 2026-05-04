@@ -206,6 +206,8 @@ In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY 
 
 **Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first.
 
+To **read** a symbol's source code, use `/gm-fn <symbol>` — it returns full source + callers + callees in one call. Prefer it over Read when you already know the symbol name.
+
 Only fall back to grep for: string literals, config values, env vars, non-code patterns.
 
 Invoke: `Skill(skill: "graphmind", args: "<your query>")`
