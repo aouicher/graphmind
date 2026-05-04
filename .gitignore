@@ -10,3 +10,4 @@ dist/
 .graphmindrc.json
 .omc/
 *.node
+.fastembed_cache/
