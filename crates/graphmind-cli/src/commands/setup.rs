@@ -140,6 +140,24 @@ fn register_mcp_in_claude_code() {
         json!({})
     };
 
+    // Inject ~/.graphmind/bin into the global env.PATH so hooks (Bash tool) can resolve graphmind
+    {
+        let env = config
+            .as_object_mut()
+            .unwrap()
+            .entry("env")
+            .or_insert_with(|| json!({}));
+        let current_path = env
+            .get("PATH")
+            .and_then(|v| v.as_str())
+            .unwrap_or("/usr/local/bin:/usr/bin:/bin")
+            .to_string();
+        if !current_path.contains(&graphmind_bin_dir) {
+            let new_path = format!("{}:{}", graphmind_bin_dir, current_path);
+            env.as_object_mut().unwrap().insert("PATH".to_string(), json!(new_path));
+        }
+    }
+
     let mcp_entry = json!({
         "command": graphmind_path,
         "args": ["mcp"],
@@ -159,12 +177,9 @@ fn register_mcp_in_claude_code() {
         .and_then(|e| e.get("env"))
         .is_some();
 
-    if already_correct {
-        println!("    {} already configured", "✓".green());
-        return;
+    if !already_correct {
+        mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
     }
-
-    mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
     fs::write(&settings_path, formatted).unwrap_or_else(|e| {
