@@ -73,6 +73,7 @@ jobs:
           name: ${{ matrix.binary }}
           path: dist/${{ matrix.binary }}
           if-no-files-found: error
+          retention-days: 1
 
   # --- Desktop app build (macOS, signed + notarized) ---
 
@@ -146,6 +147,7 @@ jobs:
           name: graphmind-desktop-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
+          retention-days: 1
 
       - name: Upload updater artifact (tar.gz + sig)
         uses: actions/upload-artifact@v4
@@ -155,6 +157,7 @@ jobs:
             target/${{ matrix.target }}/release/bundle/macos/*.tar.gz
             target/${{ matrix.target }}/release/bundle/macos/*.tar.gz.sig
           if-no-files-found: warn
+          retention-days: 1
 
   # --- CD: release on push to main or staging ---
 
