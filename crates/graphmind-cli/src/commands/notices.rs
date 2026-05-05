@@ -5,7 +5,7 @@ use std::path::PathBuf;
 const ANNOUNCEMENTS_URL: &str =
     "https://github.com/aouicher/graphmind-dist/releases/latest/download/announcements.json";
 const LATEST_VERSION_URL: &str =
-    "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest-version.txt";
+    "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest.json";
 const CACHE_TTL_SECS: u64 = 86400;
 const FETCH_TIMEOUT_SECS: u32 = 2;
 
@@ -91,7 +91,11 @@ fn fetch_latest_version() -> Option<String> {
         return None;
     }
 
-    let latest = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let body = String::from_utf8_lossy(&output.stdout);
+    // latest.json has a "version" field (same format as Tauri updater manifest)
+    let latest = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(|s| s.to_string()))?;
     if latest.is_empty() {
         return None;
     }

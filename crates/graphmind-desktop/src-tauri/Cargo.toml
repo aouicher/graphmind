@@ -1,8 +1,8 @@
 [package]
 name = "graphmind-desktop"
-version = "0.2.115"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "GraphMind Desktop - Local-first code intelligence app"
 
 [build-dependencies]

@@ -1,11 +1,11 @@
 [package]
 name = "graphmind-cli"
-version = "0.2.115"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Local-first code intelligence CLI"
-repository = "https://github.com/aouicher/graphmind"
-homepage = "https://github.com/aouicher/graphmind"
+repository.workspace = true
+homepage.workspace = true
 readme = "../../README.md"
 keywords = ["code-intelligence", "mcp", "knowledge-graph", "tree-sitter"]
 categories = ["command-line-utilities", "development-tools"]
