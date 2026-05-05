@@ -214,8 +214,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml crates/graphmind-desktop/src-tauri/tauri.conf.json
-          git diff --cached --quiet || git commit -m "chore: bump to ${VERSION} [skip ci]"
-          git push origin HEAD
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: bump to ${VERSION} [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD
+          fi
 
       - name: Create tag and release
         id: create
