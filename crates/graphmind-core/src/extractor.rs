@@ -406,7 +406,6 @@ fn node_text(node: Node, source: &str) -> String {
 
 #[cfg(test)]
 mod object_literal_tests {
-    use super::*;
     use crate::parser::parse;
 
     #[test]
