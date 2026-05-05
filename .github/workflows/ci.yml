@@ -63,7 +63,7 @@ jobs:
       - name: Inject version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i'' "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+          perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
@@ -120,8 +120,8 @@ jobs:
       - name: Inject version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i'' "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
-          sed -i'' "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
+          perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+          perl -i -pe "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
 
       - name: Install Apple certificate
         env:
