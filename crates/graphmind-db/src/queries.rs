@@ -117,7 +117,30 @@ impl<'a> GraphQueries<'a> {
     }
 
     pub fn find_symbol_filtered(&self, name: &str, file: Option<&str>, kind: Option<&str>) -> Vec<SymbolRow> {
-        let mut sql = String::from("SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE name = ?1");
+        let results = self.find_symbol_by_name(name, file, kind, false);
+        if !results.is_empty() {
+            return results;
+        }
+        // Fallback: match object literal methods like "authService.refreshToken" when searching "refreshToken"
+        if !name.contains('.') {
+            return self.find_symbol_by_name(name, file, kind, true);
+        }
+        results
+    }
+
+    fn find_symbol_by_name(&self, name: &str, file: Option<&str>, kind: Option<&str>, suffix_match: bool) -> Vec<SymbolRow> {
+        let name_clause = if suffix_match {
+            "name LIKE ?1".to_string()
+        } else {
+            "name = ?1".to_string()
+        };
+        let name_param = if suffix_match {
+            format!("%.{name}")
+        } else {
+            name.to_string()
+        };
+
+        let mut sql = format!("SELECT id, name, kind, file, line_start, line_end, signature, doc, content FROM symbols WHERE {name_clause}");
         let mut param_idx = 2;
         if file.is_some() {
             sql.push_str(&format!(" AND file = ?{param_idx}"));
@@ -126,8 +149,11 @@ impl<'a> GraphQueries<'a> {
         if kind.is_some() {
             sql.push_str(&format!(" AND kind = ?{param_idx} COLLATE NOCASE"));
         }
-        let mut stmt = self.db.prepare(&sql).unwrap();
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(name.to_string())];
+        let mut stmt = match self.db.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(name_param)];
         if let Some(f) = file {
             params_vec.push(Box::new(f.to_string()));
         }
