@@ -3,6 +3,7 @@ name: CI/CD
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -32,7 +33,7 @@ jobs:
 
   rust-build:
     needs: rust-check
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +60,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Inject version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
 
@@ -79,7 +85,7 @@ jobs:
 
   desktop-build:
     needs: rust-check
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +116,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: crates/graphmind-desktop
         run: npm ci
+
+      - name: Inject version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
 
       - name: Install Apple certificate
         env:
@@ -159,82 +171,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # --- CD: release on push to main or staging ---
+  # --- CD: release on tag push ---
 
   release:
-    needs: [rust-check]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    needs: rust-check
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
-      tag: ${{ steps.version.outputs.tag }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
+      tag: ${{ github.ref_name }}
+      prerelease: ${{ steps.create.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Compute next version
-        id: version
-        env:
-          BRANCH_REF: ${{ github.ref }}
-        run: |
-          BRANCH="${BRANCH_REF#refs/heads/}"
-
-          # Find latest semver tag, default to v0.0.0 if none
-          LAST=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -v '\-rc' | sort -V | tail -1)
-          LAST="${LAST:-v0.0.0}"
-          LAST_CLEAN="${LAST#v}"
-
-          # Increment patch
-          MAJOR=$(echo "$LAST_CLEAN" | cut -d. -f1)
-          MINOR=$(echo "$LAST_CLEAN" | cut -d. -f2)
-          PATCH=$(echo "$LAST_CLEAN" | cut -d. -f3)
-          NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))"
-
-          if [ "$BRANCH" = "staging" ]; then
-            TAG="v${NEXT}-rc"
-            PRERELEASE="true"
-          else
-            TAG="v${NEXT}"
-            PRERELEASE="false"
-          fi
-
-          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-
-      - name: Bump version in Cargo.toml and tauri.conf.json
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml crates/graphmind-desktop/src-tauri/tauri.conf.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: bump to ${VERSION} [skip ci]"
-            git pull --rebase origin main
-            git push origin HEAD
-          fi
-
-      - name: Create tag and release
+      - name: Create GitHub release
         id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          TAG: ${{ github.ref_name }}
         run: |
-          git tag "$TAG"
-          git push origin "$TAG"
-          if [ "$PRERELEASE" = "true" ]; then
+          PRERELEASE="false"
+          if [[ "$TAG" == *"-rc"* ]]; then
+            PRERELEASE="true"
             gh release create "$TAG" --generate-notes --title "$TAG" --prerelease
           else
             gh release create "$TAG" --generate-notes --title "$TAG"
           fi
           echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
   release-assets:
     needs: [release, rust-build, desktop-build]
