@@ -85,6 +85,32 @@ download() {
     fi
 }
 
+configure_path() {
+    local dir="$1"
+    local export_line="export PATH=\"${dir}:\$PATH\""
+    local updated=()
+
+    # zshenv: always ensure (loaded even in non-interactive shells — needed for MCP)
+    # zshrc/bashrc: only if the file already exists
+    local profiles=(".zshenv" ".zshrc" ".bashrc")
+    for profile in "${profiles[@]}"; do
+        local profile_path="$HOME/$profile"
+        [ ! -f "$profile_path" ] && [ "$profile" != ".zshenv" ] && continue
+        if grep -qF "$dir" "$profile_path" 2>/dev/null; then
+            continue
+        fi
+        printf '\n%s\n' "$export_line" >> "$profile_path"
+        updated+=("$profile")
+    done
+
+    if [ ${#updated[@]} -eq 0 ]; then
+        info "PATH already configured"
+    else
+        info "PATH added to: ${updated[*]}"
+        echo "  Restart your shell or run: source ~/${updated[0]}"
+    fi
+}
+
 TMP_DIR=""
 cleanup() { [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"; }
 
@@ -121,14 +147,10 @@ main() {
 
     info "Installed to ${INSTALL_DIR}/${BINARY}"
 
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
-        echo ""
-        info "Add to your PATH:"
-        echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-    fi
+    configure_path "$INSTALL_DIR"
 
     echo ""
-    info "Done! Run 'graphmind --help' to get started."
+    info "Done! Run 'graphmind setup' to complete configuration, then 'graphmind --help' to get started."
 }
 
 main "$@"

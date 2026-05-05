@@ -14,19 +14,22 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 5, "Claude Code hooks");
+    print_step(1, 6, "Shell PATH configuration");
+    install_shell_path();
+
+    print_step(2, 6, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(2, 5, "Claude Code skills");
+    print_step(3, 6, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(3, 5, "Claude Desktop MCP config");
+    print_step(4, 6, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(4, 5, "Claude Code MCP server");
+    print_step(5, 6, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(5, 5, "CLAUDE.md instruction");
+    print_step(6, 6, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -36,6 +39,7 @@ pub fn setup() {
 
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
+    println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 4 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse)", "✓".green());
     println!("  {} /gm skill + 18 sub-skills installed", "✓".green());
     println!("  {} MCP server configured (Claude Desktop + Claude Code)", "✓".green());
@@ -215,6 +219,49 @@ Invoke: `Skill(skill: "graphmind", args: "<your query>")`
 **Auto-memory**: After making architectural decisions, discovering important patterns, or establishing conventions, save them with `/gm-memory add <fact>`. Use `--priority` for facts that should always be injected (e.g. "auth tokens go through middleware X").
 
 <!-- GM:END -->"#;
+
+fn install_shell_path() {
+    let install_dir = home_dir().join(".local").join("bin");
+    let install_dir_str = install_dir.to_string_lossy();
+    let export_line = format!("export PATH=\"{}:$PATH\"", install_dir_str);
+
+    // Profiles to update — zshenv for non-interactive shells (MCP), zshrc/bashrc for interactive
+    let profiles: &[&str] = &[".zshenv", ".zshrc", ".bashrc"];
+    let mut updated = Vec::new();
+
+    for profile in profiles {
+        let path = home_dir().join(profile);
+        // Only write to profiles that already exist, except .zshenv which we always ensure
+        if !path.exists() && *profile != ".zshenv" {
+            continue;
+        }
+        let content = if path.exists() {
+            fs::read_to_string(&path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if content.contains(&export_line) || content.contains(&format!("\"{}\"", install_dir_str)) {
+            continue;
+        }
+        let new_content = if content.is_empty() {
+            format!("{}\n", export_line)
+        } else {
+            format!("{}\n{}\n", content.trim_end(), export_line)
+        };
+        if let Err(e) = fs::write(&path, new_content) {
+            println!("    {} failed to update {}: {e}", "✗".red(), profile);
+        } else {
+            updated.push(*profile);
+        }
+    }
+
+    if updated.is_empty() {
+        println!("    {} PATH already configured", "✓".green());
+    } else {
+        println!("    {} added to: {}", "✓".green(), updated.join(", "));
+        println!("    {} restart your shell or run: source ~/{}", "→".cyan(), updated[0]);
+    }
+}
 
 fn install_claude_md_block() {
     let claude_md = home_dir().join(".claude").join("CLAUDE.md");

@@ -1,6 +1,6 @@
 [package]
 name = "graphmind-config"
-version = "0.2.111"
+version = "0.2.112"
 edition = "2021"
 license = "MIT"
 description = "Shared configuration, paths, and project registry for GraphMind"
