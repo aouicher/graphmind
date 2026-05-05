@@ -196,6 +196,19 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Sync tauri.conf.json version
+        if: steps.version.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          V="${VERSION#v}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${V}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add crates/graphmind-desktop/src-tauri/tauri.conf.json
+          git diff --cached --quiet || git commit -m "chore: sync tauri.conf.json to ${V}"
+          git push origin HEAD
+
       - name: Create tag and release
         id: create
         if: steps.version.outputs.exists == 'false'
