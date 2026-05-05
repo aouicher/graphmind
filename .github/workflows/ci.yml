@@ -172,46 +172,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Check version bump
+      - name: Compute next version
         id: version
         env:
           BRANCH_REF: ${{ github.ref }}
         run: |
-          CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           BRANCH="${BRANCH_REF#refs/heads/}"
+
+          # Find latest semver tag, default to v0.0.0 if none
+          LAST=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -v '\-rc' | sort -V | tail -1)
+          LAST="${LAST:-v0.0.0}"
+          LAST_CLEAN="${LAST#v}"
+
+          # Increment patch
+          MAJOR=$(echo "$LAST_CLEAN" | cut -d. -f1)
+          MINOR=$(echo "$LAST_CLEAN" | cut -d. -f2)
+          PATCH=$(echo "$LAST_CLEAN" | cut -d. -f3)
+          NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))"
+
           if [ "$BRANCH" = "staging" ]; then
-            TAG="v${CURRENT}-rc"
+            TAG="v${NEXT}-rc"
             PRERELEASE="true"
           else
-            TAG="v${CURRENT}"
+            TAG="v${NEXT}"
             PRERELEASE="false"
           fi
+
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
 
-      - name: Sync tauri.conf.json version
-        if: steps.version.outputs.exists == 'false'
+      - name: Bump version in Cargo.toml and tauri.conf.json
         env:
-          VERSION: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          V="${VERSION#v}"
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${V}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
+          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add crates/graphmind-desktop/src-tauri/tauri.conf.json
-          git diff --cached --quiet || git commit -m "chore: sync tauri.conf.json to ${V}"
+          git add Cargo.toml crates/graphmind-desktop/src-tauri/tauri.conf.json
+          git diff --cached --quiet || git commit -m "chore: bump to ${VERSION} [skip ci]"
           git push origin HEAD
 
       - name: Create tag and release
         id: create
-        if: steps.version.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
