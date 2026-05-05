@@ -105,10 +105,22 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
                 }
                 return;
             }
+            // export const obj = { method() {} } — extract object literal methods
+            let before = symbols.len();
+            collect_object_literal_methods(node, source, symbols, None);
+            if symbols.len() > before {
+                return;
+            }
         }
         "lexical_declaration" => {
             if let Some(child) = find_arrow_function(node, source) {
                 symbols.push(child);
+                return;
+            }
+            // const obj = { method() {} } — extract object literal methods
+            let before = symbols.len();
+            collect_object_literal_methods(node, source, symbols, None);
+            if symbols.len() > before {
                 return;
             }
         }
@@ -225,6 +237,81 @@ fn collect_class_members(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
     }
 }
 
+/// Extract methods from `export const obj = { method() {}, arrow: () => {} }`
+/// container_name: if provided, names symbols as "container.method"
+fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Symbol>, container_name: Option<&str>) {
+    for i in 0..node.named_child_count() {
+        let child = match node.named_child(i) {
+            Some(c) => c,
+            None => continue,
+        };
+        match child.kind() {
+            // Traverse wrappers to reach variable_declarator
+            "lexical_declaration" | "export_statement" => {
+                collect_object_literal_methods(child, source, symbols, container_name);
+            }
+            "variable_declarator" => {
+                // Determine container name from the variable name
+                let var_name = child.child_by_field_name("name")
+                    .map(|n| node_text(n, source));
+                let value = child.child_by_field_name("value");
+                if let Some(val) = value {
+                    if val.kind() == "object" {
+                        let cname = var_name.as_deref().or(container_name);
+                        collect_object_literal_methods(val, source, symbols, cname);
+                    }
+                }
+            }
+            "pair" => {
+                // { key: function() {} } or { key: () => {} }
+                let key = child.child_by_field_name("key")
+                    .map(|n| node_text(n, source));
+                let val = child.child_by_field_name("value");
+                if let (Some(key_name), Some(val_node)) = (key, val) {
+                    let sym_name = if let Some(c) = container_name {
+                        format!("{c}.{key_name}")
+                    } else {
+                        key_name.clone()
+                    };
+                    match val_node.kind() {
+                        "arrow_function" | "function" | "function_expression" => {
+                            symbols.push(Symbol {
+                                name: sym_name,
+                                kind: SymbolKind::Method,
+                                line_start: child.start_position().row as u32 + 1,
+                                line_end: child.end_position().row as u32 + 1,
+                                signature: Some(build_signature(val_node, source)),
+                                doc: extract_doc_comment(child, source),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "method_definition" => {
+                // { async method() {} }
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let method_name = node_text(name_node, source);
+                    let sym_name = if let Some(c) = container_name {
+                        format!("{c}.{method_name}")
+                    } else {
+                        method_name
+                    };
+                    symbols.push(Symbol {
+                        name: sym_name,
+                        kind: SymbolKind::Method,
+                        line_start: child.start_position().row as u32 + 1,
+                        line_end: child.end_position().row as u32 + 1,
+                        signature: Some(build_signature(child, source)),
+                        doc: extract_doc_comment(child, source),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, current_fn: Option<&str>) {
     let fn_name = match node.kind() {
         "function_declaration" | "method_definition" => {
@@ -315,4 +402,27 @@ fn node_text(node: Node, source: &str) -> String {
     let start = node.start_byte();
     let end = node.end_byte();
     source[start..end].to_string()
+}
+
+#[cfg(test)]
+mod object_literal_tests {
+    use super::*;
+    use crate::parser::parse;
+
+    #[test]
+    fn extracts_object_literal_methods() {
+        let source = r#"export const authService = {
+  async refreshToken(token: string): Promise<void> {
+    return;
+  },
+  async authenticate(email: string): Promise<void> {
+    return;
+  },
+};"#;
+        let result = parse("test.ts", source, "typescript").unwrap();
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.iter().any(|n| n.contains("refreshToken")), "refreshToken not found in {:?}", names);
+        assert!(names.iter().any(|n| n.contains("authenticate")), "authenticate not found in {:?}", names);
+        assert_eq!(names.iter().filter(|n| n.contains("refreshToken")).count(), 1, "duplicate refreshToken");
+    }
 }

@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "chrono",
  "clap",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "napi",
  "napi-build",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1945,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "dirs 5.0.1",
  "fastembed",
@@ -1960,7 +1960,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "dirs 5.0.1",
  "graphmind-config",
@@ -1975,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.109"
+version = "0.2.110"
 dependencies = [
  "chrono",
  "graphmind-db",
@@ -2039,9 +2039,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f44da3a8150a6703ed5d34e164b875fd14c2cdab9af1252a9a1020bde2bdc54"
+checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2895,7 +2895,7 @@ dependencies = [
  "bitflags 2.11.1",
  "libc",
  "plain",
- "redox_syscall 0.7.4",
+ "redox_syscall 0.7.5",
 ]
 
 [[package]]
@@ -3223,9 +3223,9 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "no_std_io2"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b51ed7824b6e07d354605f4abb3d9d300350701299da96642ee084f5ce631550"
+checksum = "418abd1b6d34fbf6cae440dc874771b0525a604428704c76e48b29a5e67b8003"
 dependencies = [
  "memchr",
 ]
@@ -4162,9 +4162,9 @@ checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"
-version = "0.39.2"
+version = "0.39.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "958f21e8e7ceb5a1aa7fa87fab28e7c75976e0bfe7e23ff069e0a260f894067d"
+checksum = "721da970c312655cde9b4ffe0547f20a8494866a4af5ff51f18b7c633d0c870b"
 dependencies = [
  "memchr",
 ]
@@ -4338,9 +4338,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f450ad9c3b1da563fb6948a8e0fb0fb9269711c9c73d9ea1de5058c79c8d643a"
+checksum = "4666a1a60d8412eab19d94f6d13dcc9cea0a5ef4fdf6a5db306537413c661b1b"
 dependencies = [
  "bitflags 2.11.1",
 ]
@@ -5348,9 +5348,9 @@ dependencies = [
 
 [[package]]
 name = "tao"
-version = "0.35.0"
+version = "0.35.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cf65722394c2ac443e80120064987f8914ee1d4e4e36e63cdf10f2990f01159"
+checksum = "a33f7f9e486ade65fcf1e45c440f9236c904f5c1002cdc7fc6ae582777345ce4"
 dependencies = [
  "bitflags 2.11.1",
  "block2",
@@ -6371,9 +6371,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-powershell"
-version = "0.26.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ff5d1c86d8b1625585fd18e05fff47e38c36564e45ec4f38fd0de4ecbf08e2c"
+checksum = "3faf304d44b9ddd4a7d97804bb8de7daf564336dd5a526dc6de5b39238243022"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -7667,9 +7667,9 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "wry"
-version = "0.55.0"
+version = "0.55.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3013fd6116aac351dd2e18f349b28b2cfef3a5ff3253a9d0ce2d7193bb1b4429"
+checksum = "186f9871daa55fd9c016578b810d149de58367113db7fb72b462d2323ce19514"
 dependencies = [
  "base64 0.22.1",
  "block2",
