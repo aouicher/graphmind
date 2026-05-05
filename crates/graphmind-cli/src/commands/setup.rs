@@ -131,6 +131,7 @@ fn install_claude_desktop_mcp() {
 fn register_mcp_in_claude_code() {
     let settings_path = home_dir().join(".claude").join("settings.json");
     let graphmind_path = find_graphmind_binary();
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
 
     let mut config: Value = if settings_path.exists() {
         let content = fs::read_to_string(&settings_path).unwrap_or_default();
@@ -139,24 +140,31 @@ fn register_mcp_in_claude_code() {
         json!({})
     };
 
+    let mcp_entry = json!({
+        "command": graphmind_path,
+        "args": ["mcp"],
+        "env": {
+            "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+        }
+    });
+
     let mcp_servers = config
         .as_object_mut()
         .unwrap()
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
 
-    if mcp_servers.get("graphmind").is_some() {
+    let already_correct = mcp_servers
+        .get("graphmind")
+        .and_then(|e| e.get("env"))
+        .is_some();
+
+    if already_correct {
         println!("    {} already configured", "✓".green());
         return;
     }
 
-    mcp_servers.as_object_mut().unwrap().insert(
-        "graphmind".to_string(),
-        json!({
-            "command": graphmind_path,
-            "args": ["mcp"]
-        }),
-    );
+    mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
     fs::write(&settings_path, formatted).unwrap_or_else(|e| {
@@ -221,7 +229,7 @@ Invoke: `Skill(skill: "graphmind", args: "<your query>")`
 <!-- GM:END -->"#;
 
 fn install_shell_path() {
-    let install_dir = home_dir().join(".local").join("bin");
+    let install_dir = home_dir().join(".graphmind").join("bin");
     let install_dir_str = install_dir.to_string_lossy();
     let export_line = format!("export PATH=\"{}:$PATH\"", install_dir_str);
 
