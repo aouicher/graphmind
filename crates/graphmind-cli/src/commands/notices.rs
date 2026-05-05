@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 const ANNOUNCEMENTS_URL: &str =
     "https://github.com/aouicher/graphmind-dist/releases/latest/download/announcements.json";
+const LATEST_VERSION_URL: &str =
+    "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest-version.txt";
 const CACHE_TTL_SECS: u64 = 86400;
 const FETCH_TIMEOUT_SECS: u32 = 2;
 
@@ -34,6 +36,71 @@ struct AnnouncementsCache {
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct DismissedList {
     ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct UpdateCache {
+    fetched_at: u64,
+    latest_version: String,
+}
+
+fn update_cache_path() -> PathBuf {
+    graphmind_config::paths::graphmind_dir().join("update-check.json")
+}
+
+pub fn check_cli_update() {
+    // Skip if stdout is not a TTY (MCP mode, pipes, etc.)
+    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        return;
+    }
+
+    let current = env!("CARGO_PKG_VERSION");
+    let Some(latest) = fetch_latest_version() else { return };
+
+    if version_cmp(&latest, current) > 0 {
+        eprintln!(
+            "\x1b[33m[graphmind]\x1b[0m Update available: {} → {} — run \x1b[36mgraphmind update\x1b[0m",
+            current, latest
+        );
+    }
+}
+
+fn fetch_latest_version() -> Option<String> {
+    let path = update_cache_path();
+    let now = now_secs();
+
+    if let Ok(raw) = fs::read_to_string(&path) {
+        if let Ok(cache) = serde_json::from_str::<UpdateCache>(&raw) {
+            if now - cache.fetched_at < CACHE_TTL_SECS && !cache.latest_version.is_empty() {
+                return Some(cache.latest_version);
+            }
+        }
+    }
+
+    let output = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "--max-time",
+            &FETCH_TIMEOUT_SECS.to_string(),
+            LATEST_VERSION_URL,
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let latest = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if latest.is_empty() {
+        return None;
+    }
+
+    let cache = UpdateCache { fetched_at: now, latest_version: latest.clone() };
+    let json = serde_json::to_string(&cache).unwrap_or_default();
+    fs::write(&path, json).ok();
+
+    Some(latest)
 }
 
 fn cache_path() -> PathBuf {

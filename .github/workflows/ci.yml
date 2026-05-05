@@ -342,6 +342,10 @@ jobs:
           sed -i 's/^          //' /tmp/latest.json
           gh release upload "$TAG" /tmp/latest.json --repo "$DIST_REPO" --clobber
 
+          # Generate latest-version.txt for CLI update check
+          echo "${VERSION}" > /tmp/latest-version.txt
+          gh release upload "$TAG" /tmp/latest-version.txt --repo "$DIST_REPO" --clobber
+
           # Compute SHA256
           SHA_ARM64=$(shasum -a 256 /tmp/graphmind-cli-macos-arm64 | cut -d' ' -f1)
           SHA_X64=$(shasum -a 256 /tmp/graphmind-cli-macos-x64 | cut -d' ' -f1)

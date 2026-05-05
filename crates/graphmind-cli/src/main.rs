@@ -337,6 +337,7 @@ fn main() {
     if !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
         commands::notices::check_setup_version();
         commands::notices::check_announcements();
+        commands::notices::check_cli_update();
     }
 
     match cli.command {
