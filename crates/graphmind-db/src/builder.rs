@@ -102,6 +102,7 @@ pub struct BuildResult {
     pub skipped: usize,
     pub deleted: usize,
     pub duration_ms: u128,
+    pub errors: Vec<String>,
 }
 
 pub struct BuildOptions {
@@ -160,6 +161,7 @@ impl GraphBuilder {
         let mut deleted = 0usize;
         let mut total_symbols = 0usize;
         let mut total_edges = 0usize;
+        let mut errors: Vec<String> = Vec::new();
 
         // Clean up files no longer in scope (deleted, excluded, or filtered)
         {
@@ -182,12 +184,24 @@ impl GraphBuilder {
 
             for stale in &all_known {
                 if !current_paths.contains(stale) {
-                    self.db.execute(
+                    if let Err(e) = self.db.execute(
                         "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
                         params![stale],
-                    ).ok();
-                    self.db.execute("DELETE FROM symbols WHERE file = ?1", params![stale]).ok();
-                    self.db.execute("DELETE FROM files WHERE path = ?1", params![stale]).ok();
+                    ) {
+                        let msg = format!("error: failed to delete stale edges for {}: {}", stale, e);
+                        eprintln!("{}", msg);
+                        errors.push(msg);
+                    }
+                    if let Err(e) = self.db.execute("DELETE FROM symbols WHERE file = ?1", params![stale]) {
+                        let msg = format!("error: failed to delete stale symbols for {}: {}", stale, e);
+                        eprintln!("{}", msg);
+                        errors.push(msg);
+                    }
+                    if let Err(e) = self.db.execute("DELETE FROM files WHERE path = ?1", params![stale]) {
+                        let msg = format!("error: failed to delete stale file record for {}: {}", stale, e);
+                        eprintln!("{}", msg);
+                        errors.push(msg);
+                    }
                     self.cache.remove(stale);
                     deleted += 1;
                 }
@@ -480,7 +494,9 @@ impl GraphBuilder {
         }
 
         if let Err(e) = self.db.execute_batch("COMMIT") {
-            eprintln!("warn: failed to commit transaction: {}", e);
+            let msg = format!("error: failed to commit transaction: {}", e);
+            eprintln!("{}", msg);
+            errors.push(msg);
         }
         self.cache.save();
 
@@ -491,6 +507,7 @@ impl GraphBuilder {
             skipped,
             deleted,
             duration_ms: start.elapsed().as_millis(),
+            errors,
         }
     }
 

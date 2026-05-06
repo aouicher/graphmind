@@ -245,6 +245,10 @@ where
 }
 
 fn handle_query(args: &Value) -> Value {
+    handle_symbol_query(args, false)
+}
+
+fn handle_symbol_query(args: &Value, default_include_content: bool) -> Value {
     let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
@@ -254,12 +258,14 @@ fn handle_query(args: &Value) -> Value {
     let file_filter = args.get("file").and_then(|v| v.as_str());
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let project_slug = args.get("project").and_then(|v| v.as_str());
-    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(default_include_content);
     let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
+
+    let opts = SymbolQueryOptions { file: file_filter, kind: kind_filter, limit, offset, include_content, format };
 
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format)
+            query_symbol_filtered(gq, &proj.slug, symbol, &opts)
         });
     }
 
@@ -270,7 +276,7 @@ fn handle_query(args: &Value) -> Value {
                 let gq = GraphQueries::new(&conn);
                 let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, &opts);
                 }
             }
         }
@@ -380,8 +386,35 @@ fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::Symb
     }).collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize, include_content: bool, format: &str) -> Value {
+struct SymbolQueryOptions<'a> {
+    file: Option<&'a str>,
+    kind: Option<&'a str>,
+    limit: usize,
+    offset: usize,
+    include_content: bool,
+    format: &'a str,
+}
+
+impl<'a> Default for SymbolQueryOptions<'a> {
+    fn default() -> Self {
+        Self {
+            file: None,
+            kind: None,
+            limit: 15,
+            offset: 0,
+            include_content: false,
+            format: "compact",
+        }
+    }
+}
+
+fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, opts: &SymbolQueryOptions<'_>) -> Value {
+    let file = opts.file;
+    let kind = opts.kind;
+    let limit = opts.limit;
+    let offset = opts.offset;
+    let include_content = opts.include_content;
+    let format = opts.format;
     let symbols = gq.find_symbol_filtered(symbol, file, kind);
     let definitions = qualify_definitions(gq, &symbols, include_content);
     let all_callers = gq.callers_filtered(symbol, file);
@@ -446,81 +479,7 @@ fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Opti
 }
 
 fn handle_fn(args: &Value) -> Value {
-    let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
-        Some(s) => s,
-        None => return err_text("Missing required parameter: symbol"),
-    };
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(15) as usize;
-    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let file_filter = args.get("file").and_then(|v| v.as_str());
-    let kind_filter = args.get("kind").and_then(|v| v.as_str());
-    let project_slug = args.get("project").and_then(|v| v.as_str());
-    let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(true);
-    let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
-
-    if project_slug.is_some() {
-        return with_graph(args, |gq, proj| {
-            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format)
-        });
-    }
-
-    if let Some(proj) = resolve_project(None) {
-        let db_path = graph_db_path(&proj.slug);
-        if db_path.exists() {
-            if let Ok(conn) = init_database(&db_path.to_string_lossy()) {
-                let gq = GraphQueries::new(&conn);
-                let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
-                if !symbols.is_empty() {
-                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format);
-                }
-            }
-        }
-    }
-
-    let slugs = all_project_slugs();
-    let mut results: Vec<Value> = Vec::new();
-    for slug in &slugs {
-        let db_path = graph_db_path(slug);
-        if !db_path.exists() { continue; }
-        let conn = match init_database(&db_path.to_string_lossy()) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let gq = GraphQueries::new(&conn);
-        let found = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
-        if !found.is_empty() {
-            let defs = qualify_definitions(&gq, &found, include_content);
-            let callers = gq.callers_filtered(symbol, file_filter);
-            let callees = gq.callees_filtered(symbol, file_filter);
-            let compact_callers = compact_edges(&gq, &callers);
-            let compact_callees = compact_edges(&gq, &callees);
-            let callers_truncated = compact_callers.len() > limit;
-            let callees_truncated = compact_callees.len() > limit;
-            let mut entry = json!({
-                "project": slug,
-                "definitions": defs,
-                "callers": compact_callers.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-                "callees": compact_callees.iter().skip(offset).take(limit).collect::<Vec<_>>(),
-            });
-            let obj = entry.as_object_mut().unwrap();
-            if callers_truncated {
-                obj.insert("callers_truncated".into(), json!(true));
-                obj.insert("total_callers".into(), json!(compact_callers.len()));
-            }
-            if callees_truncated {
-                obj.insert("callees_truncated".into(), json!(true));
-                obj.insert("total_callees".into(), json!(compact_callees.len()));
-            }
-            results.push(entry);
-        }
-    }
-    if results.is_empty() {
-        return json_text(&json!({ "symbol": symbol, "message": "Symbol not found in any project." }));
-    }
-    json_text(&json!({
-        "symbol": symbol,
-        "results": results,
-    }))
+    handle_symbol_query(args, true)
 }
 
 fn handle_deps(args: &Value) -> Value {
