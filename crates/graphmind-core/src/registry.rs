@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::extractor::{CallSite, Symbol};
 use tree_sitter::Node;
 
