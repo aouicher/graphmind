@@ -4,10 +4,12 @@ use napi_derive::napi;
 mod extractor;
 mod languages;
 mod parser;
+mod registry;
 mod resolver;
 
 pub use extractor::{CallSite, Symbol, SymbolKind};
 pub use parser::{parse, ParseResult};
+pub use registry::LanguageParser;
 pub use resolver::ResolvedImport;
 
 #[cfg_attr(feature = "napi", napi(object))]
