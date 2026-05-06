@@ -33,6 +33,15 @@ pub struct CallSite {
     pub line: u32,
 }
 
+pub fn run_collect<F>(root: Node, source: &str, collect: F) -> Vec<Symbol>
+where
+    F: Fn(Node, &str, &mut Vec<Symbol>),
+{
+    let mut symbols = Vec::new();
+    collect(root, source, &mut symbols);
+    symbols
+}
+
 pub fn extract_symbols(root: Node, source: &str) -> Vec<Symbol> {
     let mut symbols = Vec::new();
     collect_symbols(root, source, &mut symbols);

@@ -3,9 +3,7 @@ use crate::resolver::ResolvedImport;
 use tree_sitter::Node;
 
 pub fn extract_symbols(root: Node, source: &str) -> Vec<Symbol> {
-    let mut symbols = Vec::new();
-    collect_symbols(root, source, &mut symbols);
-    symbols
+    crate::extractor::run_collect(root, source, collect_symbols)
 }
 
 pub fn extract_call_sites(_root: Node, _source: &str) -> Vec<CallSite> {
