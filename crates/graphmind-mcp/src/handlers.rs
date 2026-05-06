@@ -261,9 +261,11 @@ fn handle_symbol_query(args: &Value, default_include_content: bool) -> Value {
     let include_content = args.get("include_content").and_then(|v| v.as_bool()).unwrap_or(default_include_content);
     let format = args.get("format").and_then(|v| v.as_str()).unwrap_or("compact");
 
+    let opts = SymbolQueryOptions { file: file_filter, kind: kind_filter, limit, offset, include_content, format };
+
     if project_slug.is_some() {
         return with_graph(args, |gq, proj| {
-            query_symbol_filtered(gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format)
+            query_symbol_filtered(gq, &proj.slug, symbol, &opts)
         });
     }
 
@@ -274,7 +276,7 @@ fn handle_symbol_query(args: &Value, default_include_content: bool) -> Value {
                 let gq = GraphQueries::new(&conn);
                 let symbols = gq.find_symbol_filtered(symbol, file_filter, kind_filter);
                 if !symbols.is_empty() {
-                    return query_symbol_filtered(&gq, &proj.slug, symbol, file_filter, kind_filter, limit, offset, include_content, format);
+                    return query_symbol_filtered(&gq, &proj.slug, symbol, &opts);
                 }
             }
         }
@@ -384,8 +386,35 @@ fn qualify_definitions(gq: &GraphQueries, symbols: &[graphmind_db::queries::Symb
     }).collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize, include_content: bool, format: &str) -> Value {
+struct SymbolQueryOptions<'a> {
+    file: Option<&'a str>,
+    kind: Option<&'a str>,
+    limit: usize,
+    offset: usize,
+    include_content: bool,
+    format: &'a str,
+}
+
+impl<'a> Default for SymbolQueryOptions<'a> {
+    fn default() -> Self {
+        Self {
+            file: None,
+            kind: None,
+            limit: 15,
+            offset: 0,
+            include_content: false,
+            format: "compact",
+        }
+    }
+}
+
+fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, opts: &SymbolQueryOptions<'_>) -> Value {
+    let file = opts.file;
+    let kind = opts.kind;
+    let limit = opts.limit;
+    let offset = opts.offset;
+    let include_content = opts.include_content;
+    let format = opts.format;
     let symbols = gq.find_symbol_filtered(symbol, file, kind);
     let definitions = qualify_definitions(gq, &symbols, include_content);
     let all_callers = gq.callers_filtered(symbol, file);
