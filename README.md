@@ -343,22 +343,41 @@ graphmind clean --all         # clean all projects
 
 ### Query
 ```bash
-graphmind query <symbol>      # find symbol + connections
-graphmind fn <symbol>         # full detail with source + callers/callees
-graphmind deps <file>         # file dependency map
-graphmind impact <file>       # transitive reverse deps
-graphmind fn-impact <symbol>  # blast radius
-graphmind diff-impact         # impact of current git changes
+graphmind query <symbol>                          # find symbol + connections
+graphmind query <symbol> --file <path>            # filter to a specific file
+graphmind query <symbol> --kind function          # filter by kind
+graphmind query <symbol> --limit 20 --offset 0   # paginate callers/callees
+graphmind fn <symbol>                             # full detail with source + callers/callees
+graphmind fn <symbol> --file <path>               # disambiguate by file
+graphmind fn <symbol> --kind function             # filter by kind
+graphmind fn <symbol> --limit 20 --offset 0      # paginate callers/callees
+graphmind fn <symbol> --include-content           # include source code in output
+graphmind fn <symbol> --no-tests                  # skip test files
+graphmind deps <file>                             # file dependency map
+graphmind impact <file>                           # transitive reverse deps
+graphmind fn-impact <symbol>                      # blast radius
+graphmind diff-impact                             # impact of current git changes
 graphmind diff-impact --staged
-graphmind map [slug]          # most-connected files
-graphmind cycles [slug]       # circular dependencies
+graphmind map [slug]                              # most-connected files
+graphmind cycles [slug]                           # circular dependencies
+graphmind outline <file>                          # hierarchical symbol tree for a file
+graphmind who-calls <symbol>                      # transitive caller chain (BFS)
+graphmind who-calls <symbol> --depth 5            # limit traversal depth
+graphmind dead-code                               # symbols with no incoming edges
+graphmind dead-code --kind function               # filter by kind
+graphmind dead-code --limit 50                    # cap results
+graphmind similar <symbol>                        # structurally similar symbols
+graphmind similar <symbol> --limit 10             # cap results
+graphmind listeners <event>                       # find listeners for an event name
 ```
 
 ### Search
 ```bash
-graphmind search "<query>"          # hybrid FTS + semantic + graph
-graphmind search "<q1>; <q2>"       # multi-query
+graphmind search "<query>"                        # hybrid FTS + semantic + graph
+graphmind search "<q1>; <q2>"                     # multi-query
 graphmind search "<query>" --kind class
+graphmind search "<query>" --offset 10            # paginate results
+graphmind search "<query>" --include-content      # include source code in output
 ```
 
 ### Embeddings

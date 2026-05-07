@@ -20,12 +20,12 @@ fn open_db(slug: &str) -> rusqlite::Connection {
     })
 }
 
-pub fn query_symbol(name: &str, slug: Option<&str>) {
+pub fn query_symbol(name: &str, slug: Option<&str>, file: Option<&str>, kind: Option<&str>, limit: usize, offset: usize) {
     let slug = require_slug(slug);
     let db = open_db(&slug);
     let q = GraphQueries::new(&db);
 
-    let symbols = q.find_symbol(name);
+    let symbols = q.find_symbol_filtered(name, file, kind);
     if symbols.is_empty() {
         println!("{} No symbol found: {}", "!".yellow(), name);
         return;
@@ -46,29 +46,50 @@ pub fn query_symbol(name: &str, slug: Option<&str>) {
             }
         }
 
-        // Show callers/callees (deduplicated)
-        let callers = q.callers(&s.name);
+        // Show callers/callees (deduplicated, with limit/offset)
+        let callers = q.callers_filtered(&s.name, file);
         let mut seen = std::collections::HashSet::new();
         let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
         if !unique_callers.is_empty() {
             println!("  {} ({}):", "Callers".green(), unique_callers.len());
-            for c in &unique_callers {
+            for c in unique_callers.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
+            if unique_callers.len() > offset + limit {
+                println!("    ... +{} more (use --offset/--limit)", unique_callers.len() - offset - limit);
+            }
         }
-        let callees = q.callees(&s.name);
+        let callees = q.callees_filtered(&s.name, file);
         seen.clear();
         let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
         if !unique_callees.is_empty() {
             println!("  {} ({}):", "Callees".green(), unique_callees.len());
-            for c in &unique_callees {
+            for c in unique_callees.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
+            }
+            if unique_callees.len() > offset + limit {
+                println!("    ... +{} more (use --offset/--limit)", unique_callees.len() - offset - limit);
             }
         }
     }
 }
 
-pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool, file: Option<&str>, kind: Option<&str>, limit: usize) {
+pub struct FnDetailOpts<'a> {
+    pub no_tests: bool,
+    pub file: Option<&'a str>,
+    pub kind: Option<&'a str>,
+    pub limit: usize,
+    pub offset: usize,
+    pub include_content: bool,
+}
+
+pub fn fn_detail(name: &str, slug: Option<&str>, opts: &FnDetailOpts<'_>) {
+    let no_tests = opts.no_tests;
+    let file = opts.file;
+    let kind = opts.kind;
+    let limit = opts.limit;
+    let offset = opts.offset;
+    let include_content = opts.include_content;
     let slug = require_slug(slug);
     let db = open_db(&slug);
     let q = GraphQueries::new(&db);
@@ -103,9 +124,11 @@ pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool, file: Option<&s
                 println!("  doc: {}", doc.dimmed());
             }
         }
-        if let Some(ref content) = s.content {
-            if !content.is_empty() {
-                println!("{}", content);
+        if include_content {
+            if let Some(ref content) = s.content {
+                if !content.is_empty() {
+                    println!("{}", content);
+                }
             }
         }
 
@@ -114,11 +137,11 @@ pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool, file: Option<&s
         let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
         if !unique_callers.is_empty() {
             println!("  {} ({}):", "Callers".green(), unique_callers.len());
-            for c in unique_callers.iter().take(limit) {
+            for c in unique_callers.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callers.len() > limit {
-                println!("    ... +{} more (use --limit)", unique_callers.len() - limit);
+            if unique_callers.len() > offset + limit {
+                println!("    ... +{} more (use --limit/--offset)", unique_callers.len() - offset - limit);
             }
         }
         let callees = q.callees_filtered(&s.name, file);
@@ -126,11 +149,11 @@ pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool, file: Option<&s
         let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
         if !unique_callees.is_empty() {
             println!("  {} ({}):", "Callees".green(), unique_callees.len());
-            for c in unique_callees.iter().take(limit) {
+            for c in unique_callees.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callees.len() > limit {
-                println!("    ... +{} more (use --limit)", unique_callees.len() - limit);
+            if unique_callees.len() > offset + limit {
+                println!("    ... +{} more (use --limit/--offset)", unique_callees.len() - offset - limit);
             }
         }
     }
@@ -271,6 +294,168 @@ pub fn cycles(slug: Option<&str>) {
     );
     for c in &cycles {
         println!("  {} <-> {}", c.from_file.red(), c.to_file.red());
+    }
+}
+
+pub fn outline(file: &str, slug: Option<&str>) {
+    let slug = require_slug(slug);
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+
+    let nodes = q.outline(file);
+    if nodes.is_empty() {
+        println!("{} No symbols found in {}", "!".yellow(), file);
+        return;
+    }
+
+    println!("{} outline: {}\n", ">>".cyan().bold(), file.bold());
+    fn render_tree(nodes: &[graphmind_db::queries::OutlineNode], depth: usize) {
+        for node in nodes {
+            let indent = "  ".repeat(depth);
+            let sig = node.signature.as_deref().unwrap_or("");
+            let sig_part = if sig.is_empty() { String::new() } else { format!("({})", sig) };
+            println!("{}{} {}{} :{}", indent, node.kind.yellow(), node.name.bold(), sig_part.dimmed(), node.line_start);
+            if !node.children.is_empty() {
+                render_tree(&node.children, depth + 1);
+            }
+        }
+    }
+    render_tree(&nodes, 1);
+}
+
+pub fn who_calls(symbol: &str, slug: Option<&str>, depth: usize) {
+    let slug = require_slug(slug);
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+
+    let (chain, max_reached) = q.who_calls_chain(symbol, depth);
+    if chain.is_empty() {
+        println!("{} No callers found for: {}", "!".yellow(), symbol);
+        return;
+    }
+
+    println!(
+        "{} who calls {} (depth {}, {} callers):\n",
+        ">>".cyan().bold(),
+        symbol.bold(),
+        depth,
+        chain.len()
+    );
+    for node in &chain {
+        let indent = "  ".repeat(node.depth + 1);
+        println!(
+            "{}← {} [{}] {}:{}",
+            indent,
+            node.name.bold(),
+            node.kind.yellow(),
+            node.file.dimmed(),
+            node.line_start
+        );
+    }
+    if max_reached {
+        println!("\n  {} (max depth {} reached — increase --depth for more)", "!".yellow(), depth);
+    }
+}
+
+pub fn dead_code(slug: Option<&str>, kind: Option<&str>, limit: i64) {
+    let slug = require_slug(slug);
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+
+    let dead = q.dead_code(kind, limit);
+    if dead.is_empty() {
+        println!("{} No dead code found", "OK".green().bold());
+        return;
+    }
+
+    let kind_label = kind.unwrap_or("Function/Method");
+    println!(
+        "{} {} dead symbols (kind: {}):\n",
+        ">>".cyan().bold(),
+        dead.len().to_string().yellow(),
+        kind_label
+    );
+    for s in &dead {
+        println!(
+            "  {} [{}] {}:{}",
+            s.name.bold(),
+            s.kind.yellow(),
+            s.file.dimmed(),
+            s.line_start
+        );
+        if let Some(ref sig) = s.signature {
+            if !sig.is_empty() {
+                println!("    {}", sig.dimmed());
+            }
+        }
+    }
+}
+
+pub fn similar(symbol: &str, slug: Option<&str>, limit: i64) {
+    let slug = require_slug(slug);
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+
+    let found = q.find_symbol(symbol);
+    if found.is_empty() {
+        println!("{} No symbol found: {}", "!".yellow(), symbol);
+        return;
+    }
+
+    let results = q.similar_symbols(found[0].id, limit);
+    if results.is_empty() {
+        println!("{} No similar symbols found for: {}", "!".yellow(), symbol);
+        return;
+    }
+
+    println!(
+        "{} {} similar to \"{}\":\n",
+        ">>".cyan().bold(),
+        results.len().to_string().green(),
+        symbol.bold()
+    );
+    for s in &results {
+        println!(
+            "  {} [{}] {}:{} ({:.2})",
+            s.name.bold(),
+            s.kind.yellow(),
+            s.file.dimmed(),
+            s.line_start,
+            s.score
+        );
+    }
+}
+
+pub fn listeners(event: &str, slug: Option<&str>) {
+    let slug = require_slug(slug);
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+
+    let found = q.find_listeners(event);
+    if found.is_empty() {
+        println!("{} No listeners found for: {}", "!".yellow(), event);
+        return;
+    }
+
+    println!(
+        "{} {} listener(s) for \"{}\":\n",
+        ">>".cyan().bold(),
+        found.len().to_string().green(),
+        event.bold()
+    );
+    for s in &found {
+        println!(
+            "  {} [{}] {}:{}",
+            s.name.bold(),
+            s.kind.yellow(),
+            s.file.dimmed(),
+            s.line_start
+        );
+        if let Some(ref sig) = s.signature {
+            if !sig.is_empty() {
+                println!("    {}", sig.dimmed());
+            }
+        }
     }
 }
 

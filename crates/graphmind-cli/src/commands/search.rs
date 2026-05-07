@@ -7,7 +7,7 @@ use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use std::collections::HashMap;
 
-pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
+pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, offset: usize, include_content: bool) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,
         None => {
@@ -95,8 +95,8 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
                 .and_modify(|e| e.score += boost)
                 .or_insert_with(|| FusedHit {
                     name: c.name.clone(), kind: c.kind.clone(), file: c.file.clone(),
-                    line: c.line_start, signature: c.signature.clone(), score: boost,
-                    from_fts: false, from_sem: false, from_graph: true,
+                    line: c.line_start, signature: c.signature.clone(), content: c.content.clone(),
+                    score: boost, from_fts: false, from_sem: false, from_graph: true,
                 });
         }
         let callees = q.callees(&hit.name);
@@ -107,8 +107,8 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
                 .and_modify(|e| e.score += boost)
                 .or_insert_with(|| FusedHit {
                     name: c.name.clone(), kind: c.kind.clone(), file: c.file.clone(),
-                    line: c.line_start, signature: c.signature.clone(), score: boost,
-                    from_fts: false, from_sem: false, from_graph: true,
+                    line: c.line_start, signature: c.signature.clone(), content: c.content.clone(),
+                    score: boost, from_fts: false, from_sem: false, from_graph: true,
                 });
         }
     }
@@ -125,6 +125,10 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
     }
 
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    // apply offset before truncate
+    if offset > 0 {
+        results.drain(..offset.min(results.len()));
+    }
     results.truncate(limit as usize);
 
     if results.is_empty() {
@@ -165,6 +169,13 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>) {
         if let Some(ref s) = hit.signature {
             if !s.is_empty() {
                 println!("    {}", s.dimmed());
+            }
+        }
+        if include_content {
+            if let Some(ref content) = hit.content {
+                if !content.is_empty() {
+                    println!("{}", content.dimmed());
+                }
             }
         }
     }
@@ -210,6 +221,7 @@ struct FusedHit {
     file: String,
     line: i64,
     signature: Option<String>,
+    content: Option<String>,
     score: f64,
     from_fts: bool,
     from_sem: bool,
@@ -231,8 +243,8 @@ fn fuse_results(
             .and_modify(|e| { e.score += rrf; e.from_fts = true; })
             .or_insert_with(|| FusedHit {
                 name: s.name.clone(), kind: s.kind.clone(), file: s.file.clone(),
-                line: s.line_start, signature: s.signature.clone(), score: rrf,
-                from_fts: true, from_sem: false, from_graph: false,
+                line: s.line_start, signature: s.signature.clone(), content: s.content.clone(),
+                score: rrf, from_fts: true, from_sem: false, from_graph: false,
             });
     }
 
@@ -243,7 +255,7 @@ fn fuse_results(
             .and_modify(|e| { e.score += rrf; e.from_sem = true; })
             .or_insert_with(|| FusedHit {
                 name: r.symbol_name.clone(), kind: r.symbol_kind.clone(), file: r.file.clone(),
-                line: 0, signature: None, score: rrf,
+                line: 0, signature: None, content: None, score: rrf,
                 from_fts: false, from_sem: true, from_graph: false,
             });
     }

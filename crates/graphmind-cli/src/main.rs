@@ -45,6 +45,18 @@ enum Commands {
         name: String,
         #[arg(long, alias = "in")]
         slug: Option<String>,
+        /// Filter by file path
+        #[arg(long)]
+        file: Option<String>,
+        /// Filter by symbol kind (Function, Method, Class, Interface, Type)
+        #[arg(long)]
+        kind: Option<String>,
+        /// Max callers/callees to show (default 15)
+        #[arg(long, default_value = "15")]
+        limit: usize,
+        /// Skip first N callers/callees (default 0)
+        #[arg(long, default_value = "0")]
+        offset: usize,
     },
     /// Show function/symbol detail with source
     Fn {
@@ -62,6 +74,12 @@ enum Commands {
         /// Max callers/callees to show (default 15)
         #[arg(long, default_value = "15")]
         limit: usize,
+        /// Skip first N callers/callees (default 0)
+        #[arg(long, default_value = "0")]
+        offset: usize,
+        /// Show source content
+        #[arg(long)]
+        include_content: bool,
     },
     /// Show file dependencies
     Deps {
@@ -102,6 +120,53 @@ enum Commands {
         limit: i64,
         #[arg(long)]
         kind: Option<String>,
+        /// Skip first N results (default 0)
+        #[arg(long, default_value = "0")]
+        offset: usize,
+        /// Show source content in results
+        #[arg(long)]
+        include_content: bool,
+    },
+    /// Show file outline (hierarchical symbol tree)
+    Outline {
+        file: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+    },
+    /// Trace transitive callers of a symbol
+    WhoCalls {
+        symbol: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+        /// Max depth to trace (default 3)
+        #[arg(long, default_value = "3")]
+        depth: usize,
+    },
+    /// Find unreachable symbols (dead code)
+    DeadCode {
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+        /// Filter by kind (Function, Method, Class, ...)
+        #[arg(long)]
+        kind: Option<String>,
+        /// Max results (default 50)
+        #[arg(long, default_value = "50")]
+        limit: i64,
+    },
+    /// Find structurally similar symbols
+    Similar {
+        symbol: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+        /// Max results (default 10)
+        #[arg(long, default_value = "10")]
+        limit: i64,
+    },
+    /// Find listeners for an event
+    Listeners {
+        event: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
     },
     /// Show embedding index status or generate embeddings
     Embed {
@@ -374,8 +439,8 @@ fn main() {
         } => {
             commands::build::build(slug.as_deref(), all, full, watch);
         }
-        Commands::Query { name, slug } => {
-            commands::query::query_symbol(&name, slug.as_deref());
+        Commands::Query { name, slug, file, kind, limit, offset } => {
+            commands::query::query_symbol(&name, slug.as_deref(), file.as_deref(), kind.as_deref(), limit, offset);
         }
         Commands::Fn {
             name,
@@ -384,8 +449,17 @@ fn main() {
             file,
             kind,
             limit,
+            offset,
+            include_content,
         } => {
-            commands::query::fn_detail(&name, slug.as_deref(), no_tests, file.as_deref(), kind.as_deref(), limit);
+            commands::query::fn_detail(&name, slug.as_deref(), &commands::query::FnDetailOpts {
+                no_tests,
+                file: file.as_deref(),
+                kind: kind.as_deref(),
+                limit,
+                offset,
+                include_content,
+            });
         }
         Commands::Deps { file, slug } => {
             commands::query::deps(&file, slug.as_deref());
@@ -402,8 +476,23 @@ fn main() {
         Commands::Cycles { slug } => {
             commands::query::cycles(slug.as_deref());
         }
-        Commands::Search { query, slug, limit, kind } => {
-            commands::search::search(&query, slug.as_deref(), limit, kind.as_deref());
+        Commands::Search { query, slug, limit, kind, offset, include_content } => {
+            commands::search::search(&query, slug.as_deref(), limit, kind.as_deref(), offset, include_content);
+        }
+        Commands::Outline { file, slug } => {
+            commands::query::outline(&file, slug.as_deref());
+        }
+        Commands::WhoCalls { symbol, slug, depth } => {
+            commands::query::who_calls(&symbol, slug.as_deref(), depth);
+        }
+        Commands::DeadCode { slug, kind, limit } => {
+            commands::query::dead_code(slug.as_deref(), kind.as_deref(), limit);
+        }
+        Commands::Similar { symbol, slug, limit } => {
+            commands::query::similar(&symbol, slug.as_deref(), limit);
+        }
+        Commands::Listeners { event, slug } => {
+            commands::query::listeners(&event, slug.as_deref());
         }
         Commands::Embed { run, all, slug } => {
             if run {
