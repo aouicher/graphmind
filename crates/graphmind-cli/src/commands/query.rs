@@ -68,12 +68,12 @@ pub fn query_symbol(name: &str, slug: Option<&str>) {
     }
 }
 
-pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool) {
+pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool, file: Option<&str>, kind: Option<&str>, limit: usize) {
     let slug = require_slug(slug);
     let db = open_db(&slug);
     let q = GraphQueries::new(&db);
 
-    let symbols = q.find_symbol(name);
+    let symbols = q.find_symbol_filtered(name, file, kind);
     if symbols.is_empty() {
         println!("{} No symbol found: {}", "!".yellow(), name);
         return;
@@ -106,6 +106,31 @@ pub fn fn_detail(name: &str, slug: Option<&str>, no_tests: bool) {
         if let Some(ref content) = s.content {
             if !content.is_empty() {
                 println!("{}", content);
+            }
+        }
+
+        let callers = q.callers_filtered(&s.name, file);
+        let mut seen = std::collections::HashSet::new();
+        let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
+        if !unique_callers.is_empty() {
+            println!("  {} ({}):", "Callers".green(), unique_callers.len());
+            for c in unique_callers.iter().take(limit) {
+                println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
+            }
+            if unique_callers.len() > limit {
+                println!("    ... +{} more (use --limit)", unique_callers.len() - limit);
+            }
+        }
+        let callees = q.callees_filtered(&s.name, file);
+        seen.clear();
+        let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
+        if !unique_callees.is_empty() {
+            println!("  {} ({}):", "Callees".green(), unique_callees.len());
+            for c in unique_callees.iter().take(limit) {
+                println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
+            }
+            if unique_callees.len() > limit {
+                println!("    ... +{} more (use --limit)", unique_callees.len() - limit);
             }
         }
     }

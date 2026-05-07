@@ -53,6 +53,15 @@ enum Commands {
         slug: Option<String>,
         #[arg(long)]
         no_tests: bool,
+        /// Filter by file path to disambiguate common symbol names
+        #[arg(long)]
+        file: Option<String>,
+        /// Filter by symbol kind (Function, Method, Class, Interface, Type)
+        #[arg(long)]
+        kind: Option<String>,
+        /// Max callers/callees to show (default 15)
+        #[arg(long, default_value = "15")]
+        limit: usize,
     },
     /// Show file dependencies
     Deps {
@@ -372,8 +381,11 @@ fn main() {
             name,
             slug,
             no_tests,
+            file,
+            kind,
+            limit,
         } => {
-            commands::query::fn_detail(&name, slug.as_deref(), no_tests);
+            commands::query::fn_detail(&name, slug.as_deref(), no_tests, file.as_deref(), kind.as_deref(), limit);
         }
         Commands::Deps { file, slug } => {
             commands::query::deps(&file, slug.as_deref());
