@@ -31,3 +31,4 @@ tokio = { version = "1", features = ["full"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
 graphmind-embeddings = { path = "../graphmind-embeddings" }
+which = "6"

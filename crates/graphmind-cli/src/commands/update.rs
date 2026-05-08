@@ -12,22 +12,25 @@ fn current_version() -> &'static str {
 }
 
 fn get_latest_version() -> Result<String, String> {
-    let output = Command::new("curl")
-        .args([
-            "-fsSL",
-            "-H",
-            "Accept: application/vnd.github+json",
-            &format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest"),
-        ])
-        .output()
-        .map_err(|e| format!("Failed to check for updates: {e}"))?;
+    let use_rtk = which::which("rtk").is_ok();
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
+    let output = if use_rtk {
+        Command::new("rtk")
+            .args(["proxy", "curl", "-fsSL", "--max-time", "10",
+                   "-H", "Accept: application/vnd.github+json", &url])
+            .output()
+    } else {
+        Command::new("curl")
+            .args(["-fsSL", "--max-time", "10",
+                   "-H", "Accept: application/vnd.github+json", &url])
+            .output()
+    }.map_err(|e| format!("Failed to check for updates: {e}"))?;
 
     if !output.status.success() {
         return Err("Failed to fetch latest release info".to_string());
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
-    // Extract tag_name from JSON (avoid serde dependency)
     let tag = body
         .split("\"tag_name\"")
         .nth(1)

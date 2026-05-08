@@ -49,13 +49,13 @@ fn update_cache_path() -> PathBuf {
 }
 
 pub fn check_cli_update() {
-    // Skip if stdout is not a TTY (MCP mode, pipes, etc.)
+    let current = env!("CARGO_PKG_VERSION");
+    let Some(latest) = fetch_latest_version() else { return };
+
+    // Only display if stderr is a TTY
     if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         return;
     }
-
-    let current = env!("CARGO_PKG_VERSION");
-    let Some(latest) = fetch_latest_version() else { return };
 
     if version_cmp(&latest, current) > 0 {
         eprintln!(
@@ -77,24 +77,25 @@ fn fetch_latest_version() -> Option<String> {
         }
     }
 
-    let output = std::process::Command::new("curl")
-        .args([
-            "-fsSL",
-            "--max-time",
-            &FETCH_TIMEOUT_SECS.to_string(),
-            "-H",
-            "Accept: application/vnd.github+json",
-            LATEST_VERSION_URL,
-        ])
-        .output()
-        .ok()?;
-
+    let use_rtk = which::which("rtk").is_ok();
+    let timeout_str = FETCH_TIMEOUT_SECS.to_string();
+    let output = if use_rtk {
+        std::process::Command::new("rtk")
+            .args(["proxy", "curl", "-fsSL", "--max-time", &timeout_str,
+                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
+            .output()
+            .ok()?
+    } else {
+        std::process::Command::new("curl")
+            .args(["-fsSL", "--max-time", &timeout_str,
+                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
+            .output()
+            .ok()?
+    };
     if !output.status.success() {
         return None;
     }
-
     let body = String::from_utf8_lossy(&output.stdout);
-    // GitHub API returns tag_name like "v0.2.143"
     let latest = serde_json::from_str::<serde_json::Value>(&body)
         .ok()
         .and_then(|v| v.get("tag_name").and_then(|v| v.as_str()).map(|s| s.trim_start_matches('v').to_string()))?;
