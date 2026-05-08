@@ -13,11 +13,6 @@ use std::process::Command;
 // Update notice (cache-only, no network)
 // ---------------------------------------------------------------------------
 
-/// Versions that introduced breaking graph schema changes requiring --reset.
-const BREAKING_VERSIONS: &[&str] = &[
-    "0.2.134", // edge kind classification (listens/emits/instantiates/spawns)
-];
-
 pub fn update_notice() -> Option<String> {
     #[derive(serde::Deserialize)]
     struct UpdateCache { latest_version: String, fetched_at: u64 }
@@ -50,13 +45,7 @@ pub fn update_notice() -> Option<String> {
             "⚠ graphmind update available: {} → {} — run `graphmind update`",
             CURRENT, cache.latest_version
         );
-        let current_t = parse(CURRENT);
-        let latest_t = parse(&cache.latest_version);
-        let crosses_breaking = BREAKING_VERSIONS.iter().any(|&b| {
-            let bt = parse(b);
-            current_t < bt && bt <= latest_t
-        });
-        if crosses_breaking {
+        if graphmind_config::update_crosses_breaking(CURRENT, &cache.latest_version) {
             msg.push_str(
                 " — then run `graphmind build --reset --all` (graph schema changed)"
             );
