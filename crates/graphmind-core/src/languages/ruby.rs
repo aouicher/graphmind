@@ -107,6 +107,7 @@ fn collect_call_sites(
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
+                    kind: "calls".to_string(),
                 });
             }
         }

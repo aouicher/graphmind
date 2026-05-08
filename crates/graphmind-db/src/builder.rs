@@ -135,6 +135,7 @@ struct ParsedCallSite {
     caller: String,
     callee: String,
     receiver: Option<String>,
+    kind: String,
 }
 
 pub struct GraphBuilder {
@@ -335,6 +336,7 @@ impl GraphBuilder {
                         caller: cs.caller.clone(),
                         callee: cs.callee.clone(),
                         receiver: cs.receiver.clone(),
+                        kind: cs.kind.clone(),
                     }).collect(),
                 ));
             }
@@ -438,7 +440,7 @@ impl GraphBuilder {
                 if let Some(callee_id) = callee_id {
                     if let Err(e) = self.db.execute(
                         "INSERT INTO edges (from_id, to_id, kind, file, confidence) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![caller_id, callee_id, "calls", rel_path, confidence],
+                        params![caller_id, callee_id, cs.kind.as_str(), rel_path, confidence],
                     ) {
                         eprintln!("warn: failed to insert call edge in {}: {}", rel_path, e);
                     } else {

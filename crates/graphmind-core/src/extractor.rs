@@ -31,6 +31,7 @@ pub struct CallSite {
     pub callee: String,
     pub receiver: Option<String>,
     pub line: u32,
+    pub kind: String,
 }
 
 pub fn run_collect<F>(root: Node, source: &str, collect: F) -> Vec<Symbol>
@@ -348,6 +349,7 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
+                    kind: "calls".to_string(),
                 });
             }
         }

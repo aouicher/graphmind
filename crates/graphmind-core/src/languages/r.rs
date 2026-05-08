@@ -69,6 +69,7 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
                     callee,
                     receiver: None,
                     line: node.start_position().row as u32 + 1,
+                    kind: "calls".to_string(),
                 });
             }
         }
