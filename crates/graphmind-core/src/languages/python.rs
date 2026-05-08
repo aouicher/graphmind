@@ -105,13 +105,14 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
             } else {
                 (node_text(func, source), None)
             };
+            let kind = crate::extractor::classify_call_kind(&callee).to_string();
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
-                    kind: "calls".to_string(),
+                    kind,
                 });
             }
         }

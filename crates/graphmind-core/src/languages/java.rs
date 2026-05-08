@@ -98,13 +98,14 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
             let callee = node_text(name_node, source);
             let receiver = node.child_by_field_name("object")
                 .map(|o| crate::extractor::extract_receiver_name(o, source));
+            let kind = crate::extractor::classify_call_kind(&callee).to_string();
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
-                    kind: "calls".to_string(),
+                    kind,
                 });
             }
         }
