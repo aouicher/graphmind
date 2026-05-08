@@ -182,7 +182,12 @@ pub fn update(check_only: bool) {
             println!("  {} Updated to v{latest}", "✓".green().bold());
             println!();
             println!("  Run {} to refresh hooks and skills.", "graphmind setup".dimmed());
-            if update_crosses_breaking(current, &latest) {
+            // Check via version crossing OR stale DB schema
+            let schema_stale = graphmind_config::Registry::list().iter().any(|p| {
+                let db_path = graphmind_config::paths::graph_db_path(&p.slug);
+                graphmind_db::schema::schema_needs_reset(db_path.to_str().unwrap_or(""))
+            });
+            if update_crosses_breaking(current, &latest) || schema_stale {
                 println!();
                 println!(
                     "  {} This update changed the graph schema.",
