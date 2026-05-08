@@ -150,7 +150,29 @@ pub async fn check_cli_update() -> Result<UpdateInfo, String> {
 
 #[tauri::command]
 pub async fn update_cli() -> Result<CliStatus, String> {
-    install_cli().await
+    let cli_path = super::updater::find_graphmind_binary();
+    if cli_path == "graphmind" {
+        // CLI not installed yet — do a fresh install
+        return install_cli().await;
+    }
+
+    // Delegate to the CLI's own update logic (handles Homebrew symlinks correctly)
+    let status = std::process::Command::new(&cli_path)
+        .arg("update")
+        .status()
+        .map_err(|e| format!("Failed to run graphmind update: {e}"))?;
+
+    if !status.success() {
+        return Err("graphmind update failed".to_string());
+    }
+
+    // Return updated CLI status
+    let version = get_version(&cli_path);
+    Ok(CliStatus {
+        installed: true,
+        path: Some(cli_path),
+        version,
+    })
 }
 
 #[tauri::command]
