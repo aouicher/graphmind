@@ -119,16 +119,14 @@ fn download_and_replace(version: &str) -> Result<(), String> {
 
     fs::remove_file(&backup).ok();
 
-    // Migrate stale copies in other known locations (e.g. ~/.local/bin from old install.sh default)
+    // Remove stale copies in other known locations (e.g. ~/.local/bin from old install.sh default)
     if let Some(home) = dirs::home_dir() {
-        let other_locations = [
+        let stale_locations = [
             home.join(".local").join("bin").join("graphmind"),
-            home.join(".graphmind").join("bin").join("graphmind"),
         ];
-        for other in &other_locations {
-            if other != &bin_path && other.exists() && fs::copy(&bin_path, other).is_ok() {
-                #[cfg(target_os = "macos")]
-                Command::new("codesign").args(["-s", "-"]).arg(other).output().ok();
+        for stale in &stale_locations {
+            if stale != &bin_path && stale.exists() {
+                fs::remove_file(stale).ok();
             }
         }
     }
