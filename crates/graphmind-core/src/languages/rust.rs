@@ -132,6 +132,26 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
                     .unwrap_or_else(|| node_text(func, source));
                 let recv = func.child_by_field_name("path")
                     .map(|o| node_text(o, source));
+                // tokio::spawn / thread::spawn / rayon::spawn → spawns
+                let full = node_text(func, source);
+                if method == "spawn" && (full.contains("tokio") || full.contains("thread") || full.contains("rayon") || full.contains("task")) {
+                    let kind = "spawns".to_string();
+                    if let Some(caller) = active_fn {
+                        sites.push(CallSite {
+                            caller: caller.to_string(),
+                            callee: full,
+                            receiver: recv,
+                            line: node.start_position().row as u32 + 1,
+                            kind,
+                        });
+                    }
+                    for i in 0..node.named_child_count() {
+                        if let Some(child) = node.named_child(i) {
+                            collect_call_sites(child, source, sites, active_fn);
+                        }
+                    }
+                    return;
+                }
                 (method, recv)
             } else {
                 (node_text(func, source), None)

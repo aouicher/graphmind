@@ -92,6 +92,48 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
     };
     let active_fn = fn_name.as_deref().or(current_fn);
 
+    // go func() / go someFunc() → spawns
+    if node.kind() == "go_statement" {
+        if let Some(call) = node.named_child(0) {
+            let callee = if let Some(func) = call.child_by_field_name("function") {
+                if func.kind() == "selector_expression" {
+                    func.child_by_field_name("field")
+                        .map(|f| node_text(f, source))
+                        .unwrap_or_else(|| node_text(func, source))
+                } else {
+                    node_text(func, source)
+                }
+            } else {
+                node_text(call, source)
+            };
+            if let Some(caller) = active_fn {
+                sites.push(CallSite {
+                    caller: caller.to_string(),
+                    callee,
+                    receiver: None,
+                    line: node.start_position().row as u32 + 1,
+                    kind: "spawns".to_string(),
+                });
+            }
+        }
+    }
+
+    // ch <- val → emits
+    if node.kind() == "send_statement" {
+        if let Some(channel) = node.child_by_field_name("channel") {
+            let callee = node_text(channel, source);
+            if let Some(caller) = active_fn {
+                sites.push(CallSite {
+                    caller: caller.to_string(),
+                    callee,
+                    receiver: None,
+                    line: node.start_position().row as u32 + 1,
+                    kind: "emits".to_string(),
+                });
+            }
+        }
+    }
+
     if node.kind() == "call_expression" {
         if let Some(func) = node.child_by_field_name("function") {
             let (callee, receiver) = if func.kind() == "selector_expression" {

@@ -382,6 +382,7 @@ pub fn classify_call_kind(callee: &str) -> &'static str {
     match callee {
         "addEventListener" | "on" | "once" | "addListener" | "subscribe" | "observe" => "listens",
         "emit" | "dispatch" | "trigger" | "fire" | "publish" | "send" | "broadcast" => "emits",
+        "spawn" | "fork" => "spawns",
         _ => "calls",
     }
 }
