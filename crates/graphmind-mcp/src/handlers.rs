@@ -13,6 +13,11 @@ use std::process::Command;
 // Update notice (cache-only, no network)
 // ---------------------------------------------------------------------------
 
+/// Versions that introduced breaking graph schema changes requiring --reset.
+const BREAKING_VERSIONS: &[&str] = &[
+    "0.2.134", // edge kind classification (listens/emits/instantiates/spawns)
+];
+
 pub fn update_notice() -> Option<String> {
     #[derive(serde::Deserialize)]
     struct UpdateCache { latest_version: String, fetched_at: u64 }
@@ -32,7 +37,6 @@ pub fn update_notice() -> Option<String> {
         return None;
     }
 
-    // Simple semver comparison: split on '.' and compare numerically
     fn parse(v: &str) -> (u64, u64, u64) {
         let mut p = v.trim_start_matches('v').splitn(3, '.');
         let a = p.next().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -42,10 +46,22 @@ pub fn update_notice() -> Option<String> {
     }
 
     if parse(&cache.latest_version) > parse(CURRENT) {
-        Some(format!(
+        let mut msg = format!(
             "⚠ graphmind update available: {} → {} — run `graphmind update`",
             CURRENT, cache.latest_version
-        ))
+        );
+        let current_t = parse(CURRENT);
+        let latest_t = parse(&cache.latest_version);
+        let crosses_breaking = BREAKING_VERSIONS.iter().any(|&b| {
+            let bt = parse(b);
+            current_t < bt && bt <= latest_t
+        });
+        if crosses_breaking {
+            msg.push_str(
+                " — then run `graphmind build --reset --all` (graph schema changed)"
+            );
+        }
+        Some(msg)
     } else {
         None
     }
