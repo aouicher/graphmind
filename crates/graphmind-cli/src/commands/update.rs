@@ -6,6 +6,12 @@ use std::process::Command;
 
 const GITHUB_REPO: &str = "aouicher/graphmind-dist";
 
+/// Versions that introduced breaking changes to the graph schema or edge kinds.
+/// If the user is updating from a version older than any of these, they need --reset.
+const BREAKING_VERSIONS: &[&str] = &[
+    "0.2.134", // edge kind classification (listens/emits/instantiates/spawns)
+];
+
 fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
@@ -134,6 +140,23 @@ fn download_and_replace(version: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn version_tuple(v: &str) -> (u32, u32, u32) {
+    let mut parts = v.splitn(3, '.');
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+fn needs_reset(from: &str, to: &str) -> bool {
+    let from_t = version_tuple(from);
+    let to_t = version_tuple(to);
+    BREAKING_VERSIONS.iter().any(|&breaking| {
+        let b = version_tuple(breaking);
+        from_t < b && b <= to_t
+    })
+}
+
 pub fn update(check_only: bool) {
     let current = current_version();
 
@@ -177,6 +200,17 @@ pub fn update(check_only: bool) {
             println!("  {} Updated to v{latest}", "✓".green().bold());
             println!();
             println!("  Run {} to refresh hooks and skills.", "graphmind setup".dimmed());
+            if needs_reset(current, &latest) {
+                println!();
+                println!(
+                    "  {} This update changed the graph schema.",
+                    "Important:".yellow().bold()
+                );
+                println!(
+                    "  Run {} to reindex all projects with the new edge kinds.",
+                    "graphmind build --reset --all".bold()
+                );
+            }
         }
         Err(e) => {
             eprintln!("  {} {e}", "Error:".red().bold());

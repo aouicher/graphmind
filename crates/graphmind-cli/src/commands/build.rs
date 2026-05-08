@@ -157,6 +157,25 @@ fn build_single(slug: &str, full: bool, reset: bool) {
         result.deleted.to_string().red(),
         result.duration_ms
     );
+
+    if reset {
+        let other_projects: Vec<_> = Registry::list()
+            .into_iter()
+            .filter(|p| p.slug != slug)
+            .collect();
+        if !other_projects.is_empty() {
+            println!();
+            println!(
+                "  {} {} other project(s) may need a reset too.",
+                "Note:".yellow().bold(),
+                other_projects.len()
+            );
+            println!(
+                "  Run {} to reindex all projects.",
+                "graphmind build --reset --all".bold()
+            );
+        }
+    }
 }
 
 fn run_embedding_step(
