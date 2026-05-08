@@ -126,11 +126,9 @@ fn download_and_replace(version: &str) -> Result<(), String> {
             home.join(".graphmind").join("bin").join("graphmind"),
         ];
         for other in &other_locations {
-            if other != &bin_path && other.exists() {
-                if fs::copy(&bin_path, other).is_ok() {
-                    #[cfg(target_os = "macos")]
-                    Command::new("codesign").args(["-s", "-"]).arg(other).output().ok();
-                }
+            if other != &bin_path && other.exists() && fs::copy(&bin_path, other).is_ok() {
+                #[cfg(target_os = "macos")]
+                Command::new("codesign").args(["-s", "-"]).arg(other).output().ok();
             }
         }
     }
