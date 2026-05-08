@@ -5,7 +5,16 @@ use rmcp::model::{
 };
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt, transport::stdio};
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+static SESSION_NOTICE_SHOWN: OnceLock<()> = OnceLock::new();
+
+fn take_session_notice() -> Option<String> {
+    if SESSION_NOTICE_SHOWN.set(()).is_err() {
+        return None; // already shown this session
+    }
+    handlers::update_notice()
+}
 
 #[derive(Debug, Clone)]
 pub struct GraphmindServer;
@@ -260,6 +269,11 @@ impl ServerHandler for GraphmindServer {
             serde_json::to_string_pretty(&result).unwrap_or_default()
         };
 
+        let text = if let Some(notice) = take_session_notice() {
+            format!("{notice}\n\n{text}")
+        } else {
+            text
+        };
         let content = vec![Content::text(text)];
         if is_error {
             Ok(CallToolResult::error(content))

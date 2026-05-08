@@ -13,7 +13,7 @@ use std::process::Command;
 // Update notice (cache-only, no network)
 // ---------------------------------------------------------------------------
 
-fn update_notice() -> Option<String> {
+pub fn update_notice() -> Option<String> {
     #[derive(serde::Deserialize)]
     struct UpdateCache { latest_version: String, fetched_at: u64 }
 
