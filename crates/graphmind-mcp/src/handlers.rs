@@ -10,6 +10,48 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // ---------------------------------------------------------------------------
+// Update notice (cache-only, no network)
+// ---------------------------------------------------------------------------
+
+fn update_notice() -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct UpdateCache { latest_version: String, fetched_at: u64 }
+
+    const CACHE_TTL_SECS: u64 = 86400;
+    const CURRENT: &str = env!("CARGO_PKG_VERSION");
+
+    let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let cache: UpdateCache = serde_json::from_str(&raw).ok()?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now - cache.fetched_at > CACHE_TTL_SECS || cache.latest_version.is_empty() {
+        return None;
+    }
+
+    // Simple semver comparison: split on '.' and compare numerically
+    fn parse(v: &str) -> (u64, u64, u64) {
+        let mut p = v.trim_start_matches('v').splitn(3, '.');
+        let a = p.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let b = p.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let c = p.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        (a, b, c)
+    }
+
+    if parse(&cache.latest_version) > parse(CURRENT) {
+        Some(format!(
+            "⚠ graphmind update available: {} → {} — run `graphmind update`",
+            CURRENT, cache.latest_version
+        ))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config helpers
 // ---------------------------------------------------------------------------
 
@@ -714,10 +756,14 @@ fn handle_status(args: &Value) -> Value {
 
         let last_build = proj.last_build.as_deref().unwrap_or("never");
 
-        let text = format!(
+        let mut text = format!(
             ">> Project: {}\n  Path: {}\n  Last build: {}\n  Graph: {} symbols, {} edges, {} files\n  Languages: {}",
             proj.slug, proj.path, last_build, symbols, edges, files, lang_str
         );
+        if let Some(notice) = update_notice() {
+            text.push('\n');
+            text.push_str(&notice);
+        }
         text_content(&text)
     })
 }
@@ -755,13 +801,17 @@ fn handle_context(args: &Value) -> Value {
     let cl_store = CrossLinkStore::new(&cross_links_path());
     let cross_links = cl_store.find_by_project(&proj.slug);
 
-    json_text(&json!({
+    let mut out = json!({
         "project": proj.slug,
         "path": proj.path,
         "graph": graph_info,
         "recent_memory": recent_memory,
         "cross_links": cross_links
-    }))
+    });
+    if let Some(notice) = update_notice() {
+        out["update_notice"] = json!(notice);
+    }
+    json_text(&out)
 }
 
 // ---------------------------------------------------------------------------
