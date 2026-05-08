@@ -101,13 +101,14 @@ fn collect_call_sites(
             let callee = node_text(method_node, source);
             let receiver = node.child_by_field_name("receiver")
                 .map(|r| crate::extractor::extract_receiver_name(r, source));
+            let kind = crate::extractor::classify_call_kind(&callee).to_string();
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
-                    kind: "calls".to_string(),
+                    kind,
                 });
             }
         }

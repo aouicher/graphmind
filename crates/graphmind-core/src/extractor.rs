@@ -331,6 +331,21 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
     };
     let active_fn = fn_name.as_deref().or(current_fn);
 
+    if node.kind() == "new_expression" {
+        if let Some(constructor) = node.child_by_field_name("constructor") {
+            let callee = node_text(constructor, source);
+            if let Some(caller) = active_fn {
+                sites.push(CallSite {
+                    caller: caller.to_string(),
+                    callee,
+                    receiver: None,
+                    line: node.start_position().row as u32 + 1,
+                    kind: "instantiates".to_string(),
+                });
+            }
+        }
+    }
+
     if node.kind() == "call_expression" {
         if let Some(func) = node.child_by_field_name("function") {
             let (callee, receiver) = if func.kind() == "member_expression" {
@@ -343,13 +358,14 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
             } else {
                 (node_text(func, source), None)
             };
+            let kind = classify_call_kind(&callee);
             if let Some(caller) = active_fn {
                 sites.push(CallSite {
                     caller: caller.to_string(),
                     callee,
                     receiver,
                     line: node.start_position().row as u32 + 1,
-                    kind: "calls".to_string(),
+                    kind: kind.to_string(),
                 });
             }
         }
@@ -359,6 +375,14 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
         if let Some(child) = node.named_child(i) {
             collect_call_sites(child, source, sites, active_fn);
         }
+    }
+}
+
+pub fn classify_call_kind(callee: &str) -> &'static str {
+    match callee {
+        "addEventListener" | "on" | "once" | "addListener" | "subscribe" | "observe" => "listens",
+        "emit" | "dispatch" | "trigger" | "fire" | "publish" | "send" | "broadcast" => "emits",
+        _ => "calls",
     }
 }
 
