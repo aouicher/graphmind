@@ -33,7 +33,7 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
             std::process::exit(1);
         }
         for p in &projects {
-            build_single(&p.slug, full, reset);
+            build_single(&p.slug, full, reset, true);
         }
         return;
     }
@@ -49,10 +49,10 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
         }
     };
 
-    build_single(&slug, full, reset);
+    build_single(&slug, full, reset, false);
 }
 
-fn build_single(slug: &str, full: bool, reset: bool) {
+fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let project = match Registry::get(slug) {
         Some(p) => p,
         None => {
@@ -166,17 +166,21 @@ fn build_single(slug: &str, full: bool, reset: bool) {
         result.duration_ms
     );
 
-    if reset {
-        let other_projects: Vec<_> = Registry::list()
+    if reset && !is_all {
+        let stale_others: Vec<_> = Registry::list()
             .into_iter()
-            .filter(|p| p.slug != slug)
+            .filter(|p| {
+                if p.slug == slug { return false; }
+                let db = paths::graph_db_path(&p.slug);
+                graphmind_db::schema::schema_needs_reset(db.to_str().unwrap_or(""))
+            })
             .collect();
-        if !other_projects.is_empty() {
+        if !stale_others.is_empty() {
             println!();
             println!(
                 "  {} {} other project(s) may need a reset too.",
                 "Note:".yellow().bold(),
-                other_projects.len()
+                stale_others.len()
             );
             println!(
                 "  Run {} to reindex all projects.",
@@ -390,7 +394,7 @@ fn watch_project(slug: &str) {
     );
 
     // Initial build
-    build_single(slug, false, false);
+    build_single(slug, false, false, false);
 
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(Duration::from_secs(2), tx)
@@ -416,7 +420,7 @@ fn watch_project(slug: &str) {
                 });
                 if has_relevant {
                     println!("\n{} Change detected, rebuilding...", ">>".cyan().bold());
-                    build_single(slug, false, false);
+                    build_single(slug, false, false, false);
                     println!("{} Watching for changes...", ">>".cyan().bold());
                 }
             }
