@@ -38,6 +38,8 @@ enum Commands {
         #[arg(long)]
         full: bool,
         #[arg(long)]
+        reset: bool,
+        #[arg(long)]
         watch: bool,
     },
     /// Query a symbol
@@ -435,9 +437,10 @@ fn main() {
             slug,
             all,
             full,
+            reset,
             watch,
         } => {
-            commands::build::build(slug.as_deref(), all, full, watch);
+            commands::build::build(slug.as_deref(), all, full, reset, watch);
         }
         Commands::Query { name, slug, file, kind, limit, offset } => {
             commands::query::query_symbol(&name, slug.as_deref(), file.as_deref(), kind.as_deref(), limit, offset);

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
-pub fn build(slug: Option<&str>, all: bool, full: bool, watch: bool) {
+pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool) {
     if watch {
         let slug = match resolve_project_slug(&[slug]) {
             Some(s) => s,
@@ -33,7 +33,7 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, watch: bool) {
             std::process::exit(1);
         }
         for p in &projects {
-            build_single(&p.slug, full);
+            build_single(&p.slug, full, reset);
         }
         return;
     }
@@ -49,10 +49,10 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, watch: bool) {
         }
     };
 
-    build_single(&slug, full);
+    build_single(&slug, full, reset);
 }
 
-fn build_single(slug: &str, full: bool) {
+fn build_single(slug: &str, full: bool, reset: bool) {
     let project = match Registry::get(slug) {
         Some(p) => p,
         None => {
@@ -73,10 +73,17 @@ fn build_single(slug: &str, full: bool) {
     let db_path_str = db_path.to_string_lossy().to_string();
     let cache_dir_str = cache_dir.to_string_lossy().to_string();
 
+    if reset {
+        std::fs::remove_file(&db_path).ok();
+        std::fs::remove_dir_all(&cache_dir).ok();
+        println!("{} DB and cache cleared", ">>".cyan().bold());
+    }
+
     let mut builder = GraphBuilder::new(&db_path_str, &cache_dir_str);
 
     let mut options = BuildOptions {
-        full,
+        full: full || reset,
+        reset,
         ..BuildOptions::default()
     };
     for e in &project.exclude {
@@ -356,7 +363,7 @@ fn watch_project(slug: &str) {
     );
 
     // Initial build
-    build_single(slug, false);
+    build_single(slug, false, false);
 
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(Duration::from_secs(2), tx)
@@ -382,7 +389,7 @@ fn watch_project(slug: &str) {
                 });
                 if has_relevant {
                     println!("\n{} Change detected, rebuilding...", ">>".cyan().bold());
-                    build_single(slug, false);
+                    build_single(slug, false, false);
                     println!("{} Watching for changes...", ">>".cyan().bold());
                 }
             }

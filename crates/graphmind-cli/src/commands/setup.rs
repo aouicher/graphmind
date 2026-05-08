@@ -68,7 +68,7 @@ pub fn init(path: Option<&str>, skip_build: bool) {
 
     if !skip_build {
         print_step(3, 3, "Build code graph");
-        super::build::build(None, false, false, false);
+        super::build::build(None, false, false, false, false);
     } else {
         println!("  {} Build skipped (use {} to index later)", "[3/3]".cyan().bold(), "graphmind build".dimmed());
     }

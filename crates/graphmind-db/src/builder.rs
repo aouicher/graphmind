@@ -107,6 +107,7 @@ pub struct BuildResult {
 
 pub struct BuildOptions {
     pub full: bool,
+    pub reset: bool,
     pub exclude: Vec<String>,
     pub cancel: Option<Arc<AtomicBool>>,
 }
@@ -115,6 +116,7 @@ impl Default for BuildOptions {
     fn default() -> Self {
         Self {
             full: false,
+            reset: false,
             exclude: DEFAULT_EXCLUDE.iter().map(|s| s.to_string()).collect(),
             cancel: None,
         }
