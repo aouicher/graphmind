@@ -52,27 +52,35 @@ pub async fn install_app_update(app: AppHandle) -> Result<String, String> {
 
 /// Find graphmind binary: check known install paths first, then PATH.
 pub fn find_graphmind_binary() -> String {
-    // Check ~/.graphmind/bin first (primary install location)
+    // Resolve via PATH (same as the shell would) — handles all install locations
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let mut candidates: Vec<std::path::PathBuf> = path_env
+        .split(':')
+        .map(|dir| std::path::Path::new(dir).join("graphmind"))
+        .filter(|p| p.exists())
+        .collect();
+
+    // Also inject known locations that the app's PATH may not include
     if let Some(home) = dirs::home_dir() {
-        let local = home.join(".graphmind").join("bin").join("graphmind");
-        if local.exists() {
-            return local.to_string_lossy().to_string();
+        for extra in [
+            home.join(".local").join("bin").join("graphmind"),
+            home.join(".graphmind").join("bin").join("graphmind"),
+        ] {
+            if extra.exists() && !candidates.contains(&extra) {
+                candidates.push(extra);
+            }
         }
-        // Also check ~/.local/bin
-        let local2 = home.join(".local").join("bin").join("graphmind");
-        if local2.exists() {
-            return local2.to_string_lossy().to_string();
+    }
+    for extra in ["/usr/local/bin/graphmind", "/opt/homebrew/bin/graphmind"] {
+        let p = std::path::PathBuf::from(extra);
+        if p.exists() && !candidates.contains(&p) {
+            candidates.push(p);
         }
     }
-    // Try /usr/local/bin directly (no shell needed)
-    let usr_local = std::path::Path::new("/usr/local/bin/graphmind");
-    if usr_local.exists() {
-        return usr_local.to_string_lossy().to_string();
-    }
-    let usr_local2 = std::path::Path::new("/opt/homebrew/bin/graphmind");
-    if usr_local2.exists() {
-        return usr_local2.to_string_lossy().to_string();
-    }
-    // Last resort: rely on shell (may fail in app context)
-    "graphmind".to_string()
+
+    candidates
+        .into_iter()
+        .next()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "graphmind".to_string())
 }
