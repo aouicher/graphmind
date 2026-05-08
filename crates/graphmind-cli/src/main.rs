@@ -414,6 +414,7 @@ fn main() {
         commands::notices::check_setup_version();
         commands::notices::check_announcements();
         commands::notices::check_cli_update();
+        commands::notices::check_schema_version();
     }
 
     match cli.command {

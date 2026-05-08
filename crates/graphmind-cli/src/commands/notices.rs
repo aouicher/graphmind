@@ -190,6 +190,23 @@ pub fn dismiss(id: &str) {
     }
 }
 
+pub fn check_schema_version() {
+    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        return;
+    }
+    let projects = graphmind_config::Registry::list();
+    let stale_count = projects.iter().filter(|p| {
+        let db_path = graphmind_config::paths::graph_db_path(&p.slug);
+        graphmind_db::schema::schema_needs_reset(db_path.to_str().unwrap_or(""))
+    }).count();
+    if stale_count > 0 {
+        eprintln!(
+            "\x1b[33m[graphmind]\x1b[0m {} project(s) have an outdated graph index. Run \x1b[36mgraphmind build --reset --all\x1b[0m to reindex.",
+            stale_count
+        );
+    }
+}
+
 #[allow(dead_code)]
 pub fn get_active_announcements() -> Vec<Announcement> {
     let cache = load_or_fetch_cache();

@@ -92,6 +92,13 @@ pub fn status(slug: Option<&str>) {
     let db_path = paths::graph_db_path(&slug);
     if db_path.exists() {
         let db_path_str = db_path.to_string_lossy().to_string();
+        if graphmind_db::schema::schema_needs_reset(&db_path_str) {
+            println!(
+                "  {}: {}",
+                "Schema".bold(),
+                "outdated — run `graphmind build --reset` to reindex".yellow()
+            );
+        }
         if let Ok(db) = graphmind_db::schema::init_database(&db_path_str) {
             let queries = graphmind_db::queries::GraphQueries::new(&db);
             let stats = queries.stats();
