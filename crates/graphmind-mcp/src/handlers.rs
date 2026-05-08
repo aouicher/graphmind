@@ -479,10 +479,17 @@ fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, opts: &Sym
     let all_callees = gq.callees_filtered(symbol, file);
     let compact_callers = compact_edges(gq, &all_callers);
     let compact_callees = compact_edges(gq, &all_callees);
-    let callers_truncated = compact_callers.len() > limit;
-    let callees_truncated = compact_callees.len() > limit;
-    let callers: Vec<_> = compact_callers.iter().skip(offset).take(limit).collect();
-    let callees: Vec<_> = compact_callees.iter().skip(offset).take(limit).collect();
+
+    let is_import = |v: &&Value| v.get("edge_kind").and_then(|k| k.as_str()) == Some("imports");
+    let (import_callers_all, call_callers_all): (Vec<_>, Vec<_>) = compact_callers.iter().partition(is_import);
+    let (import_callees_all, call_callees_all): (Vec<_>, Vec<_>) = compact_callees.iter().partition(is_import);
+
+    let callers_truncated = call_callers_all.len() > limit;
+    let callees_truncated = call_callees_all.len() > limit;
+    let callers: Vec<_> = call_callers_all.iter().skip(offset).take(limit).collect();
+    let callees: Vec<_> = call_callees_all.iter().skip(offset).take(limit).collect();
+    let imported_by: Vec<_> = import_callers_all.iter().take(limit).collect();
+    let imports: Vec<_> = import_callees_all.iter().take(limit).collect();
 
     if format == "compact" {
         let mut lines = Vec::new();
@@ -505,14 +512,24 @@ fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, opts: &Sym
             }
         }
         if !callers.is_empty() {
-            let trunc = if callers_truncated { format!(" (showing {}/{}", limit, compact_callers.len()) + ")" } else { String::new() };
+            let trunc = if callers_truncated { format!(" (showing {}/{}", limit, call_callers_all.len()) + ")" } else { String::new() };
             lines.push(format!("\nCallers{}:", trunc));
             for c in &callers { lines.push(compact_edge_line(c)); }
         }
+        if !imported_by.is_empty() {
+            let trunc = if import_callers_all.len() > limit { format!(" (showing {}/{})", limit, import_callers_all.len()) } else { String::new() };
+            lines.push(format!("\nImported by{}:", trunc));
+            for c in &imported_by { lines.push(compact_edge_line(c)); }
+        }
         if !callees.is_empty() {
-            let trunc = if callees_truncated { format!(" (showing {}/{}", limit, compact_callees.len()) + ")" } else { String::new() };
+            let trunc = if callees_truncated { format!(" (showing {}/{}", limit, call_callees_all.len()) + ")" } else { String::new() };
             lines.push(format!("\nCallees{}:", trunc));
             for c in &callees { lines.push(compact_edge_line(c)); }
+        }
+        if !imports.is_empty() {
+            let trunc = if import_callees_all.len() > limit { format!(" (showing {}/{})", limit, import_callees_all.len()) } else { String::new() };
+            lines.push(format!("\nImports{}:", trunc));
+            for c in &imports { lines.push(compact_edge_line(c)); }
         }
         return text_content(&lines.join("\n"));
     }
@@ -523,15 +540,17 @@ fn query_symbol_filtered(gq: &GraphQueries, slug: &str, symbol: &str, opts: &Sym
         "definitions": definitions,
         "callers": callers,
         "callees": callees,
+        "imported_by": imported_by,
+        "imports": imports,
     });
     let obj = result.as_object_mut().unwrap();
     if callers_truncated {
         obj.insert("callers_truncated".into(), json!(true));
-        obj.insert("total_callers".into(), json!(compact_callers.len()));
+        obj.insert("total_callers".into(), json!(call_callers_all.len()));
     }
     if callees_truncated {
         obj.insert("callees_truncated".into(), json!(true));
-        obj.insert("total_callees".into(), json!(compact_callees.len()));
+        obj.insert("total_callees".into(), json!(call_callees_all.len()));
     }
     json_text(&result)
 }

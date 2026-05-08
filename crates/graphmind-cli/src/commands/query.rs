@@ -50,25 +50,47 @@ pub fn query_symbol(name: &str, slug: Option<&str>, file: Option<&str>, kind: Op
         let callers = q.callers_filtered(&s.name, file);
         let mut seen = std::collections::HashSet::new();
         let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
-        if !unique_callers.is_empty() {
-            println!("  {} ({}):", "Callers".green(), unique_callers.len());
-            for c in unique_callers.iter().skip(offset).take(limit) {
+        let call_callers: Vec<_> = unique_callers.iter().copied().filter(|c| c.edge_kind != "imports").collect();
+        let import_callers: Vec<_> = unique_callers.iter().copied().filter(|c| c.edge_kind == "imports").collect();
+        if !call_callers.is_empty() {
+            println!("  {} ({}):", "Callers".green(), call_callers.len());
+            for c in call_callers.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callers.len() > offset + limit {
-                println!("    ... +{} more (use --offset/--limit)", unique_callers.len() - offset - limit);
+            if call_callers.len() > offset + limit {
+                println!("    ... +{} more (use --offset/--limit)", call_callers.len() - offset - limit);
+            }
+        }
+        if !import_callers.is_empty() {
+            println!("  {} ({}):", "Imported by".cyan(), import_callers.len());
+            for c in import_callers.iter().take(limit) {
+                println!("    {} {}", c.name, c.file.dimmed());
+            }
+            if import_callers.len() > limit {
+                println!("    ... +{} more", import_callers.len() - limit);
             }
         }
         let callees = q.callees_filtered(&s.name, file);
         seen.clear();
         let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
-        if !unique_callees.is_empty() {
-            println!("  {} ({}):", "Callees".green(), unique_callees.len());
-            for c in unique_callees.iter().skip(offset).take(limit) {
+        let call_callees: Vec<_> = unique_callees.iter().copied().filter(|c| c.edge_kind != "imports").collect();
+        let import_callees: Vec<_> = unique_callees.iter().copied().filter(|c| c.edge_kind == "imports").collect();
+        if !call_callees.is_empty() {
+            println!("  {} ({}):", "Callees".green(), call_callees.len());
+            for c in call_callees.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callees.len() > offset + limit {
-                println!("    ... +{} more (use --offset/--limit)", unique_callees.len() - offset - limit);
+            if call_callees.len() > offset + limit {
+                println!("    ... +{} more (use --offset/--limit)", call_callees.len() - offset - limit);
+            }
+        }
+        if !import_callees.is_empty() {
+            println!("  {} ({}):", "Imports".cyan(), import_callees.len());
+            for c in import_callees.iter().take(limit) {
+                println!("    {} {}", c.name, c.file.dimmed());
+            }
+            if import_callees.len() > limit {
+                println!("    ... +{} more", import_callees.len() - limit);
             }
         }
     }
@@ -135,25 +157,47 @@ pub fn fn_detail(name: &str, slug: Option<&str>, opts: &FnDetailOpts<'_>) {
         let callers = q.callers_filtered(&s.name, file);
         let mut seen = std::collections::HashSet::new();
         let unique_callers: Vec<_> = callers.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
-        if !unique_callers.is_empty() {
-            println!("  {} ({}):", "Callers".green(), unique_callers.len());
-            for c in unique_callers.iter().skip(offset).take(limit) {
+        let call_callers: Vec<_> = unique_callers.iter().copied().filter(|c| c.edge_kind != "imports").collect();
+        let import_callers: Vec<_> = unique_callers.iter().copied().filter(|c| c.edge_kind == "imports").collect();
+        if !call_callers.is_empty() {
+            println!("  {} ({}):", "Callers".green(), call_callers.len());
+            for c in call_callers.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callers.len() > offset + limit {
-                println!("    ... +{} more (use --limit/--offset)", unique_callers.len() - offset - limit);
+            if call_callers.len() > offset + limit {
+                println!("    ... +{} more (use --limit/--offset)", call_callers.len() - offset - limit);
+            }
+        }
+        if !import_callers.is_empty() {
+            println!("  {} ({}):", "Imported by".cyan(), import_callers.len());
+            for c in import_callers.iter().take(limit) {
+                println!("    {} {}", c.name, c.file.dimmed());
+            }
+            if import_callers.len() > limit {
+                println!("    ... +{} more", import_callers.len() - limit);
             }
         }
         let callees = q.callees_filtered(&s.name, file);
         seen.clear();
         let unique_callees: Vec<_> = callees.iter().filter(|c| seen.insert((&c.name, &c.file, c.line_start))).collect();
-        if !unique_callees.is_empty() {
-            println!("  {} ({}):", "Callees".green(), unique_callees.len());
-            for c in unique_callees.iter().skip(offset).take(limit) {
+        let call_callees: Vec<_> = unique_callees.iter().copied().filter(|c| c.edge_kind != "imports").collect();
+        let import_callees: Vec<_> = unique_callees.iter().copied().filter(|c| c.edge_kind == "imports").collect();
+        if !call_callees.is_empty() {
+            println!("  {} ({}):", "Callees".green(), call_callees.len());
+            for c in call_callees.iter().skip(offset).take(limit) {
                 println!("    {} [{}] {}", c.name, c.edge_kind.dimmed(), c.file.dimmed());
             }
-            if unique_callees.len() > offset + limit {
-                println!("    ... +{} more (use --limit/--offset)", unique_callees.len() - offset - limit);
+            if call_callees.len() > offset + limit {
+                println!("    ... +{} more (use --limit/--offset)", call_callees.len() - offset - limit);
+            }
+        }
+        if !import_callees.is_empty() {
+            println!("  {} ({}):", "Imports".cyan(), import_callees.len());
+            for c in import_callees.iter().take(limit) {
+                println!("    {} {}", c.name, c.file.dimmed());
+            }
+            if import_callees.len() > limit {
+                println!("    ... +{} more", import_callees.len() - limit);
             }
         }
     }
