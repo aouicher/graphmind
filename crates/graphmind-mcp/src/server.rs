@@ -284,7 +284,54 @@ impl ServerHandler for GraphmindServer {
 }
 
 pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
+    // Refresh update cache in background so MCP-only users get update notices
+    std::thread::spawn(refresh_update_cache);
+
     let service = GraphmindServer.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
+}
+
+fn refresh_update_cache() {
+    #[derive(serde::Serialize, serde::Deserialize, Default)]
+    struct UpdateCache { fetched_at: u64, latest_version: String }
+
+    const TTL: u64 = 86400;
+    const URL: &str = "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest.json";
+
+    let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Skip if cache is fresh
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(cache) = serde_json::from_str::<UpdateCache>(&raw) {
+            if now - cache.fetched_at < TTL && !cache.latest_version.is_empty() {
+                return;
+            }
+        }
+    }
+
+    let output = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "5", URL])
+        .output();
+
+    let Ok(output) = output else { return };
+    if !output.status.success() { return; }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let latest = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(|s| s.to_string()));
+
+    let Some(latest) = latest else { return };
+    if latest.is_empty() { return; }
+
+    let cache = UpdateCache { fetched_at: now, latest_version: latest };
+    if let Ok(json) = serde_json::to_string(&cache) {
+        std::fs::write(&path, json).ok();
+    }
 }
