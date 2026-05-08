@@ -52,7 +52,18 @@ pub fn update_notice() -> Option<String> {
         }
         Some(msg)
     } else {
-        None
+        // Check if any registered project DB has a stale schema
+        let stale = graphmind_config::Registry::list().iter().any(|p| {
+            let db_path = graphmind_config::paths::graph_db_path(&p.slug);
+            graphmind_db::schema::schema_needs_reset(db_path.to_str().unwrap_or(""))
+        });
+        if stale {
+            Some(
+                "⚠ Graph index schema is outdated. Run `graphmind build --reset --all` to reindex with current edge kinds.".to_string()
+            )
+        } else {
+            None
+        }
     }
 }
 

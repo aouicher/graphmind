@@ -73,6 +73,14 @@ fn build_single(slug: &str, full: bool, reset: bool) {
     let db_path_str = db_path.to_string_lossy().to_string();
     let cache_dir_str = cache_dir.to_string_lossy().to_string();
 
+    if !reset && graphmind_db::schema::schema_needs_reset(&db_path_str) {
+        println!(
+            "{} Graph schema is outdated. Run {} to reindex.",
+            "Warning:".yellow().bold(),
+            "graphmind build --reset".bold()
+        );
+    }
+
     if reset {
         std::fs::remove_file(&db_path).ok();
         std::fs::remove_dir_all(&cache_dir).ok();

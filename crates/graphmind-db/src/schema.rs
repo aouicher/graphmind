@@ -1,6 +1,15 @@
 use rusqlite::Connection;
 
+/// Increment this when the graph schema or parsing output changes in a way
+/// that requires a full rebuild (--reset) to get correct results.
+pub const SCHEMA_VERSION: u32 = 2; // v0.2.134: edge kind classification
+
 pub const SCHEMA_SQL: &str = "
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS files (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT UNIQUE NOT NULL,
@@ -74,5 +83,34 @@ pub fn init_database(db_path: &str) -> rusqlite::Result<Connection> {
     }
 
     db.execute_batch(FTS_SQL)?;
+
+    // Write current schema version
+    db.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+        rusqlite::params![SCHEMA_VERSION.to_string()],
+    )?;
+
     Ok(db)
+}
+
+/// Returns the schema version stored in the DB, or 1 if not present (pre-meta DBs).
+pub fn read_schema_version(db_path: &str) -> u32 {
+    let Ok(db) = Connection::open(db_path) else { return 1 };
+    // meta table may not exist in old DBs
+    let result = db.query_row(
+        "SELECT value FROM meta WHERE key = 'schema_version'",
+        [],
+        |row| row.get::<_, String>(0),
+    );
+    result.ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+}
+
+/// Returns true if the DB at db_path needs a --reset (schema version is outdated).
+pub fn schema_needs_reset(db_path: &str) -> bool {
+    if !std::path::Path::new(db_path).exists() {
+        return false;
+    }
+    read_schema_version(db_path) < SCHEMA_VERSION
 }
