@@ -297,7 +297,7 @@ fn refresh_update_cache() {
     struct UpdateCache { fetched_at: u64, latest_version: String }
 
     const TTL: u64 = 86400;
-    const URL: &str = "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest.json";
+    const URL: &str = "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest";
 
     let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
 
@@ -315,9 +315,21 @@ fn refresh_update_cache() {
         }
     }
 
-    let output = std::process::Command::new("curl")
-        .args(["-fsSL", "--max-time", "5", URL])
-        .output();
+    let use_rtk = std::process::Command::new("which").arg("rtk").output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let output = if use_rtk {
+        std::process::Command::new("rtk")
+            .args(["proxy", "curl", "-fsSL", "--max-time", "5",
+                   "-H", "Accept: application/vnd.github+json", URL])
+            .output()
+    } else {
+        std::process::Command::new("curl")
+            .args(["-fsSL", "--max-time", "5",
+                   "-H", "Accept: application/vnd.github+json", URL])
+            .output()
+    };
 
     let Ok(output) = output else { return };
     if !output.status.success() { return; }
@@ -325,7 +337,8 @@ fn refresh_update_cache() {
     let body = String::from_utf8_lossy(&output.stdout);
     let latest = serde_json::from_str::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(|s| s.to_string()));
+        .and_then(|v| v.get("tag_name").and_then(|v| v.as_str())
+            .map(|s| s.trim_start_matches('v').to_string()));
 
     let Some(latest) = latest else { return };
     if latest.is_empty() { return; }
