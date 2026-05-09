@@ -1,5 +1,12 @@
-use graphmind_config::{paths, Registry, resolve_project_slug};
+use chrono::{DateTime, Local};
 use colored::Colorize;
+use graphmind_config::{paths, Registry, resolve_project_slug};
+
+fn fmt_local(utc: &str) -> String {
+    DateTime::parse_from_rfc3339(utc)
+        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|_| utc.to_string())
+}
 
 pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) {
     let project = Registry::register(path, slug, exclude);
@@ -42,10 +49,8 @@ pub fn list() {
 
     println!("{} registered project(s):\n", projects.len().to_string().cyan().bold());
     for p in &projects {
-        let build_info = p
-            .last_build
-            .as_deref()
-            .unwrap_or("never");
+        let build_info_owned = p.last_build.as_deref().map(fmt_local).unwrap_or_else(|| "never".to_string());
+        let build_info = build_info_owned.as_str();
         println!(
             "  {} {}",
             p.slug.cyan().bold(),
@@ -86,7 +91,7 @@ pub fn status(slug: Option<&str>) {
     println!(
         "  {}: {}",
         "Last build".bold(),
-        project.last_build.as_deref().unwrap_or("never").yellow()
+        project.last_build.as_deref().map(fmt_local).unwrap_or_else(|| "never".to_string()).yellow()
     );
 
     let db_path = paths::graph_db_path(&slug);

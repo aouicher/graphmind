@@ -4,14 +4,14 @@ use graphmind_memory::cross_links::CrossLinkStore;
 use graphmind_memory::store::MemoryStore;
 use serde_json::{json, Value};
 
-use crate::formatting::{err_text, json_text, text_content};
+use crate::formatting::{err_text, format_local_time, json_text, text_content};
 use crate::graph_helpers::{resolve_project, with_graph};
 
 pub(crate) fn handle_list_projects(_args: &Value) -> Value {
     let projects = graphmind_config::Registry::list();
     let mut lines = vec![format!(">> {} registered projects:\n", projects.len())];
     for p in &projects {
-        let last = p.last_build.as_deref().unwrap_or("never");
+        let last = p.last_build.as_deref().map(format_local_time).unwrap_or_else(|| "never".to_string());
         lines.push(format!("  {} — {} (built: {})", p.slug, p.path, last));
     }
     text_content(&lines.join("\n"))
@@ -32,7 +32,8 @@ pub(crate) fn handle_status(args: &Value) -> Value {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let last_build = proj.last_build.as_deref().unwrap_or("never");
+        let last_build = proj.last_build.as_deref().map(format_local_time).unwrap_or_else(|| "never".to_string());
+        let last_build = last_build.as_str();
 
         let mut text = format!(
             ">> Project: {}\n  Path: {}\n  Last build: {}\n  Graph: {} symbols, {} edges, {} files\n  Languages: {}",

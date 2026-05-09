@@ -1,4 +1,11 @@
+use chrono::{DateTime, Local};
 use serde_json::{json, Value};
+
+pub(crate) fn format_local_time(utc_rfc3339: &str) -> String {
+    DateTime::parse_from_rfc3339(utc_rfc3339)
+        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|_| utc_rfc3339.to_string())
+}
 
 pub(crate) const MAX_RESPONSE_BYTES: usize = 800_000;
 

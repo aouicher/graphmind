@@ -1962,6 +1962,7 @@ dependencies = [
 name = "graphmind-mcp"
 version = "0.2.161"
 dependencies = [
+ "chrono",
  "graphmind-config",
  "graphmind-db",
  "graphmind-embeddings",
