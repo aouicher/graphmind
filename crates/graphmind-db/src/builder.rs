@@ -105,11 +105,27 @@ pub struct BuildResult {
     pub errors: Vec<String>,
 }
 
+impl Default for BuildResult {
+    fn default() -> Self {
+        Self {
+            files_processed: 0,
+            symbols_found: 0,
+            edges_created: 0,
+            skipped: 0,
+            deleted: 0,
+            duration_ms: 0,
+            errors: Vec::new(),
+        }
+    }
+}
+
 pub struct BuildOptions {
     pub full: bool,
     pub reset: bool,
     pub exclude: Vec<String>,
     pub cancel: Option<Arc<AtomicBool>>,
+    /// If Some, only rebuild these files (relative paths). Bypasses hash cache for them.
+    pub only_files: Option<Vec<String>>,
 }
 
 impl Default for BuildOptions {
@@ -119,6 +135,7 @@ impl Default for BuildOptions {
             reset: false,
             exclude: DEFAULT_EXCLUDE.iter().map(|s| s.to_string()).collect(),
             cancel: None,
+            only_files: None,
         }
     }
 }
@@ -157,7 +174,16 @@ impl GraphBuilder {
 
     pub fn build(&mut self, project_path: &str, options: &BuildOptions) -> BuildResult {
         let start = std::time::Instant::now();
-        let files = self.collect_files(project_path, &options.exclude);
+        let mut files = self.collect_files(project_path, &options.exclude);
+
+        // In only_files mode, restrict to the requested files only
+        let only_set: Option<HashSet<String>> = options.only_files.as_ref().map(|v| v.iter().cloned().collect());
+        if let Some(ref only) = only_set {
+            files.retain(|f| {
+                let rel = pathdiff(f.full_path.to_str().unwrap_or(""), project_path);
+                only.contains(&rel)
+            });
+        }
 
         let mut processed = 0usize;
         let mut skipped = 0usize;
@@ -172,18 +198,23 @@ impl GraphBuilder {
                 .map(|f| pathdiff(f.full_path.to_str().unwrap_or(""), project_path))
                 .collect();
 
-            // Collect stale paths from both cache and DB
-            let cached_paths = self.cache.known_files();
-            let db_paths: Vec<String> = self.db
-                .prepare("SELECT DISTINCT path FROM files")
-                .and_then(|mut stmt| {
-                    stmt.query_map([], |row| row.get(0))
-                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                })
-                .unwrap_or_default();
-
-            let mut all_known: HashSet<String> = cached_paths.into_iter().collect();
-            all_known.extend(db_paths);
+            // In only_files mode: only check the targeted files for deletion (skip global stale scan)
+            // In normal mode: scan all known files from cache + DB
+            let all_known: HashSet<String> = if let Some(ref only) = only_set {
+                only.clone()
+            } else {
+                let cached_paths = self.cache.known_files();
+                let db_paths: Vec<String> = self.db
+                    .prepare("SELECT DISTINCT path FROM files")
+                    .and_then(|mut stmt| {
+                        stmt.query_map([], |row| row.get(0))
+                            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    })
+                    .unwrap_or_default();
+                let mut known: HashSet<String> = cached_paths.into_iter().collect();
+                known.extend(db_paths);
+                known
+            };
 
             for stale in &all_known {
                 if !current_paths.contains(stale) {
@@ -247,7 +278,9 @@ impl GraphBuilder {
                 }
             }
 
-            if !options.full && !self.cache.has_changed(&rel_path, &content) {
+            // In only_files mode, force rebuild for targeted files (bypass cache check)
+            let force = only_set.as_ref().map(|s| s.contains(&rel_path)).unwrap_or(false);
+            if !options.full && !force && !self.cache.has_changed(&rel_path, &content) {
                 skipped += 1;
                 continue;
             }

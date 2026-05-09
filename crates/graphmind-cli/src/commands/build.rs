@@ -1,19 +1,38 @@
 use graphmind_config::{paths, Registry, resolve_project_slug};
 use graphmind_config::config::{EmbeddingMode, load_config};
 use colored::Colorize;
-use graphmind_db::builder::{BuildOptions, GraphBuilder};
+use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
+use graphmind_db::schema::init_database;
 use graphmind_embeddings::factory::create_engine;
 use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool) {
+    if watch && all {
+        let projects = Registry::list();
+        if projects.is_empty() {
+            eprintln!("{} No projects registered", "Error:".red().bold());
+            std::process::exit(1);
+        }
+        let handles: Vec<_> = projects
+            .into_iter()
+            .map(|p| {
+                std::thread::spawn(move || watch_project(&p.slug))
+            })
+            .collect();
+        for h in handles {
+            let _ = h.join();
+        }
+        return;
+    }
+
     if watch {
         let slug = match resolve_project_slug(&[slug]) {
             Some(s) => s,
@@ -377,6 +396,170 @@ fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConf
     run_embedding_step(slug, &queries, emb_config, None);
 }
 
+fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
+    let project = match Registry::get(slug) {
+        Some(p) => p,
+        None => return BuildResult::default(),
+    };
+
+    let project_path = PathBuf::from(&project.path);
+    let rel_paths: Vec<String> = changed_paths
+        .iter()
+        .filter_map(|p| p.strip_prefix(&project_path).ok().map(|r| r.to_string_lossy().to_string()))
+        .collect();
+
+    if rel_paths.is_empty() {
+        return BuildResult::default();
+    }
+
+    let db_path = paths::graph_db_path(slug);
+    let cache_dir = paths::cache_dir_path(slug);
+    let mut builder = GraphBuilder::new(
+        &db_path.to_string_lossy(),
+        &cache_dir.to_string_lossy(),
+    );
+
+    let mut options = BuildOptions {
+        only_files: Some(rel_paths),
+        ..BuildOptions::default()
+    };
+    for e in &project.exclude {
+        if !options.exclude.contains(e) {
+            options.exclude.push(e.clone());
+        }
+    }
+    let config = Registry::get_config();
+    for e in &config.global_exclude {
+        if !options.exclude.contains(e) {
+            options.exclude.push(e.clone());
+        }
+    }
+
+    let result = builder.build(&project.path, &options);
+
+    // Update registry + meta.json
+    let queries = GraphQueries::new(builder.database());
+    let stats = queries.stats();
+    let langs = queries.language_breakdown();
+    let lang_names: Vec<String> = langs.iter().map(|l| l.language.clone()).collect();
+
+    Registry::update_project(slug, |p| {
+        p.last_build = Some(chrono::Utc::now().to_rfc3339());
+        p.languages.clone_from(&lang_names);
+    });
+
+    let meta = json!({
+        "slug": slug,
+        "path": project.path,
+        "last_build": chrono::Utc::now().to_rfc3339(),
+        "stats": { "symbols": stats.symbols, "edges": stats.edges, "files": stats.files },
+        "languages": langs.iter().map(|l| json!({"language": l.language, "count": l.count})).collect::<Vec<_>>(),
+        "build_result": {
+            "files_processed": result.files_processed,
+            "symbols_found": result.symbols_found,
+            "edges_created": result.edges_created,
+            "skipped": result.skipped,
+            "deleted": result.deleted,
+            "duration_ms": result.duration_ms,
+        }
+    });
+    std::fs::write(paths::meta_path(slug), serde_json::to_string_pretty(&meta).unwrap_or_default()).ok();
+
+    result
+}
+
+fn run_embedding_for_files(
+    slug: &str,
+    changed_rel_paths: &[String],
+    config: &graphmind_config::config::EmbeddingConfig,
+) {
+    if changed_rel_paths.is_empty() {
+        return;
+    }
+
+    let engine = match create_engine(config) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("{} Embeddings: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    let emb_db_path = paths::embedding_db_path(slug);
+    let store = match EmbeddingStore::open(&emb_db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{} Embedding store: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    let graph_db_path = paths::graph_db_path(slug);
+    let db = match init_database(&graph_db_path.to_string_lossy()) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{} Graph DB: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+    let queries = GraphQueries::new(&db);
+
+    // Delete old embeddings and collect new symbols for changed files
+    let mut symbols = Vec::new();
+    for file in changed_rel_paths {
+        store.delete_by_file(file).ok();
+        let file_symbols = queries.symbols_in_file(file);
+        symbols.extend(file_symbols);
+    }
+
+    let symbols: Vec<_> = symbols.iter()
+        .filter(|s| s.content.is_some() || s.signature.is_some())
+        .collect();
+
+    if symbols.is_empty() {
+        return;
+    }
+
+    let texts: Vec<String> = symbols.iter().map(|s| {
+        let mut t = format!("{} {} ({})", s.kind, s.name, s.file);
+        if let Some(sig) = &s.signature { t.push_str(&format!("\n{sig}")); }
+        if let Some(content) = &s.content {
+            let truncated: String = content.chars().take(512).collect();
+            t.push_str(&format!("\n{truncated}"));
+        }
+        t
+    }).collect();
+
+    const CHUNK_SIZE: usize = 256;
+    let mut total_embedded = 0usize;
+    for (i, chunk) in symbols.chunks(CHUNK_SIZE).enumerate() {
+        let chunk_texts: Vec<&str> = texts[i * CHUNK_SIZE..][..chunk.len()].iter().map(|t| t.as_str()).collect();
+        match engine.embed_batch(&chunk_texts) {
+            Ok(embeddings) => {
+                let rows: Vec<NewEmbeddingRow> = chunk.iter().zip(embeddings.iter()).map(|(sym, emb)| {
+                    NewEmbeddingRow {
+                        symbol_name: sym.name.clone(),
+                        symbol_kind: sym.kind.clone(),
+                        file: sym.file.clone(),
+                        text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].to_string(),
+                        embedding: float32_to_bytes(emb),
+                    }
+                }).collect();
+                if let Err(e) = store.insert_batch(&rows) {
+                    eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
+                } else {
+                    total_embedded += rows.len();
+                }
+            }
+            Err(e) => eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e),
+        }
+    }
+
+    if total_embedded > 0 {
+        println!("{} Embeddings updated ({} symbols)", ">>".cyan().bold(), total_embedded);
+    }
+}
+
 fn watch_project(slug: &str) {
     let project = match Registry::get(slug) {
         Some(p) => p,
@@ -393,11 +576,11 @@ fn watch_project(slug: &str) {
         project.path.dimmed()
     );
 
-    // Initial build
+    // Initial full build
     build_single(slug, false, false, false);
 
     let (tx, rx) = mpsc::channel();
-    let mut debouncer = new_debouncer(Duration::from_secs(2), tx)
+    let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
         .expect("Failed to create file watcher");
 
     debouncer
@@ -407,22 +590,80 @@ fn watch_project(slug: &str) {
 
     println!("{} Watching for changes... (Ctrl+C to stop)", ">>".cyan().bold());
 
+    // Extensions to watch — matches LANGUAGE_MAP in builder.rs
+    let watched_exts = [
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb",
+        ".tf", ".tfvars", ".yml", ".yaml", ".md", ".c", ".h", ".m", ".mm",
+        ".java", ".php", ".swift", ".sh", ".bash", ".zsh", ".pl", ".pm",
+        ".html", ".htm", ".toml", ".sql", ".cpp", ".cc", ".cxx", ".hpp",
+        ".hh", ".cs", ".kt", ".kts", ".dart", ".scala", ".sc", ".r", ".R",
+        ".graphql", ".gql", ".ps1", ".psm1",
+    ];
+
+    // Directory segments to ignore
+    let excluded_dirs = [
+        "node_modules", "dist", "build", "out", ".git", ".next", ".nuxt",
+        ".turbo", "coverage", "__pycache__", ".venv", "venv", "env",
+        "vendor", "target", "tmp", "log", "cdk.out", ".terraform", ".serverless",
+    ];
+
     loop {
         match rx.recv() {
             Ok(Ok(events)) => {
-                let dominated_exts = [
-                    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb", ".tf", ".yml", ".yaml",
-                ];
-                let has_relevant = events.iter().any(|e| {
-                    if e.kind != DebouncedEventKind::Any { return false; }
-                    let path_str = e.path.to_string_lossy();
-                    dominated_exts.iter().any(|ext| path_str.ends_with(ext))
-                });
-                if has_relevant {
-                    println!("\n{} Change detected, rebuilding...", ">>".cyan().bold());
-                    build_single(slug, false, false, false);
-                    println!("{} Watching for changes...", ">>".cyan().bold());
+                let changed: Vec<PathBuf> = events.iter()
+                    .filter(|e| e.kind == DebouncedEventKind::Any)
+                    .map(|e| e.path.clone())
+                    .filter(|p| {
+                        let s = p.to_string_lossy();
+                        // Must have a watched extension
+                        let has_ext = watched_exts.iter().any(|ext| s.ends_with(ext));
+                        // Must not be inside an excluded directory
+                        let is_excluded = excluded_dirs.iter().any(|dir| {
+                            s.contains(&format!("/{dir}/")) || s.contains(&format!("\\{dir}\\"))
+                        });
+                        has_ext && !is_excluded
+                    })
+                    .collect::<std::collections::HashSet<_>>()
+                    .into_iter()
+                    .collect();
+
+                if changed.is_empty() {
+                    continue;
                 }
+
+                let display: Vec<String> = changed.iter()
+                    .filter_map(|p| p.strip_prefix(&project.path).ok().map(|r| r.to_string_lossy().to_string()))
+                    .collect();
+
+                println!(
+                    "\n{} Change detected ({} file{}):",
+                    ">>".cyan().bold(),
+                    changed.len(),
+                    if changed.len() == 1 { "" } else { "s" }
+                );
+                for f in &display {
+                    println!("     {}", f.dimmed());
+                }
+
+                let result = build_changed_files(slug, &changed);
+
+                println!(
+                    "{} {} file{} | {} symbols | {} edges | {}ms",
+                    "OK".green().bold(),
+                    result.files_processed,
+                    if result.files_processed == 1 { "" } else { "s" },
+                    result.symbols_found.to_string().green(),
+                    result.edges_created.to_string().green(),
+                    result.duration_ms
+                );
+
+                // Incremental embedding update
+                let global_config = load_config();
+                if global_config.embedding.mode != EmbeddingMode::Disabled {
+                    run_embedding_for_files(slug, &display, &global_config.embedding);
+                }
+
+                println!("{} Watching for changes...", ">>".cyan().bold());
             }
             Ok(Err(e)) => {
                 eprintln!("{} Watch error: {:?}", "Error:".red().bold(), e);
