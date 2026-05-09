@@ -40,7 +40,7 @@ pub fn setup() {
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
     println!("  {} PATH configured in shell profiles", "✓".green());
-    println!("  {} 4 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse)", "✓".green());
+    println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
     println!("  {} MCP server configured (Claude Desktop + Claude Code)", "✓".green());
     println!("  {} CLAUDE.md instruction block updated", "✓".green());
@@ -239,7 +239,13 @@ Only fall back to grep for: string literals, config values, env vars, non-code p
 
 Invoke: `Skill(skill: "graphmind", args: "<your query>")`
 
-**Auto-memory**: After making architectural decisions, discovering important patterns, or establishing conventions, save them with `/gm-memory add <fact>`. Use `--priority` for facts that should always be injected (e.g. "auth tokens go through middleware X").
+**Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory during and after every session, without waiting for the user to ask:
+- Architectural decisions → `graphmind memory add "<decision>" --type decision`
+- Patterns/conventions discovered → `--type pattern` or `--type convention`
+- Critical always-needed facts → add `--priority` (injected every session)
+- Important bugs or gotchas → `--type bug`
+
+Save immediately when something is decided or discovered. Be selective — only facts useful in a future session. Skip task details and temporary state.
 
 <!-- GM:END -->"#;
 

@@ -189,6 +189,44 @@ jq -n --arg msg "$MSG" '{
 }'
 "#;
 
+const STOP_HOOK: &str = r#"#!/usr/bin/env bash
+# graphmind Stop hook — auto-save session knowledge to persistent memory
+
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+if ! command -v jq &>/dev/null; then exit 0; fi
+if ! command -v graphmind &>/dev/null; then exit 0; fi
+
+# Only run in graphmind-registered projects
+graphmind status &>/dev/null || exit 0
+
+INPUT=$(cat)
+STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // empty')
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+
+# Skip if no meaningful session (< 3 turns)
+TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
+if [ "$TURN_COUNT" -lt 3 ]; then exit 0; fi
+
+# Instruct Claude to synthesize and save memory
+MSG="Session ended ($TURN_COUNT turns). Review this session and save any reusable knowledge to graphmind memory:
+- Architectural decisions made (use: graphmind memory add \"<decision>\" --type decision)
+- Patterns or conventions established (--type pattern or --type convention)
+- Important bugs found or fixed (--type bug)
+- Critical facts that should always be in context (add --priority flag)
+
+Be selective: only save facts that would be useful in a FUTURE session on this project. Skip task details, temporary state, and anything obvious from the code.
+
+Use: graphmind memory add \"<content>\" [--type <type>] [--priority]"
+
+jq -n --arg msg "$MSG" '{
+  "hookSpecificOutput": {
+    "hookEventName": "Stop",
+    "additionalContext": $msg
+  }
+}'
+"#;
+
 const POST_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
 # graphmind PostToolUse hook — tracks hot files + nudges toward MCP tools
 
@@ -272,6 +310,10 @@ fn post_hook_path() -> PathBuf {
     hooks_dir().join("graphmind-post.sh")
 }
 
+fn stop_hook_path() -> PathBuf {
+    hooks_dir().join("graphmind-stop.sh")
+}
+
 fn settings_path() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
@@ -292,11 +334,14 @@ pub fn install_hook() {
     let prompt_p = prompt_hook_path();
     let post_p = post_hook_path();
 
+    let stop_p = stop_hook_path();
+
     let scripts = [
         (&hook_p, PRE_TOOL_HOOK, "PreToolUse"),
         (&session_p, SESSION_START_HOOK, "SessionStart"),
         (&prompt_p, USER_PROMPT_HOOK, "UserPromptSubmit"),
         (&post_p, POST_TOOL_HOOK, "PostToolUse"),
+        (&stop_p, STOP_HOOK, "Stop"),
     ];
 
     for (path, content, name) in &scripts {
@@ -324,7 +369,7 @@ pub fn install_hook() {
 }
 
 pub fn uninstall_hook() {
-    let paths = [hook_path(), session_hook_path(), prompt_hook_path(), post_hook_path()];
+    let paths = [hook_path(), session_hook_path(), prompt_hook_path(), post_hook_path(), stop_hook_path()];
 
     for path in &paths {
         if path.exists() {
@@ -480,6 +525,28 @@ fn register_in_settings() -> Result<(), String> {
         }
     }
 
+    // --- Stop ---
+    let stop_cmd = stop_hook_path().to_string_lossy().to_string();
+    let stop = hooks_obj
+        .entry("Stop")
+        .or_insert_with(|| serde_json::json!([]));
+    let stop_arr = stop.as_array_mut().ok_or("Stop is not an array")?;
+
+    let has_graphmind_stop = stop_arr.iter().any(|entry| {
+        entry.get("hooks").and_then(|h| h.as_array()).is_some_and(|hooks| {
+            hooks.iter().any(|h| {
+                h.get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("graphmind"))
+            })
+        })
+    });
+
+    if !has_graphmind_stop {
+        stop_arr.push(serde_json::json!({
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": &stop_cmd}]
+        }));
+    }
+
     let output = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
@@ -498,7 +565,7 @@ fn unregister_from_settings() -> Result<(), String> {
         .map_err(|e| format!("Failed to parse settings.json: {}", e))?;
 
     if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-        let events = ["PreToolUse", "SessionStart", "UserPromptSubmit", "PostToolUse"];
+        let events = ["PreToolUse", "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 
         for event in &events {
             if let Some(arr) = hooks.get_mut(*event).and_then(|p| p.as_array_mut()) {
