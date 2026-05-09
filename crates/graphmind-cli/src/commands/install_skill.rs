@@ -40,6 +40,7 @@ When you receive a `/gm` query, route as follows:
 | Full source + callers/callees | `graphmind fn <symbol>` |
 | Compact callers/callees (no source) | `graphmind query <symbol>` |
 | Outline/structure/what's in file | `graphmind outline <file>` |
+| Raw file content | `graphmind file <file>` |
 | Dependencies/imports/what depends on | `graphmind deps <file>` |
 | Impact/blast radius/what breaks | `graphmind fn-impact <symbol>` |
 | How do we reach this function | `graphmind who-calls <symbol>` |
@@ -54,6 +55,7 @@ When you receive a `/gm` query, route as follows:
 | Event listeners | `graphmind listeners <event>` |
 | Project status/health | `graphmind status` |
 | Rebuild index | `graphmind build` |
+| Raw file content | `graphmind file <file>` |
 
 If ambiguous, default to `graphmind search`.
 
@@ -92,6 +94,7 @@ const SUB_SKILLS: &[(&str, &str)] = &[
     ("gm-listeners", "---\ndescription: >\n  Find all functions/methods that listen to a domain event.\n  Use to trace event-driven architectures and understand side effects.\nallowed-tools: Bash\n---\n\n# /gm-listeners — Event listeners\n\nUsage: `/gm-listeners <event_name>`\n\nRuns `graphmind listeners <event>` to find all handlers for a domain event.\n\nExample: `/gm-listeners order_created`\n\n## Execution\n\nRun via Bash: `graphmind listeners <event>`\n"),
     ("gm-status", "---\ndescription: >\n  Health check: graph stats, symbol/edge count, last build time, languages.\n  Use to verify a project is indexed and up to date.\nallowed-tools: Bash\n---\n\n# /gm-status — Project status\n\nUsage: `/gm-status`\n\nRuns `graphmind status` to show graph stats for the current project.\n\n## Execution\n\nRun via Bash: `graphmind status`\n"),
     ("gm-build", "---\ndescription: >\n  Rebuild the code graph index. Use after adding/removing modules,\n  major refactors, or after git merge with structural changes.\nallowed-tools: Bash\n---\n\n# /gm-build — Rebuild graph\n\nUsage: `/gm-build`\n\nRuns `graphmind build` to reindex the project (fast, SHA256-cached).\n\n## Execution\n\nRun via Bash: `graphmind build`\n"),
+    ("gm-file", "---\ndescription: >\n  Read raw source content of a file from a registered project.\n  Use when you need the full file rather than individual symbols.\nallowed-tools: Bash\n---\n\n# /gm-file — Raw file content\n\nUsage: `/gm-file <file>`\n\nRuns `graphmind file <file>` to read a file by path relative to the project root.\n\n## Execution\n\nRun via Bash: `graphmind file <file>`\n"),
 ];
 
 pub fn install_skill() {

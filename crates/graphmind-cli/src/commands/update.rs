@@ -181,7 +181,8 @@ pub fn update(check_only: bool) {
         Ok(()) => {
             println!("  {} Updated to v{latest}", "✓".green().bold());
             println!();
-            println!("  Run {} to refresh hooks and skills.", "graphmind setup".dimmed());
+            println!("  {} Refreshing hooks and skills...", ">>".cyan().bold());
+            super::setup::setup();
             // Check via version crossing OR stale DB schema
             let schema_stale = graphmind_config::Registry::list().iter().any(|p| {
                 let db_path = graphmind_config::paths::graph_db_path(&p.slug);
