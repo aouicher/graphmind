@@ -23,6 +23,7 @@ You MUST query graphmind first. Only fall back to grep/find if graphmind cannot 
 | Git change impact | `graphmind diff-impact` | `gm_diff_impact` |
 | Project overview | `graphmind map` | `gm_map` |
 | File outline | `graphmind outline <file>` | `gm_outline` |
+| Raw file content | `graphmind file <file>` | `gm_file` |
 | Who calls chain | — | `gm_who_calls_chain` |
 | Dead code | — | `gm_dead_code` |
 | Cross-project | `graphmind cross query <symbol>` | `gm_cross_query` |

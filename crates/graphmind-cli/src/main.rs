@@ -135,6 +135,12 @@ enum Commands {
         #[arg(long, alias = "in")]
         slug: Option<String>,
     },
+    /// Read raw file content from a registered project
+    File {
+        file: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+    },
     /// Trace transitive callers of a symbol
     WhoCalls {
         symbol: String,
@@ -485,6 +491,9 @@ fn main() {
         }
         Commands::Outline { file, slug } => {
             commands::query::outline(&file, slug.as_deref());
+        }
+        Commands::File { file, slug } => {
+            commands::query::file_content(&file, slug.as_deref());
         }
         Commands::WhoCalls { symbol, slug, depth } => {
             commands::query::who_calls(&symbol, slug.as_deref(), depth);

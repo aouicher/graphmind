@@ -265,6 +265,7 @@ pub fn dispatch_tool(name: &str, args: &Value) -> Value {
         "gm_listeners" => handle_listeners(args),
         // New tools
         "gm_outline" => handle_outline(args),
+        "gm_file" => handle_file(args),
         "gm_who_calls_chain" => handle_who_calls_chain(args),
         "gm_dead_code" => handle_dead_code(args),
         "gm_export" => handle_export(args),
@@ -625,6 +626,20 @@ fn handle_impact(args: &Value) -> Value {
             "impacted_files": impacted,
             "count": impacted.len()
         }))
+    })
+}
+
+fn handle_file(args: &Value) -> Value {
+    let file = match args.get("file").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return err_text("Missing required parameter: file"),
+    };
+    with_graph(args, |_gq, proj| {
+        let path = std::path::Path::new(&proj.path).join(file);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => text_content(&format!("# {file} [{slug}]\n\n```\n{content}\n```", slug = proj.slug)),
+            Err(e) => err_text(&format!("Cannot read {}: {e}", path.display())),
+        }
     })
 }
 

@@ -196,8 +196,8 @@ graphmind install hook-git
 ┌─────────────────────────────────────────────┐
 │  Claude Code / MCP Client                    │
 ├─────────────────────────────────────────────┤
-│  MCP Server (rmcp SDK, stdio) — 24 tools     │
-│  gm_query · gm_fn · gm_deps · gm_impact    │
+│  MCP Server (rmcp SDK, stdio) — 25 tools     │
+│  gm_query · gm_fn · gm_file · gm_deps      │
 │  gm_outline · gm_who_calls_chain · gm_dead  │
 │  gm_export · gm_similar · gm_listeners      │
 │  gm_memory_search · gm_cross_query          │
@@ -361,6 +361,7 @@ graphmind diff-impact --staged
 graphmind map [slug]                              # most-connected files
 graphmind cycles [slug]                           # circular dependencies
 graphmind outline <file>                          # hierarchical symbol tree for a file
+graphmind file <file>                             # raw file content from project root
 graphmind who-calls <symbol>                      # transitive caller chain (BFS)
 graphmind who-calls <symbol> --depth 5            # limit traversal depth
 graphmind dead-code                               # symbols with no incoming edges
@@ -488,6 +489,7 @@ graphmind exposes 24 tools via MCP (Model Context Protocol):
 | `gm_search` | Hybrid search (FTS + semantic + graph) |
 | `gm_listeners` | Find event listeners by event name |
 | `gm_outline` | Hierarchical file structure with qualified names |
+| `gm_file` | Raw source content of a file |
 | `gm_who_calls_chain` | Transitive caller chain (BFS) |
 | `gm_dead_code` | Find symbols with no incoming edges |
 | `gm_export` | Export subgraph as Mermaid/DOT |

@@ -215,6 +215,14 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
+        make_tool("gm_file", "Read the raw source content of a file from a registered project. Use when you need the full file rather than individual symbols.", json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "File path relative to project root" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["file"]
+        })),
         make_tool("gm_similar", "Find structurally similar symbols (same kind, similar size and callee count). Useful for detecting duplication.", json!({
             "type": "object",
             "properties": {

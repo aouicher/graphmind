@@ -503,6 +503,27 @@ pub fn listeners(event: &str, slug: Option<&str>) {
     }
 }
 
+pub fn file_content(file: &str, slug: Option<&str>) {
+    let slug = require_slug(slug);
+    let project = match graphmind_config::Registry::get(&slug) {
+        Some(p) => p,
+        None => {
+            println!("{} Project {} not found", "!".yellow(), slug);
+            return;
+        }
+    };
+    let path = std::path::Path::new(&project.path).join(file);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            println!("{} {} [{}]", ">>".cyan().bold(), file.bold(), slug.dimmed());
+            println!("{}", content);
+        }
+        Err(e) => {
+            println!("{} Cannot read {}: {}", "!".yellow(), path.display(), e);
+        }
+    }
+}
+
 fn require_slug(slug: Option<&str>) -> String {
     match resolve_project_slug(&[slug]) {
         Some(s) => s,
