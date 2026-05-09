@@ -197,27 +197,34 @@ export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 if ! command -v jq &>/dev/null; then exit 0; fi
 if ! command -v graphmind &>/dev/null; then exit 0; fi
 
-# Only run in graphmind-registered projects
-graphmind status &>/dev/null || exit 0
-
 INPUT=$(cat)
-STOP_REASON=$(echo "$INPUT" | jq -r '.stop_reason // empty')
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
 # Skip if no meaningful session (< 3 turns)
 TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
 if [ "$TURN_COUNT" -lt 3 ]; then exit 0; fi
 
-# Instruct Claude to synthesize and save memory
+# Detect if we're in a registered project
+IN_PROJECT=false
+graphmind status &>/dev/null && IN_PROJECT=true
+
+if [ "$IN_PROJECT" = true ]; then
+  SCOPE_NOTE="Save project-specific facts without extra flags. For cross-project or user-level facts, add --global."
+  EXAMPLE="graphmind memory add \"<content>\" [--type <type>] [--priority] [--global]"
+else
+  SCOPE_NOTE="Not in a registered project — save with --global for facts that apply across sessions and projects."
+  EXAMPLE="graphmind memory add \"<content>\" --global [--type <type>] [--priority]"
+fi
+
 MSG="Session ended ($TURN_COUNT turns). Review this session and save any reusable knowledge to graphmind memory:
-- Architectural decisions made (use: graphmind memory add \"<decision>\" --type decision)
-- Patterns or conventions established (--type pattern or --type convention)
-- Important bugs found or fixed (--type bug)
-- Critical facts that should always be in context (add --priority flag)
+- Architectural decisions made → --type decision
+- Patterns or conventions established → --type pattern or --type convention
+- Important bugs found or fixed → --type bug
+- Critical facts that should always be in context → add --priority
 
-Be selective: only save facts that would be useful in a FUTURE session on this project. Skip task details, temporary state, and anything obvious from the code.
+$SCOPE_NOTE
+Be selective: only save facts useful in a FUTURE session. Skip task details, temporary state, and anything obvious from the code.
 
-Use: graphmind memory add \"<content>\" [--type <type>] [--priority]"
+$EXAMPLE"
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
