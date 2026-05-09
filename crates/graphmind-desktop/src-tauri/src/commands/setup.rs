@@ -92,6 +92,12 @@ pub async fn install_cli() -> Result<CliStatus, String> {
             .ok();
     }
 
+    // Run setup to install hooks, skills, CLAUDE.md, MCP configs
+    std::process::Command::new(&bin_path)
+        .arg("setup")
+        .status()
+        .ok();
+
     let version = get_version(&bin_path.to_string_lossy());
     Ok(CliStatus {
         installed: true,
