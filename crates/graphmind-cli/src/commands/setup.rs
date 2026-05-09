@@ -220,8 +220,10 @@ fn find_graphmind_binary() -> String {
     "graphmind".to_string()
 }
 
-const GM_BLOCK: &str = r#"<!-- GM:START -->
-<!-- GM:VERSION:0.2.82 -->
+fn gm_block() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(r#"<!-- GM:START -->
+<!-- GM:VERSION:{version} -->
 
 ## Mandatory: Code exploration via graphmind
 
@@ -253,7 +255,8 @@ Outside a registered project: always use `--global`.
 
 Be selective — only facts useful in a future session. Skip task details and temporary state.
 
-<!-- GM:END -->"#;
+<!-- GM:END -->"#)
+}
 
 fn install_shell_path() {
     let install_dir = home_dir().join(".graphmind").join("bin");
@@ -318,14 +321,14 @@ fn install_claude_md_block() {
         let re_end = content.find("<!-- GM:END -->")
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
-        format!("{}{}{}", &content[..re_start], GM_BLOCK, &content[re_end..])
+        format!("{}{}{}", &content[..re_start], gm_block(), &content[re_end..])
     } else if content.contains("<!-- OMC:START -->") {
         // Insert before OMC block — highest attention weight position
         let omc_start = content.find("<!-- OMC:START -->").unwrap();
-        format!("{}{}\n\n{}", &content[..omc_start], GM_BLOCK, &content[omc_start..])
+        format!("{}{}\n\n{}", &content[..omc_start], gm_block(), &content[omc_start..])
     } else {
         // No OMC block — prepend before other content
-        format!("{}\n\n{}", GM_BLOCK, content)
+        format!("{}\n\n{}", gm_block(), content)
     };
 
     fs::create_dir_all(claude_md.parent().unwrap()).ok();
