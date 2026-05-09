@@ -95,6 +95,7 @@ fn extension_to_language(ext: &str) -> Option<&'static str> {
 }
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct BuildResult {
     pub files_processed: usize,
     pub symbols_found: usize,
@@ -103,20 +104,6 @@ pub struct BuildResult {
     pub deleted: usize,
     pub duration_ms: u128,
     pub errors: Vec<String>,
-}
-
-impl Default for BuildResult {
-    fn default() -> Self {
-        Self {
-            files_processed: 0,
-            symbols_found: 0,
-            edges_created: 0,
-            skipped: 0,
-            deleted: 0,
-            duration_ms: 0,
-            errors: Vec::new(),
-        }
-    }
 }
 
 pub struct BuildOptions {
