@@ -243,49 +243,44 @@ jobs:
           SHA_X64=$(shasum -a 256 /tmp/graphmind-cli-macos-x64 | cut -d' ' -f1)
           SHA_LINUX=$(shasum -a 256 /tmp/graphmind-cli-linux-x64 | cut -d' ' -f1)
           TAP_REPO="aouicher/homebrew-graphmind"
-          cat > /tmp/graphmind.rb << RUBY
-          class Graphmind < Formula
-            desc "Local-first code intelligence CLI with MCP server"
-            homepage "https://github.com/${REPO}"
-            license "MIT"
-            version "${VERSION}"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
-                sha256 "${SHA_ARM64}"
-              else
-                url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
-                sha256 "${SHA_X64}"
-              end
-            end
-
-            on_linux do
-              url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
-              sha256 "${SHA_LINUX}"
-            end
-
-            def install
-              binary = Dir["graphmind-*"].first || "graphmind"
-              bin.install binary => "graphmind"
-            end
-
-            test do
-              assert_match "graphmind", shell_output("#{bin}/graphmind --help")
-            end
-          end
-          RUBY
-          sed -i 's/^          //' /tmp/graphmind.rb
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-tap
-          mkdir -p /tmp/homebrew-tap/Formula
-          cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
-          cd /tmp/homebrew-tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan tmp-formula
-          git add Formula/graphmind.rb
-          git commit -m "Update graphmind to ${TAG}"
-          git push origin tmp-formula:main --force
+          FORMULA="class Graphmind < Formula\n"
+          FORMULA+="  desc \"Local-first code intelligence CLI with MCP server\"\n"
+          FORMULA+="  homepage \"https://github.com/${REPO}\"\n"
+          FORMULA+="  license \"MIT\"\n"
+          FORMULA+="  version \"${VERSION}\"\n\n"
+          FORMULA+="  on_macos do\n"
+          FORMULA+="    if Hardware::CPU.arm?\n"
+          FORMULA+="      url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64\"\n"
+          FORMULA+="      sha256 \"${SHA_ARM64}\"\n"
+          FORMULA+="    else\n"
+          FORMULA+="      url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64\"\n"
+          FORMULA+="      sha256 \"${SHA_X64}\"\n"
+          FORMULA+="    end\n"
+          FORMULA+="  end\n\n"
+          FORMULA+="  on_linux do\n"
+          FORMULA+="    url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64\"\n"
+          FORMULA+="    sha256 \"${SHA_LINUX}\"\n"
+          FORMULA+="  end\n\n"
+          FORMULA+="  def install\n"
+          FORMULA+="    binary = Dir[\"graphmind-*\"].first || \"graphmind\"\n"
+          FORMULA+="    bin.install binary => \"graphmind\"\n"
+          FORMULA+="  end\n\n"
+          FORMULA+="  test do\n"
+          FORMULA+="    assert_match \"graphmind\", shell_output(\"\#{bin}/graphmind --help\")\n"
+          FORMULA+="  end\n"
+          FORMULA+="end\n"
+          ENCODED=$(printf '%b' "$FORMULA" | base64 -w 0)
+          CURRENT_SHA=$(gh api "repos/${TAP_REPO}/contents/Formula/graphmind.rb" --jq '.sha' 2>/dev/null || echo "")
+          if [ -n "$CURRENT_SHA" ]; then
+            gh api --method PUT "repos/${TAP_REPO}/contents/Formula/graphmind.rb" \
+              --field message="Update graphmind to ${TAG}" \
+              --field content="$ENCODED" \
+              --field sha="$CURRENT_SHA"
+          else
+            gh api --method PUT "repos/${TAP_REPO}/contents/Formula/graphmind.rb" \
+              --field message="Update graphmind to ${TAG}" \
+              --field content="$ENCODED"
+          fi
 
   publish-updater:
     needs: [release, release-assets, desktop-build]
