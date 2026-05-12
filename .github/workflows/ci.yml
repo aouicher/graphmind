@@ -282,9 +282,10 @@ jobs:
           cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan tmp-formula
           git add Formula/graphmind.rb
           git commit -m "Update graphmind to ${TAG}"
-          git push
+          git push origin tmp-formula:main --force
 
   publish-updater:
     needs: [release, release-assets, desktop-build]
