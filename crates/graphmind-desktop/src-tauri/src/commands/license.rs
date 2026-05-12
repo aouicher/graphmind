@@ -52,7 +52,9 @@ pub fn activate_license(key: String) -> Result<LicenseStatus, String> {
 
 #[tauri::command]
 pub fn open_upgrade_page(app: tauri::AppHandle) -> Result<(), String> {
-    tauri_plugin_shell::ShellExt::opener(&app)
-        .open("https://getgraphmind.com/pricing", None::<&str>)
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell()
+        .open("https://getgraphmind.com/pricing", None)
         .map_err(|e| format!("Impossible d'ouvrir le navigateur: {e}"))
 }
