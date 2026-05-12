@@ -6,6 +6,7 @@ members = [
     "crates/graphmind-embeddings",
     "crates/graphmind-mcp",
     "crates/graphmind-config",
+    "crates/graphmind-license",
     "crates/graphmind-cli",
     "crates/graphmind-desktop/src-tauri",
 ]

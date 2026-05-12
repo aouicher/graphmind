@@ -62,6 +62,9 @@ pub fn run() {
             commands::notices::run_setup,
             commands::notices::check_announcements,
             commands::notices::dismiss_announcement,
+            commands::license::get_license_status,
+            commands::license::activate_license,
+            commands::license::open_upgrade_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

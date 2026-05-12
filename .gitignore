@@ -11,3 +11,5 @@ dist/
 .omc/
 *.node
 .fastembed_cache/
+*.key
+*.pem

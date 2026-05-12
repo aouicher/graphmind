@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 graphmind-config = { path = "../../graphmind-config" }
+graphmind-license = { path = "../../graphmind-license" }
 graphmind-core = { path = "../../graphmind-core" }
 graphmind-db = { path = "../../graphmind-db" }
 graphmind-memory = { path = "../../graphmind-memory" }

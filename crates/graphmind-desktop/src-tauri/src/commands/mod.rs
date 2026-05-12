@@ -1,4 +1,5 @@
 pub mod graph;
+pub mod license;
 pub mod indexing;
 pub mod integrations;
 pub mod notices;

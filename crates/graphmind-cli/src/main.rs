@@ -263,6 +263,24 @@ enum Commands {
     },
     /// Start MCP server
     Mcp,
+    /// Manage licence (login, status, logout)
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum AuthAction {
+    /// Activate a licence key
+    Login {
+        #[arg(long)]
+        key: String,
+    },
+    /// Show current licence status
+    Status,
+    /// Remove licence key (revert to Free)
+    Logout,
 }
 
 #[derive(clap::Subcommand)]
@@ -645,5 +663,16 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::Auth { action } => match action {
+            AuthAction::Login { key } => {
+                commands::auth::login(&key);
+            }
+            AuthAction::Status => {
+                commands::auth::status();
+            }
+            AuthAction::Logout => {
+                commands::auth::logout();
+            }
+        },
     }
 }

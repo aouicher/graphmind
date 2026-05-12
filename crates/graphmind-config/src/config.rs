@@ -4,6 +4,57 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier {
+    Free,
+    Embeddings,
+    Pro,
+    Team,
+}
+
+impl Default for Tier {
+    fn default() -> Self {
+        Tier::Free
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Feature {
+    // Free — always available
+    LocalGraph,
+    LocalMcp,
+    LocalMemory,
+    LocalEmbeddings,
+    // Embeddings tier
+    RemoteEmbeddings,
+    SemanticSearch,
+    // Pro tier
+    RemoteApi,
+    RemoteMcp,
+    // Team tier
+    TeamSync,
+    TeamMemories,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LicenseConfig {
+    pub key: Option<String>,
+    #[serde(skip)]
+    pub cached_tier: Option<Tier>,
+    pub last_validated_at: Option<u64>,
+}
+
+impl Default for LicenseConfig {
+    fn default() -> Self {
+        Self {
+            key: None,
+            cached_tier: None,
+            last_validated_at: None,
+        }
+    }
+}
+
 /// Bump this when hooks, skills, or MCP config format changes.
 /// Users with a lower stored version get a "run graphmind setup" warning.
 pub const SETUP_VERSION: u32 = 2;
@@ -106,6 +157,8 @@ pub struct GlobalConfig {
     pub embedding: EmbeddingConfig,
     #[serde(default)]
     pub setup_version: u32,
+    #[serde(default)]
+    pub license: LicenseConfig,
 }
 
 impl Default for GlobalConfig {
@@ -118,6 +171,7 @@ impl Default for GlobalConfig {
             mcp: McpConfig::default(),
             embedding: EmbeddingConfig::default(),
             setup_version: 0,
+            license: LicenseConfig::default(),
         }
     }
 }
