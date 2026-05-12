@@ -131,7 +131,12 @@ main() {
 
     info "Installing graphmind ${version}"
 
-    asset_name="${BINARY}-${platform}"
+    case "$platform" in
+        aarch64-apple-darwin)     asset_name="graphmind-cli-macos-arm64" ;;
+        x86_64-apple-darwin)      asset_name="graphmind-cli-macos-x64" ;;
+        x86_64-unknown-linux-gnu) asset_name="graphmind-cli-linux-x64" ;;
+        *) error "No prebuilt binary for platform: $platform" ;;
+    esac
     download_url="https://github.com/${REPO}/releases/download/${version}/${asset_name}"
 
     TMP_DIR="$(mktemp -d)"
