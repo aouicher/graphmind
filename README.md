@@ -19,6 +19,10 @@ Every new Claude Code session starts from zero. Claude re-reads your entire code
 
 Everything is 100% local. No cloud. No open ports by default. No telemetry.
 
+## Benchmark
+
+![grep vs graphmind](assets/benchmark.png)
+
 ## Install
 
 ### Desktop app (macOS) — recommended
