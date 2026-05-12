@@ -25,6 +25,8 @@ Everything is 100% local. No cloud. No open ports by default. No telemetry.
 
 Download the `.dmg` from [Releases](https://github.com/aouicher/graphmind/releases). The app installs the CLI for you and runs a guided onboarding that configures MCP, hooks, skill, and embeddings — no terminal needed.
 
+![GraphMind desktop app](assets/screenshot-desktop.png)
+
 | Platform | Asset |
 |----------|-------|
 | macOS (Apple Silicon) | `GraphMind-macos-arm64.dmg` |
