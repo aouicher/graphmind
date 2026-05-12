@@ -220,6 +220,14 @@ jobs:
               gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$REPO" --clobber
             done
           done
+          for dir in artifacts/graphmind-updater-*; do
+            [ -d "$dir" ] || continue
+            ARCH=$(basename "$dir" | sed 's/graphmind-updater-//')
+            for file in "$dir"/*.tar.gz "$dir"/*.tar.gz.sig; do
+              [ -f "$file" ] || continue
+              gh release upload "$TAG" "$file" --repo "$REPO" --clobber
+            done
+          done
 
   publish-homebrew:
     needs: [release, release-assets]
