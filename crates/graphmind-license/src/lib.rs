@@ -156,7 +156,7 @@ impl LicenseManager {
                     Tier::Free => unreachable!(),
                 };
                 let email = self.email.as_deref().unwrap_or("—");
-                let expires = self.expires_at.map(|ts| format_timestamp(ts)).unwrap_or_else(|| "—".to_string());
+                let expires = self.expires_at.map(format_timestamp).unwrap_or_else(|| "—".to_string());
 
                 let mut lines = vec![
                     format!("Plan actuel : {tier_label}"),

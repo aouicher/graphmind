@@ -4,19 +4,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
+    #[default]
     Free,
     Embeddings,
     Pro,
     Team,
-}
-
-impl Default for Tier {
-    fn default() -> Self {
-        Tier::Free
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,22 +32,12 @@ pub enum Feature {
     TeamMemories,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LicenseConfig {
     pub key: Option<String>,
     #[serde(skip)]
     pub cached_tier: Option<Tier>,
     pub last_validated_at: Option<u64>,
-}
-
-impl Default for LicenseConfig {
-    fn default() -> Self {
-        Self {
-            key: None,
-            cached_tier: None,
-            last_validated_at: None,
-        }
-    }
 }
 
 /// Bump this when hooks, skills, or MCP config format changes.
