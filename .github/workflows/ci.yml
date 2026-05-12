@@ -15,19 +15,14 @@ permissions:
   contents: write
 
 jobs:
-  # --- CI: runs on every push and PR ---
-
   rust-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
       - uses: Swatinem/rust-cache@v2
-
       - run: cargo clippy --workspace --exclude graphmind-desktop --all-targets -- -D warnings
       - run: cargo test --workspace --exclude graphmind-desktop
 
@@ -47,41 +42,32 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: graphmind-x86_64-unknown-linux-gnu
-
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-
       - name: Inject version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
-
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
-
       - name: Package binary
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/graphmind dist/${{ matrix.binary }}
           chmod +x dist/${{ matrix.binary }}
-
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.binary }}
           path: dist/${{ matrix.binary }}
           if-no-files-found: error
           retention-days: 1
-
-  # --- Desktop app build (macOS, signed + notarized) ---
 
   desktop-build:
     needs: rust-check
@@ -96,33 +82,26 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             arch: x86_64
-
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
       - uses: Swatinem/rust-cache@v2
         with:
           key: desktop-${{ matrix.target }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install frontend dependencies
         working-directory: crates/graphmind-desktop
         run: npm ci
-
       - name: Inject version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
           perl -i -pe "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
-
       - name: Install Apple certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -131,17 +110,13 @@ jobs:
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
           echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
-
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
           security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
-
       - name: Build Tauri app (sign + notarize)
         working-directory: crates/graphmind-desktop
         env:
@@ -152,7 +127,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }}
-
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
@@ -160,7 +134,6 @@ jobs:
           path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 1
-
       - name: Upload updater artifact (tar.gz + sig)
         uses: actions/upload-artifact@v4
         with:
@@ -170,8 +143,6 @@ jobs:
             target/${{ matrix.target }}/release/bundle/macos/*.tar.gz.sig
           if-no-files-found: warn
           retention-days: 1
-
-  # --- CD: release on tag push ---
 
   release:
     needs: rust-check
@@ -183,7 +154,6 @@ jobs:
       prerelease: ${{ steps.create.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Create GitHub release
         id: create
         env:
@@ -208,152 +178,69 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Upload all assets to release
+      - name: Upload all assets to GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
-          # Upload CLI binaries with clean names
           cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
           cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
           cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
           gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$REPO" --clobber
-
-          # Upload desktop DMGs with clean names
           for dir in artifacts/graphmind-desktop-*; do
-            if [ -d "$dir" ]; then
-              ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
-              if [ "$ARCH" = "aarch64" ]; then
-                LABEL="arm64"
-              else
-                LABEL="x64"
-              fi
-              for file in "$dir"/*.dmg; do
-                cp "$file" "/tmp/GraphMind-macos-${LABEL}.dmg"
-                gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$REPO" --clobber
-              done
-            fi
+            [ -d "$dir" ] || continue
+            ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
+            LABEL=$([ "$ARCH" = "aarch64" ] && echo "arm64" || echo "x64")
+            for file in "$dir"/*.dmg; do
+              cp "$file" "/tmp/GraphMind-macos-${LABEL}.dmg"
+              gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$REPO" --clobber
+            done
           done
 
-  publish-dist:
-    needs: [release, release-assets, rust-build, desktop-build]
+  publish-homebrew:
+    needs: [release, release-assets]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Publish assets to graphmind-dist and update formula
+      - name: Update Homebrew formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
           VERSION="${TAG#v}"
-          DIST_REPO="aouicher/graphmind-dist"
-
-          # Create release on graphmind-dist
-          gh release create "$TAG" --repo "$DIST_REPO" --title "graphmind $TAG" --notes "graphmind $TAG" 2>/dev/null || true
-
-          # Upload CLI binaries with clean names
           cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
           cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
           cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
-          gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$DIST_REPO" --clobber
-          gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$DIST_REPO" --clobber
-          gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$DIST_REPO" --clobber
-
-          # Upload desktop DMGs with clean names
-          for dir in artifacts/graphmind-desktop-*; do
-            if [ -d "$dir" ]; then
-              ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
-              if [ "$ARCH" = "aarch64" ]; then
-                LABEL="arm64"
-              else
-                LABEL="x64"
-              fi
-              for file in "$dir"/*.dmg; do
-                cp "$file" "/tmp/GraphMind-macos-${LABEL}.dmg"
-                gh release upload "$TAG" "/tmp/GraphMind-macos-${LABEL}.dmg" --repo "$DIST_REPO" --clobber
-              done
-            fi
-          done
-
-          # Upload updater bundles (.app.tar.gz) if available
-          SIG_ARM64=""
-          SIG_X64=""
-          for dir in artifacts/graphmind-updater-*; do
-            if [ -d "$dir" ]; then
-              ARCH=$(basename "$dir" | sed 's/graphmind-updater-//')
-              for file in "$dir"/*.tar.gz; do
-                [ -f "$file" ] || continue
-                FNAME="GraphMind-macos-${ARCH}.app.tar.gz"
-                cp "$file" "/tmp/${FNAME}"
-                gh release upload "$TAG" "/tmp/${FNAME}" --repo "$DIST_REPO" --clobber
-              done
-              for file in "$dir"/*.tar.gz.sig; do
-                [ -f "$file" ] || continue
-                SIG_CONTENT=$(cat "$file")
-                if [ "$ARCH" = "aarch64" ]; then
-                  SIG_ARM64="$SIG_CONTENT"
-                else
-                  SIG_X64="$SIG_CONTENT"
-                fi
-              done
-            fi
-          done
-
-          # Generate latest.json for Tauri auto-updater
-          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          cat > /tmp/latest.json << JSON
-          {
-            "version": "${VERSION}",
-            "notes": "graphmind ${TAG}",
-            "pub_date": "${PUB_DATE}",
-            "platforms": {
-              "darwin-aarch64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/GraphMind-macos-aarch64.app.tar.gz",
-                "signature": "${SIG_ARM64}"
-              },
-              "darwin-x86_64": {
-                "url": "https://github.com/${DIST_REPO}/releases/download/${TAG}/GraphMind-macos-x86_64.app.tar.gz",
-                "signature": "${SIG_X64}"
-              }
-            }
-          }
-          JSON
-          sed -i 's/^          //' /tmp/latest.json
-          gh release upload "$TAG" /tmp/latest.json --repo "$DIST_REPO" --clobber
-
-          # Compute SHA256
           SHA_ARM64=$(shasum -a 256 /tmp/graphmind-cli-macos-arm64 | cut -d' ' -f1)
           SHA_X64=$(shasum -a 256 /tmp/graphmind-cli-macos-x64 | cut -d' ' -f1)
           SHA_LINUX=$(shasum -a 256 /tmp/graphmind-cli-linux-x64 | cut -d' ' -f1)
-
-          # Generate Homebrew formula
+          TAP_REPO="aouicher/homebrew-graphmind"
           cat > /tmp/graphmind.rb << RUBY
           class Graphmind < Formula
             desc "Local-first code intelligence CLI with MCP server"
-            homepage "https://github.com/aouicher/graphmind"
+            homepage "https://github.com/${REPO}"
             license "MIT"
             version "${VERSION}"
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
+                url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
                 sha256 "${SHA_ARM64}"
               else
-                url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
+                url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
                 sha256 "${SHA_X64}"
               end
             end
 
             on_linux do
-              url "https://github.com/${DIST_REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
+              url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
               sha256 "${SHA_LINUX}"
             end
 
@@ -368,13 +255,62 @@ jobs:
           end
           RUBY
           sed -i 's/^          //' /tmp/graphmind.rb
-
-          # Update formula in dist repo
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${DIST_REPO}.git" /tmp/graphmind-dist
-          cp /tmp/graphmind.rb /tmp/graphmind-dist/Formula/graphmind.rb
-          cd /tmp/graphmind-dist
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Formula
+          cp /tmp/graphmind.rb /tmp/homebrew-tap/Formula/graphmind.rb
+          cd /tmp/homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/graphmind.rb
           git commit -m "Update graphmind to ${TAG}"
           git push
+
+  publish-updater:
+    needs: [release, release-assets, desktop-build]
+    if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish latest.json for Tauri auto-updater
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+          SIG_ARM64=""
+          SIG_X64=""
+          for dir in artifacts/graphmind-updater-*; do
+            [ -d "$dir" ] || continue
+            ARCH=$(basename "$dir" | sed 's/graphmind-updater-//')
+            for file in "$dir"/*.tar.gz.sig; do
+              [ -f "$file" ] || continue
+              if [ "$ARCH" = "aarch64" ]; then
+                SIG_ARM64=$(cat "$file")
+              else
+                SIG_X64=$(cat "$file")
+              fi
+            done
+          done
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > /tmp/latest.json << JSON
+          {
+            "version": "${VERSION}",
+            "notes": "graphmind ${TAG}",
+            "pub_date": "${PUB_DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "url": "https://github.com/${REPO}/releases/download/${TAG}/GraphMind-macos-aarch64.app.tar.gz",
+                "signature": "${SIG_ARM64}"
+              },
+              "darwin-x86_64": {
+                "url": "https://github.com/${REPO}/releases/download/${TAG}/GraphMind-macos-x86_64.app.tar.gz",
+                "signature": "${SIG_X64}"
+              }
+            }
+          }
+          JSON
+          sed -i 's/^          //' /tmp/latest.json
+          gh release upload "$TAG" /tmp/latest.json --repo "$REPO" --clobber

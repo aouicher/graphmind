@@ -56,7 +56,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/aouicher/graphmind-dist/releases/latest/download/latest.json"
+        "https://github.com/aouicher/graphmind/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyMEMxMTI5Q0I5NTVGRkQKUldUOVg1WExLUkVNSWc3aEtLT2ZXcDNOUTZDMCtTVXovZHBkZTRGRTFFY1lFL1NHRXJ3V2M1eUoK"
     }

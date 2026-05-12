@@ -3,9 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 const ANNOUNCEMENTS_URL: &str =
-    "https://github.com/aouicher/graphmind-dist/releases/latest/download/announcements.json";
+    "https://github.com/aouicher/graphmind/releases/latest/download/announcements.json";
 const LATEST_VERSION_URL: &str =
-    "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest";
+    "https://api.github.com/repos/aouicher/graphmind/releases/latest";
 const CACHE_TTL_SECS: u64 = 86400;
 const FETCH_TIMEOUT_SECS: u32 = 2;
 

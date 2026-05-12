@@ -305,7 +305,7 @@ fn refresh_update_cache() {
     struct UpdateCache { fetched_at: u64, latest_version: String }
 
     const TTL: u64 = 86400;
-    const URL: &str = "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest";
+    const URL: &str = "https://api.github.com/repos/aouicher/graphmind/releases/latest";
 
     let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
 

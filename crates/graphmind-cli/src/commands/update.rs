@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-const GITHUB_REPO: &str = "aouicher/graphmind-dist";
+const GITHUB_REPO: &str = "aouicher/graphmind";
 
 fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")

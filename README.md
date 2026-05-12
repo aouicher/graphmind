@@ -47,7 +47,7 @@ brew install aouicher/graphmind/graphmind
 ### CLI — Linux (direct download)
 
 ```bash
-curl -fsSL https://github.com/aouicher/graphmind-dist/releases/latest/download/graphmind-cli-linux-x64 -o ~/.local/bin/graphmind
+curl -fsSL https://github.com/aouicher/graphmind/releases/latest/download/graphmind-cli-linux-x64 -o ~/.local/bin/graphmind
 chmod +x ~/.local/bin/graphmind
 ```
 
@@ -568,7 +568,9 @@ Everything is plaintext or SQLite — fully inspectable with standard tools.
 
 ## Contributing
 
-MIT License. Contributions welcome.
+Contributions are welcome. graphmind is MIT licensed.
+
+### Setup
 
 ```bash
 git clone https://github.com/aouicher/graphmind
@@ -577,3 +579,41 @@ cargo build --release -p graphmind-cli
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
 ```
+
+### Branch model
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable, protected. Only maintainers merge here. |
+| `feat/<name>` | New features |
+| `fix/<name>` | Bug fixes |
+| `chore/<name>` | Tooling, deps, CI |
+
+All changes go through a pull request targeting `main`. Direct pushes to `main` are blocked.
+
+### Opening a PR
+
+1. Fork the repo and create a branch from `main`
+2. Make your changes — keep commits atomic and descriptive
+3. Run `cargo clippy --workspace -- -D warnings` and `cargo test --workspace` — both must pass
+4. Open a PR against `main` with a clear description of what and why
+5. One maintainer review required before merge
+
+### Tagging and releases
+
+Releases are triggered by pushing a semver tag:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+The CI will build binaries for macOS (arm64, x64) and Linux (x64), create a GitHub release, update the Homebrew formula, and publish the Tauri auto-updater manifest — all automatically.
+
+Use `-rc` suffix for pre-releases: `v0.3.0-rc1` (published as pre-release, skipped by Homebrew).
+
+### Reporting issues
+
+Open a [GitHub issue](https://github.com/aouicher/graphmind/issues) with steps to reproduce, your OS, and the output of `graphmind status`.
+
+For security vulnerabilities, see [SECURITY.md](SECURITY.md).

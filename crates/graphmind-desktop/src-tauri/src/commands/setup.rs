@@ -54,7 +54,7 @@ pub async fn install_cli() -> Result<CliStatus, String> {
     };
 
     let url = format!(
-        "https://github.com/aouicher/graphmind-dist/releases/latest/download/{asset}"
+        "https://github.com/aouicher/graphmind/releases/latest/download/{asset}"
     );
 
     let tmp_path = bin_path.with_extension("tmp");
@@ -128,7 +128,7 @@ pub async fn check_cli_update() -> Result<UpdateInfo, String> {
             "-fsSL",
             "-H", "Accept: application/vnd.github+json",
             "-H", "User-Agent: graphmind-desktop",
-            "https://api.github.com/repos/aouicher/graphmind-dist/releases/latest",
+            "https://api.github.com/repos/aouicher/graphmind/releases/latest",
         ])
         .output()
         .map_err(|e| format!("Failed to check for updates: {e}"))?;
