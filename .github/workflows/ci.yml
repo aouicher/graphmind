@@ -26,9 +26,30 @@ jobs:
       - run: cargo clippy --workspace --exclude graphmind-desktop --all-targets -- -D warnings
       - run: cargo test --workspace --exclude graphmind-desktop
 
-  rust-build:
-    needs: rust-check
+  verify-tag-on-main:
     if: startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      on_main: ${{ steps.check.outputs.on_main }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check tag points to a commit on main
+        id: check
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $GITHUB_REF_NAME does not point to a commit on main — skipping release builds." >&2
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+  rust-build:
+    needs: [rust-check, verify-tag-on-main]
+    if: needs.verify-tag-on-main.outputs.on_main == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -70,8 +91,8 @@ jobs:
           retention-days: 1
 
   desktop-build:
-    needs: rust-check
-    if: startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push'
+    needs: [rust-check, verify-tag-on-main]
+    if: needs.verify-tag-on-main.outputs.on_main == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -145,8 +166,8 @@ jobs:
           retention-days: 1
 
   release:
-    needs: rust-check
-    if: startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push'
+    needs: [rust-check, verify-tag-on-main]
+    if: needs.verify-tag-on-main.outputs.on_main == 'true'
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
