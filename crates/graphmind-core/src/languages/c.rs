@@ -75,7 +75,7 @@ fn extract_declarator_name(node: Node, source: &str) -> Option<String> {
 fn build_c_signature(node: Node, source: &str) -> String {
     if let Some(decl) = node.child_by_field_name("declarator") {
         let text = node_text(decl, source);
-        if text.len() < 200 { text } else { text[..200].to_string() }
+        if text.len() < 200 { text } else { text.chars().take(200).collect() }
     } else {
         String::new()
     }

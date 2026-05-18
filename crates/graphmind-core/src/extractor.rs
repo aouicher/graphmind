@@ -429,7 +429,7 @@ pub fn extract_receiver_name(node: Node, source: &str) -> String {
         }
         _ => {
             let text = node_text(node, source);
-            if text.len() > 40 { text[..40].to_string() } else { text }
+            if text.len() > 40 { text.chars().take(40).collect() } else { text }
         }
     }
 }
