@@ -223,9 +223,17 @@ jobs:
           for dir in artifacts/graphmind-updater-*; do
             [ -d "$dir" ] || continue
             ARCH=$(basename "$dir" | sed 's/graphmind-updater-//')
-            for file in "$dir"/*.tar.gz "$dir"/*.tar.gz.sig; do
+            for file in "$dir"/*.tar.gz; do
               [ -f "$file" ] || continue
-              gh release upload "$TAG" "$file" --repo "$REPO" --clobber
+              DEST="/tmp/GraphMind-macos-${ARCH}.app.tar.gz"
+              cp "$file" "$DEST"
+              gh release upload "$TAG" "$DEST" --repo "$REPO" --clobber
+            done
+            for file in "$dir"/*.tar.gz.sig; do
+              [ -f "$file" ] || continue
+              DEST="/tmp/GraphMind-macos-${ARCH}.app.tar.gz.sig"
+              cp "$file" "$DEST"
+              gh release upload "$TAG" "$DEST" --repo "$REPO" --clobber
             done
           done
 
