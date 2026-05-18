@@ -232,6 +232,21 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
+        make_tool("gm_team_memories", "List shared team memories. Shows memories marked as shared (is_shared=true) across all team members. Use to see what the team has documented.", json!({
+            "type": "object",
+            "properties": {
+                "project": { "type": "string", "description": "Project slug (optional)" },
+                "search": { "type": "string", "description": "Search in memory content (optional)" },
+                "limit": { "type": "integer", "description": "Max results (default 20)" }
+            }
+        })),
+        make_tool("gm_team_who_knows", "Find team memories that mention a specific file or symbol. Useful to discover if someone has documented this code.", json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "File path to search for (optional)" },
+                "symbol": { "type": "string", "description": "Symbol name to search for (optional)" }
+            }
+        })),
     ]
 }
 

@@ -1,6 +1,7 @@
 use clap::Parser;
 
 mod commands;
+mod http_client;
 
 #[derive(Parser)]
 #[command(name = "graphmind", version, about = "Local-first code intelligence CLI")]
@@ -268,6 +269,40 @@ enum Commands {
         #[command(subcommand)]
         action: AuthAction,
     },
+    /// Team sync (graph + memories)
+    Team {
+        #[command(subcommand)]
+        action: TeamAction,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum TeamAction {
+    /// Configure team sync (team-id, server-url)
+    Init {
+        #[arg(long)]
+        team_id: Option<String>,
+        #[arg(long)]
+        server_url: Option<String>,
+    },
+    /// Push graph and/or memories to the team server
+    Push {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        memories_only: bool,
+        #[arg(long)]
+        graph_only: bool,
+    },
+    /// Pull team memories from the server
+    Pull {
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show team sync status
+    Status,
 }
 
 #[derive(clap::Subcommand)]
@@ -672,6 +707,20 @@ fn main() {
             }
             AuthAction::Logout => {
                 commands::auth::logout();
+            }
+        },
+        Commands::Team { action } => match action {
+            TeamAction::Init { team_id, server_url } => {
+                commands::team::init(team_id.as_deref(), server_url.as_deref());
+            }
+            TeamAction::Push { project, all, memories_only, graph_only } => {
+                commands::team::push(project.as_deref(), all, memories_only, graph_only);
+            }
+            TeamAction::Pull { project } => {
+                commands::team::pull(project.as_deref());
+            }
+            TeamAction::Status => {
+                commands::team::status();
             }
         },
     }

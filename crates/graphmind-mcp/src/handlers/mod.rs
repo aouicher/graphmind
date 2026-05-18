@@ -5,6 +5,7 @@ pub(crate) mod cross;
 pub(crate) mod search;
 pub(crate) mod analysis;
 pub(crate) mod export;
+pub(crate) mod team;
 
 use crate::formatting::err_text;
 use serde_json::Value;
@@ -105,6 +106,8 @@ pub fn dispatch_tool(name: &str, args: &Value) -> Value {
         "gm_similar" => analysis::handle_similar(args),
         // Export
         "gm_export" => export::handle_export(args),
+        "gm_team_memories" => team::handle_team_memories(args),
+        "gm_team_who_knows" => team::handle_team_who_knows(args),
         _ => err_text(&format!("Unknown tool: {name}")),
     }
 }

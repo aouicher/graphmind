@@ -29,6 +29,16 @@ pub struct MemoryEntry {
     pub session: String,
     #[serde(default)]
     pub priority: bool,
+    #[serde(default = "default_is_shared")]
+    pub is_shared: bool,
+    #[serde(default)]
+    pub remote_id: Option<String>,
+    #[serde(default)]
+    pub synced_at: Option<u64>,
+}
+
+fn default_is_shared() -> bool {
+    true
 }
 
 pub struct AddOptions {
@@ -76,6 +86,9 @@ impl MemoryStore {
             tags: options.tags,
             session: now[..10].to_string(),
             priority: options.priority,
+            is_shared: true,
+            remote_id: None,
+            synced_at: None,
         };
 
         let file_path = if entry.global {

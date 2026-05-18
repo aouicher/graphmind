@@ -132,6 +132,29 @@ impl Default for EmbeddingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamConfig {
+    pub team_id: String,
+    pub server_url: String,
+    pub last_memory_push: Option<u64>,
+    pub last_memory_pull: Option<u64>,
+    pub last_graph_sync: HashMap<String, u64>,
+    pub init_reminder_shown: bool,
+}
+
+impl Default for TeamConfig {
+    fn default() -> Self {
+        Self {
+            team_id: String::new(),
+            server_url: "https://graphmind-server.fly.dev".to_string(),
+            last_memory_push: None,
+            last_memory_pull: None,
+            last_graph_sync: HashMap::new(),
+            init_reminder_shown: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub version: String,
     pub projects: HashMap<String, ProjectConfig>,
@@ -144,6 +167,8 @@ pub struct GlobalConfig {
     pub setup_version: u32,
     #[serde(default)]
     pub license: LicenseConfig,
+    #[serde(default)]
+    pub team: Option<TeamConfig>,
 }
 
 impl Default for GlobalConfig {
@@ -157,6 +182,7 @@ impl Default for GlobalConfig {
             embedding: EmbeddingConfig::default(),
             setup_version: 0,
             license: LicenseConfig::default(),
+            team: None,
         }
     }
 }

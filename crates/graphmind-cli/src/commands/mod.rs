@@ -16,4 +16,5 @@ pub mod search;
 pub mod session;
 pub mod setup;
 pub mod sync;
+pub mod team;
 pub mod update;

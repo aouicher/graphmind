@@ -33,3 +33,6 @@ notify = "7"
 notify-debouncer-mini = "0.5"
 graphmind-embeddings = { path = "../graphmind-embeddings" }
 which = "6"
+ureq = { version = "2", features = ["json"] }
+sha2 = "0.10"
+hex = "0.4"

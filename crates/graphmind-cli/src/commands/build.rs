@@ -1,5 +1,7 @@
 use graphmind_config::{paths, Registry, resolve_project_slug};
-use graphmind_config::config::{EmbeddingMode, load_config};
+use graphmind_config::config::{EmbeddingMode, load_config, save_config};
+use graphmind_license::LicenseManager;
+use graphmind_config::config::Tier;
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
@@ -184,6 +186,34 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
         result.deleted.to_string().red(),
         result.duration_ms
     );
+
+    // Auto-push réseau UNIQUEMENT si tier Team ET TeamConfig présent.
+    // Pro = push manuel uniquement. Free/Embeddings = zéro appel réseau.
+    {
+        let team_config = load_config();
+        let license = LicenseManager::from_config(&team_config);
+        if license.tier() == &Tier::Team {
+            if let Some(team_cfg) = team_config.team.as_ref() {
+                if !team_cfg.team_id.is_empty() {
+                    let slug_owned = slug.to_string();
+                    std::thread::spawn(move || {
+                        if let Err(e) = crate::commands::team::auto_push_graph(&slug_owned) {
+                            eprintln!("[team] sync failed: {e}");
+                        }
+                    });
+                } else if !team_cfg.init_reminder_shown {
+                    eprintln!(
+                        "[team] Lance 'graphmind team init' pour activer la sync automatique."
+                    );
+                    let mut cfg = load_config();
+                    if let Some(t) = cfg.team.as_mut() {
+                        t.init_reminder_shown = true;
+                    }
+                    save_config(&cfg);
+                }
+            }
+        }
+    }
 
     if reset && !is_all {
         let stale_others: Vec<_> = Registry::list()
