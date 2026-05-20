@@ -7,7 +7,7 @@
 
 GraphMind turns your codebase into a knowledge graph your AI can query, navigate, and remember. Ask about dead code, dependencies, or blast radius — and get answers grounded in your actual architecture.
 
-Up to **5,700× fewer tokens** than raw search. Works with Claude Code, Cursor, Windsurf, Cline, Zed, Continue, and any MCP-compatible AI assistant.
+Up to **5,700× fewer tokens** than raw search (~10M tokens saved per session). Works with Claude Code, Cursor, Windsurf, Cline, Zed, Continue, and any MCP-compatible AI assistant.
 
 ## Why GraphMind
 
@@ -25,6 +25,8 @@ Everything runs locally. No cloud. No open ports by default. No telemetry.
 
 ![grep vs graphmind](assets/benchmark.png)
 
+Comparison of token usage: `grep -r` (raw file search) vs `graphmind search` for the same query on a ~100k LOC codebase. graphmind returns ranked, structured results in under 300 tokens vs 1.5M+ for raw grep output.
+
 ## Install
 
 ### Desktop app (macOS) — recommended
@@ -37,6 +39,8 @@ Download the `.dmg` from [Releases](https://github.com/aouicher/graphmind/releas
 |----------|-------|
 | macOS (Apple Silicon) | `GraphMind-macos-arm64.dmg` |
 | macOS (Intel) | `GraphMind-macos-x64.dmg` |
+
+> **Linux / Windows**: CLI only — use the shell script or direct download below.
 
 ### CLI — shell script (macOS/Linux)
 
@@ -204,7 +208,7 @@ graphmind install hook-git
 ┌─────────────────────────────────────────────┐
 │  Claude Code / MCP Client                    │
 ├─────────────────────────────────────────────┤
-│  MCP Server (rmcp SDK, stdio) — 25 tools     │
+│  MCP Server (rmcp SDK, stdio) — 27 tools     │
 │  gm_query · gm_fn · gm_file · gm_deps      │
 │  gm_outline · gm_who_calls_chain · gm_dead  │
 │  gm_export · gm_similar · gm_listeners      │
@@ -430,6 +434,24 @@ graphmind exclude add grafana-data --global
 graphmind exclude remove grafana-data
 ```
 
+### Team Sync *(Pro/Team tiers)*
+
+Share your code graph and architectural memories across your team. Every member gets the same structural understanding without re-indexing.
+
+```bash
+graphmind team init [--team-id <id>]   # connect to a team
+graphmind team push [slug]             # push graph + shared memories
+graphmind team push --memories-only    # push memories only
+graphmind team push --graph-only       # push graph only
+graphmind team push --all              # push all projects
+graphmind team pull [slug]             # pull latest from team
+graphmind team status                  # sync status per project
+```
+
+- **Auto-sync** (Team tier): graph is pushed automatically after each `graphmind build`
+- **Memory privacy**: memories marked private (`is_shared: false`) never leave the machine
+- **MCP tools**: `gm_team_memories` (shared context) · `gm_team_who_knows` (who documented a symbol)
+
 ### Sessions
 ```bash
 graphmind session start [slug]      # log session start
@@ -482,7 +504,7 @@ MCP responses are optimized for LLM consumption — minimal tokens, maximum sign
 
 ## MCP Tools Reference
 
-graphmind exposes 24 tools via MCP (Model Context Protocol):
+graphmind exposes 25 tools via MCP (Model Context Protocol):
 
 | Tool | Description |
 |------|-------------|
@@ -511,12 +533,14 @@ graphmind exposes 24 tools via MCP (Model Context Protocol):
 | `gm_status` | Project health and stats |
 | `gm_context` | Full project context for session start |
 | `gm_list_projects` | All registered projects |
+| `gm_team_memories` | Shared team memories and context *(Pro/Team)* |
+| `gm_team_who_knows` | Who documented a given symbol *(Pro/Team)* |
 
 ## Security
 
 - **No open ports by default** — MCP uses stdio.
 - **Path traversal protection** — all file ops restricted to registered paths + `~/.graphmind/`.
-- **No network calls by default** — everything runs locally. Embedding API calls only when explicitly configured.
+- **No network calls by default** — everything runs locally. Embedding API calls only when explicitly configured. Team sync (Pro/Team tiers) is opt-in and never runs automatically on Free.
 - **API keys stored locally** — in `~/.graphmind/config.json`, never sent anywhere except the configured provider.
 - **Atomic writes** — memory JSONL writes use tmp+rename to prevent corruption.
 - **MCP write confirmation** — `gm_memory_add` requires explicit confirmation.
