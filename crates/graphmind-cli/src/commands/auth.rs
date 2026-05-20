@@ -44,8 +44,9 @@ pub fn login(key: &str) {
     };
 
     let mut config = load_config();
-    // Store the JWT with prefix so LicenseManager can strip it in decode_key
-    config.license.key = Some(format!("{KEY_PREFIX_LIVE}{jwt}"));
+    // Store the JWT with original prefix so LicenseManager can strip it in decode_key
+    let prefix = if key.starts_with(KEY_PREFIX_TEST) { KEY_PREFIX_TEST } else { KEY_PREFIX_LIVE };
+    config.license.key = Some(format!("{prefix}{jwt}"));
     config.license.last_validated_at = Some(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
