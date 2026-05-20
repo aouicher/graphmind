@@ -441,6 +441,11 @@ fn main() {
         commands::notices::check_schema_version();
     }
 
+    // Silent license revalidation every 24h (non-blocking)
+    if !matches!(cli.command, Commands::Auth { .. }) {
+        std::thread::spawn(|| commands::auth::maybe_revalidate());
+    }
+
     match cli.command {
         Commands::Register {
             path,

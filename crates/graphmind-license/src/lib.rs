@@ -1,3 +1,5 @@
+pub mod fingerprint;
+
 use graphmind_config::{Feature, GlobalConfig, Tier};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
@@ -15,12 +17,15 @@ wQIDAQAB
 const KEY_PREFIX_LIVE: &str = "gm_live_";
 const KEY_PREFIX_TEST: &str = "gm_test_";
 
+pub const REVALIDATION_INTERVAL_SECS: u64 = 86400; // 24h
+
 #[derive(Debug, Serialize, Deserialize)]
 struct LicenseClaims {
     sub: String,           // userId
     email: String,
     tier: Tier,
     features: Vec<String>,
+    fingerprint: String,
     exp: u64,
     iat: u64,
 }
@@ -68,6 +73,17 @@ impl LicenseManager {
         let data = decode::<LicenseClaims>(jwt, &key, &validation)
             .map_err(|e| format!("invalid JWT: {e}"))?;
 
+        // Verify device fingerprint
+        let local_fp = fingerprint::device_fingerprint();
+        if data.claims.fingerprint != local_fp {
+            return Err(format!(
+                "license is bound to a different device (expected {}, got {}). \
+                 This license can only be used on registered devices.",
+                &data.claims.fingerprint[..8],
+                &local_fp[..8]
+            ));
+        }
+
         Ok(Self {
             tier: data.claims.tier,
             email: Some(data.claims.email),
@@ -81,17 +97,13 @@ impl LicenseManager {
 
     pub fn has_feature(&self, feature: &Feature) -> bool {
         match feature {
-            // Free — always available
             Feature::LocalGraph | Feature::LocalMcp | Feature::LocalMemory | Feature::LocalEmbeddings => true,
-            // Embeddings tier
             Feature::RemoteEmbeddings | Feature::SemanticSearch => {
                 matches!(self.tier, Tier::Embeddings | Tier::Pro | Tier::Team)
             }
-            // Pro tier
             Feature::RemoteApi | Feature::RemoteMcp => {
                 matches!(self.tier, Tier::Pro | Tier::Team)
             }
-            // Team tier
             Feature::TeamSync | Feature::TeamMemories => {
                 matches!(self.tier, Tier::Team)
             }
@@ -106,6 +118,15 @@ impl LicenseManager {
             .unwrap_or_default()
             .as_secs();
         exp < now
+    }
+
+    pub fn needs_revalidation(config: &GlobalConfig) -> bool {
+        let Some(last) = config.license.last_validated_at else { return true };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now.saturating_sub(last) >= REVALIDATION_INTERVAL_SECS
     }
 
     pub fn status_display(&self) -> String {
