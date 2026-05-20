@@ -6,7 +6,7 @@ const KEY_PREFIX_TEST: &str = "gm_test_";
 
 pub fn login(key: &str) {
     if !key.starts_with(KEY_PREFIX_LIVE) && !key.starts_with(KEY_PREFIX_TEST) {
-        eprintln!("Erreur : clé invalide. Format attendu : gm_live_... ou gm_test_...");
+        eprintln!("Error: invalid key. Expected format: gm_live_... or gm_test_...");
         std::process::exit(1);
     }
 
@@ -22,7 +22,7 @@ pub fn login(key: &str) {
     let manager = LicenseManager::from_config(&config);
 
     if manager.is_expired() {
-        eprintln!("Erreur : cette licence est expirée.");
+        eprintln!("Error: this license has expired.");
         std::process::exit(1);
     }
 
@@ -42,5 +42,5 @@ pub fn logout() {
     config.license.key = None;
     config.license.last_validated_at = None;
     save_config(&config);
-    println!("Licence supprimée. Retour en mode Free.");
+    println!("License removed. Back to Free mode.");
 }

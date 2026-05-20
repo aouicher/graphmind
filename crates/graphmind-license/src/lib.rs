@@ -136,15 +136,15 @@ impl LicenseManager {
         match &self.tier {
             Tier::Free => {
                 [
-                    "Plan actuel : Free (local)",
+                    "Current plan: Free (local)",
                     "",
-                    "Fonctionnalités disponibles :",
-                    "✓ Graph local illimité",
-                    "✓ 24 MCP tools",
-                    "✓ Memory store local",
-                    "✓ Embeddings locaux (minilm)",
+                    "Available features:",
+                    "✓ Unlimited local graph",
+                    "✓ 25 MCP tools",
+                    "✓ Local memory store",
+                    "✓ Local embeddings (minilm)",
                     "",
-                    "→ Passer Pro : https://getgraphmind.com/pricing",
+                    "→ Upgrade: https://www.getgraphmind.com/pricing/",
                 ]
                 .join("\n")
             }
@@ -159,24 +159,24 @@ impl LicenseManager {
                 let expires = self.expires_at.map(format_timestamp).unwrap_or_else(|| "—".to_string());
 
                 let mut lines = vec![
-                    format!("Plan actuel : {tier_label}"),
+                    format!("Current plan: {tier_label}"),
                     format!("Email       : {email}"),
-                    format!("Expire      : {expires}"),
+                    format!("Expires     : {expires}"),
                     String::new(),
-                    "Fonctionnalités actives :".to_string(),
-                    "✓ Tout le plan Free".to_string(),
+                    "Active features:".to_string(),
+                    "✓ Everything in Free".to_string(),
                 ];
 
                 if matches!(tier, Tier::Embeddings | Tier::Pro | Tier::Team) {
-                    lines.push("✓ Embeddings distants".to_string());
-                    lines.push("✓ Recherche sémantique".to_string());
+                    lines.push("✓ Remote embeddings".to_string());
+                    lines.push("✓ Semantic search".to_string());
                 }
                 if matches!(tier, Tier::Pro | Tier::Team) {
-                    lines.push("✓ API distante".to_string());
-                    lines.push("✓ MCP server distant".to_string());
+                    lines.push("✓ Remote API".to_string());
+                    lines.push("✓ Remote MCP server".to_string());
                 }
                 if matches!(tier, Tier::Team) {
-                    lines.push("✓ Sync équipe (graph + memories)".to_string());
+                    lines.push("✓ Team sync (graph + memories)".to_string());
                 }
 
                 lines.join("\n")
