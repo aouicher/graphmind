@@ -280,7 +280,7 @@ Configured in `~/.graphmind/config.json`:
 | `local` | `nomic-embed-text-v1.5` (768d) | ONNX, no API key needed |
 | `openai` | `text-embedding-3-small` (1536d) | Supports custom `openai_base_url` |
 | `voyage` | `voyage-code-3` (1024d) | Code-specialized, recommended |
-| `disabled` | — | No embeddings (default) |
+| `disabled` | — | No embeddings — **default for new installs** |
 
 Embeddings are computed automatically during `graphmind build` when a provider is configured. If the model changes, the embedding index is rebuilt automatically.
 

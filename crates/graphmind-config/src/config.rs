@@ -94,10 +94,10 @@ pub struct ProjectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmbeddingMode {
-    #[default]
     Local,
     Openai,
     Voyage,
+    #[default]
     Disabled,
 }
 
