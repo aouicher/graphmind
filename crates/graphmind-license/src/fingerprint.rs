@@ -1,17 +1,19 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use sha2::{Digest, Sha256};
 
 pub fn device_fingerprint() -> String {
     let hostname = hostname();
     let username = username();
     let os = std::env::consts::OS;
 
-    let mut hasher = DefaultHasher::new();
-    hostname.hash(&mut hasher);
-    username.hash(&mut hasher);
-    os.hash(&mut hasher);
+    let mut hasher = Sha256::new();
+    hasher.update(hostname.as_bytes());
+    hasher.update(b"|");
+    hasher.update(username.as_bytes());
+    hasher.update(b"|");
+    hasher.update(os.as_bytes());
 
-    format!("{:x}", hasher.finish())
+    let result = hasher.finalize();
+    hex::encode(&result[..8]) // 16 hex chars, stable across Rust versions
 }
 
 fn hostname() -> String {
