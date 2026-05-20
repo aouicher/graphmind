@@ -9,7 +9,14 @@ GraphMind turns your codebase into a knowledge graph your AI can query, navigate
 
 Up to **5,700× fewer tokens** than raw search (~10M tokens saved per session). Works with Claude Code, Cursor, Windsurf, Cline, Zed, Continue, and any MCP-compatible AI assistant.
 
-![GraphMind demo](graphmind-demo.gif)
+<table><tr>
+<td><img src="graphmind-demo-cli.gif" width="400" alt="GraphMind CLI demo" /></td>
+<td><img src="graphmind-demo-desktop.gif" width="400" alt="GraphMind Desktop app" /></td>
+</tr>
+<tr>
+<td align="center"><sub>CLI + Claude MCP integration</sub></td>
+<td align="center"><sub>Desktop app — Mac &amp; Windows</sub></td>
+</tr></table>
 
 ## Why GraphMind
 
