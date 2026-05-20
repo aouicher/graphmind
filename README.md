@@ -9,6 +9,8 @@ GraphMind turns your codebase into a knowledge graph your AI can query, navigate
 
 Up to **5,700× fewer tokens** than raw search (~10M tokens saved per session). Works with Claude Code, Cursor, Windsurf, Cline, Zed, Continue, and any MCP-compatible AI assistant.
 
+![GraphMind demo](graphmind-demo.gif)
+
 ## Why GraphMind
 
 Every new AI session starts from zero. Your assistant re-reads the entire codebase, re-discovers architecture, and forgets every decision you explained last time. Across multiple projects, there's zero visibility into shared dependencies.
