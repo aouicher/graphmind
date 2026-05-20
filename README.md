@@ -3,21 +3,23 @@
 [![CI](https://github.com/aouicher/graphmind/actions/workflows/ci.yml/badge.svg)](https://github.com/aouicher/graphmind/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-> Your codebase has memory. Use it.
+> Your codebase has a shape. Now your AI can see it. And remember it.
 
-Persistent, local-first code intelligence for Claude Code. Structural graph + semantic memory + cross-project links — all on your machine.
+GraphMind turns your codebase into a knowledge graph your AI can query, navigate, and remember. Ask about dead code, dependencies, or blast radius — and get answers grounded in your actual architecture.
 
-## The Problem
+Up to **5,700× fewer tokens** than raw search. Works with Claude Code, Cursor, Windsurf, Cline, Zed, Continue, and any MCP-compatible AI assistant.
 
-Every new Claude Code session starts from zero. Claude re-reads your entire codebase, re-discovers architecture, and forgets every decision you explained last time. Across multiple projects, there's zero visibility into shared dependencies.
+## Why GraphMind
+
+Every new AI session starts from zero. Your assistant re-reads the entire codebase, re-discovers architecture, and forgets every decision you explained last time. Across multiple projects, there's zero visibility into shared dependencies.
 
 **graphmind** fixes this with four layers:
-1. **Structural graph** — function-level code knowledge graph per repo (AST-based, tree-sitter)
+1. **Structural graph** — function-level knowledge graph per repo (AST-based, tree-sitter, 30+ languages)
 2. **Semantic embeddings** — vector search over symbols (local ONNX, OpenAI, or Voyage AI)
-3. **Semantic memory** — declarative store for decisions, patterns, conventions
-4. **Cross-project links** — relationships between registered repos
+3. **Persistent memory** — declarative store for decisions, patterns, conventions — survives across sessions
+4. **Cross-project links** — dependencies and relationships between registered repos
 
-Everything is 100% local. No cloud. No open ports by default. No telemetry.
+Everything runs locally. No cloud. No open ports by default. No telemetry.
 
 ## Benchmark
 
