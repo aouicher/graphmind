@@ -3,7 +3,8 @@ use graphmind_license::LicenseManager;
 
 const KEY_PREFIX_LIVE: &str = "gm_live_";
 const KEY_PREFIX_TEST: &str = "gm_test_";
-const SERVER_URL: &str = "https://graphmind-server.fly.dev";
+const SERVER_URL_LIVE: &str = "https://graphmind-server.fly.dev";
+const SERVER_URL_TEST: &str = "https://graphmind-server-staging.fly.dev";
 
 pub fn login(key: &str) {
     if !key.starts_with(KEY_PREFIX_LIVE) && !key.starts_with(KEY_PREFIX_TEST) {
@@ -11,10 +12,12 @@ pub fn login(key: &str) {
         std::process::exit(1);
     }
 
+    let server_url = if key.starts_with(KEY_PREFIX_TEST) { SERVER_URL_TEST } else { SERVER_URL_LIVE };
+
     // Exchange raw key for signed JWT from server
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .post(format!("{SERVER_URL}/v1/auth/token"))
+        .post(format!("{server_url}/v1/auth/token"))
         .header("Authorization", format!("Bearer {key}"))
         .send();
 
