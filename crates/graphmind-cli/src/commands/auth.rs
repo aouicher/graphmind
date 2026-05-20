@@ -3,6 +3,7 @@ use graphmind_license::LicenseManager;
 
 const KEY_PREFIX_LIVE: &str = "gm_live_";
 const KEY_PREFIX_TEST: &str = "gm_test_";
+const SERVER_URL: &str = "https://graphmind-server.fly.dev";
 
 pub fn login(key: &str) {
     if !key.starts_with(KEY_PREFIX_LIVE) && !key.starts_with(KEY_PREFIX_TEST) {
@@ -10,8 +11,38 @@ pub fn login(key: &str) {
         std::process::exit(1);
     }
 
+    // Exchange raw key for signed JWT from server
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(format!("{SERVER_URL}/v1/auth/token"))
+        .header("Authorization", format!("Bearer {key}"))
+        .send();
+
+    let jwt = match resp {
+        Err(e) => {
+            eprintln!("Error: could not reach GraphMind server: {e}");
+            std::process::exit(1);
+        }
+        Ok(r) if !r.status().is_success() => {
+            eprintln!("Error: invalid or expired key (server returned {})", r.status());
+            std::process::exit(1);
+        }
+        Ok(r) => {
+            #[derive(serde::Deserialize)]
+            struct TokenResponse { token: String }
+            match r.json::<TokenResponse>() {
+                Ok(t) => t.token,
+                Err(e) => {
+                    eprintln!("Error: unexpected server response: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
     let mut config = load_config();
-    config.license.key = Some(key.to_string());
+    // Store the JWT with prefix so LicenseManager can strip it in decode_key
+    config.license.key = Some(format!("{KEY_PREFIX_LIVE}{jwt}"));
     config.license.last_validated_at = Some(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -27,7 +58,6 @@ pub fn login(key: &str) {
     }
 
     save_config(&config);
-
     println!("{}", manager.status_display());
 }
 

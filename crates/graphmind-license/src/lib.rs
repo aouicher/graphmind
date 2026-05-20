@@ -2,9 +2,14 @@ use graphmind_config::{Feature, GlobalConfig, Tier};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 
-/// Placeholder — replace with real RSA public key before deploying paid tiers.
 const PUBLIC_KEY_PEM: &str = "-----BEGIN PUBLIC KEY-----
-REPLACE_BEFORE_DEPLOY
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAweI8a2n6BjsFtXHKX41a
+tGalRvgxa87I70FQSo6myaOf3AR4Rff4IMe8ik5kf9Ze+FOtmyt40OtUTSDJmz4E
+LQknKz1JwylOaxwIPhlbESxE4O5DyQlJnsQtHAtDHIqTr0V3QeUIrUQTcusW8fJ/
+SbXSkavh6y737zdAmKo7cQ5VjiP2kp6D8ZM1WkBLBztumOGCYh9Wobyijxtz8c92
+RJ2EMYR12XH2W6kOlY8d1Bv/KFTAwQL6FE2YlHA3Abc8ZT4S40vUTG18vTh1GjjT
+YCP20i6kMkhiPXAXyYGNYSOy0JZkq9rwD65HugzGZPxqTzEdxUkuzHnIhYaFryXf
+wQIDAQAB
 -----END PUBLIC KEY-----";
 
 const KEY_PREFIX_LIVE: &str = "gm_live_";
@@ -12,8 +17,10 @@ const KEY_PREFIX_TEST: &str = "gm_test_";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct LicenseClaims {
-    sub: String, // email
+    sub: String,           // userId
+    email: String,
     tier: Tier,
+    features: Vec<String>,
     exp: u64,
     iat: u64,
 }
@@ -34,7 +41,7 @@ impl LicenseManager {
         match Self::decode_key(key) {
             Ok(manager) => manager,
             Err(e) => {
-                eprintln!("graphmind: licence invalide ou expirée ({e}), mode Free activé");
+                eprintln!("graphmind: invalid or expired license ({e}), falling back to Free");
                 Self::free()
             }
         }
@@ -50,51 +57,20 @@ impl LicenseManager {
         } else if let Some(j) = raw_key.strip_prefix(KEY_PREFIX_TEST) {
             j
         } else {
-            return Err("préfixe de clé invalide".to_string());
+            return Err("invalid key prefix".to_string());
         };
 
-        // PUBLIC_KEY_PEM is a placeholder — skip real verification until deployed.
-        if PUBLIC_KEY_PEM.contains("REPLACE_BEFORE_DEPLOY") {
-            return Self::decode_unverified(jwt);
-        }
-
         let key = DecodingKey::from_rsa_pem(PUBLIC_KEY_PEM.as_bytes())
-            .map_err(|e| format!("clé publique invalide: {e}"))?;
+            .map_err(|e| format!("invalid public key: {e}"))?;
         let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_issuer(&["graphmind"]);
+        validation.set_issuer(&["graphmind-server"]);
 
         let data = decode::<LicenseClaims>(jwt, &key, &validation)
-            .map_err(|e| format!("JWT invalide: {e}"))?;
+            .map_err(|e| format!("invalid JWT: {e}"))?;
 
         Ok(Self {
             tier: data.claims.tier,
-            email: Some(data.claims.sub),
-            expires_at: Some(data.claims.exp),
-        })
-    }
-
-    /// Decode without signature verification — used while PUBLIC_KEY_PEM is placeholder.
-    fn decode_unverified(jwt: &str) -> Result<Self, String> {
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.insecure_disable_signature_validation();
-        validation.validate_exp = false;
-
-        let key = DecodingKey::from_secret(b"placeholder");
-        let data = decode::<LicenseClaims>(jwt, &key, &validation)
-            .map_err(|e| format!("JWT malformé: {e}"))?;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        if data.claims.exp > 0 && data.claims.exp < now {
-            return Err("licence expirée".to_string());
-        }
-
-        Ok(Self {
-            tier: data.claims.tier,
-            email: Some(data.claims.sub),
+            email: Some(data.claims.email),
             expires_at: Some(data.claims.exp),
         })
     }
@@ -193,10 +169,9 @@ fn format_timestamp(ts: u64) -> String {
         .as_secs();
     let days_left = if ts > now { (ts - now) / 86400 } else { 0 };
 
-    // Format as simple date via chrono
     let naive = chrono::DateTime::from_timestamp(ts as i64, 0)
         .map(|dt| dt.format("%d %b %Y").to_string())
         .unwrap_or_else(|| ts.to_string());
 
-    format!("{naive} ({days_left} jours)")
+    format!("{naive} ({days_left} days)")
 }
