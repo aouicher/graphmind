@@ -577,7 +577,7 @@ function StepIntegrations({ onNext }: { onNext: () => void }) {
 
 // Step 4: Embeddings
 function StepEmbeddings({ onNext }: { onNext: () => void }) {
-  const [mode, setMode] = useState("local");
+  const [mode, setMode] = useState("disabled");
   const [voyageKey, setVoyageKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -585,7 +585,7 @@ function StepEmbeddings({ onNext }: { onNext: () => void }) {
 
   useEffect(() => {
     api.getEmbeddingSettings().then((s) => {
-      if (s.mode !== "disabled") setMode(s.mode);
+      setMode(s.mode);
       setVoyageKey(s.voyage_key || "");
       setOpenaiKey(s.openai_key || "");
     });

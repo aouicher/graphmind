@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-cli"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "clap",
@@ -1847,6 +1847,7 @@ dependencies = [
  "graphmind-memory",
  "notify",
  "notify-debouncer-mini",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1856,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-config"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1866,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-core"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "napi",
  "napi-build",
@@ -1908,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-db"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "criterion",
  "graphmind-core",
@@ -1924,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-desktop"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1949,7 +1950,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-embeddings"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "dirs 5.0.1",
  "fastembed",
@@ -1964,18 +1965,20 @@ dependencies = [
 
 [[package]]
 name = "graphmind-license"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "graphmind-config",
+ "hex",
  "jsonwebtoken",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
 name = "graphmind-mcp"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "graphmind-config",
@@ -1991,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "graphmind-memory"
-version = "0.2.165"
+version = "0.2.169"
 dependencies = [
  "chrono",
  "graphmind-db",
