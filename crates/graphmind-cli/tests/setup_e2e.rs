@@ -174,11 +174,7 @@ fn setup_claude_code_mcp_idempotent() {
         // Count occurrences of the key name inside mcpServers (not in the command path)
         let json: Value = serde_json::from_str(&content).expect("valid JSON");
         let mcp_servers = json["mcpServers"].as_object().expect("mcpServers object");
-        assert_eq!(
-            mcp_servers.contains_key("graphmind"),
-            true,
-            "graphmind key should be present"
-        );
+        assert!(mcp_servers.contains_key("graphmind"), "graphmind key should be present");
         // The key "graphmind" inside mcpServers must appear exactly once.
         // Re-running should NOT duplicate it (already_correct guard in source).
         let count = mcp_servers.keys().filter(|k| *k == "graphmind").count();
