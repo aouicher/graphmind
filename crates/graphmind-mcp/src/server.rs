@@ -29,7 +29,7 @@ fn make_tool(name: &'static str, description: &'static str, schema: serde_json::
 
 fn tool_defs() -> Vec<Tool> {
     vec![
-        make_tool("gm_query", "Resolve a symbol name to its location + direct callers/callees (compact 5-line snippets, no full source). Faster than gm_fn — use when you need the call graph but not the full implementation. Use file= or kind= to disambiguate overloaded names.", json!({
+        make_tool("gm_query", "Resolve a symbol to its location + direct callers/callees as compact 5-line snippets (no full source). Use when you need the call graph but not the implementation. For full source, use gm_fn. Use file= or kind= to disambiguate overloaded names.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
@@ -41,7 +41,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_fn", "Returns full source code + direct callers + direct callees for ONE symbol. Use when you know the exact name and need to read the implementation or understand the call graph. Slower than gm_query (includes full source). Pass file= or kind= when the name is ambiguous.", json!({
+        make_tool("gm_fn", "Returns full source code + direct callers + direct callees for ONE symbol. Use when you need to read the implementation. Returns more data than gm_query (full source vs 5-line snippets). Pass file= or kind= when the name is ambiguous.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
@@ -53,7 +53,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_deps", "Returns all symbols a file imports or uses (outgoing dependencies). Use to understand what a file depends on before refactoring it. Complements gm_impact which shows the reverse (what depends on it).", json!({
+        make_tool("gm_deps", "Returns all symbols a file imports or uses (outgoing dependencies). Use before refactoring to understand what a file depends on. Reverse direction: gm_impact (what depends on this file).", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
@@ -62,7 +62,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_impact", "Returns all files that transitively depend on a given file (reverse dependency fan-out). Use before deleting or changing a file's API to understand blast radius. Complements gm_deps (outgoing) — this is incoming.", json!({
+        make_tool("gm_impact", "Returns all files that transitively depend on a given file (incoming, reverse of gm_deps). Use before deleting or changing a file's public API to understand blast radius.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
@@ -130,7 +130,7 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_context", "Returns a combined session bootstrap payload: graph stats, recent memory entries, and cross-project links in one call. Use at session start when you need full context quickly. Equivalent to calling gm_status + gm_memory_list + gm_cross_links together.", json!({
+        make_tool("gm_context", "Returns a combined session bootstrap payload: graph stats, recent memory entries, and cross-project links in one call. Use at session start when you need full project context quickly.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" }
@@ -161,7 +161,7 @@ fn tool_defs() -> Vec<Tool> {
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
-        make_tool("gm_search", "Full-text + semantic search across all symbols by name or intent keyword. Use for discovery when you don't know the exact name. Returns ranked list with file and line. Auto-expands with callers/callees when exactly 1 result matches. Use gm_fn once you know the exact symbol name.", json!({
+        make_tool("gm_search", "Full-text + semantic search across all symbols by name or intent keyword. Use for discovery when you don't know the exact name. Returns ranked list with file and line. When exactly 1 result matches, auto-expands with callers/callees. Use gm_fn once you know the exact name.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
@@ -188,7 +188,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_who_calls_chain", "Traces transitive callers of a symbol up to N hops (BFS), showing the full path from entry points down. Answers 'how is this function reached?' Use for debugging call chains or understanding execution paths. gm_fn_impact gives the flat list; this gives the tree.", json!({
+        make_tool("gm_who_calls_chain", "Traces transitive callers of a symbol up to N hops (BFS). Answers 'how is this function reached?' Returns the call tree from entry points down. Use gm_fn_impact for a flat list; use this when you need the path structure.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to trace callers for" },
