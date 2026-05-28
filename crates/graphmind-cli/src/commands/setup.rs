@@ -14,22 +14,25 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 6, "Shell PATH configuration");
+    print_step(1, 7, "Shell PATH configuration");
     install_shell_path();
 
-    print_step(2, 6, "Claude Code hooks");
+    print_step(2, 7, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(3, 6, "Claude Code skills");
+    print_step(3, 7, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(4, 6, "Claude Desktop MCP config");
+    print_step(4, 7, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(5, 6, "Claude Code MCP server");
+    print_step(5, 7, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(6, 6, "CLAUDE.md instruction");
+    print_step(6, 7, "OpenCode MCP config");
+    install_opencode_mcp();
+
+    print_step(7, 7, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -42,7 +45,7 @@ pub fn setup() {
     println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
-    println!("  {} MCP server configured (Claude Desktop + Claude Code)", "✓".green());
+    println!("  {} MCP server configured (Claude Desktop + Claude Code + OpenCode)", "✓".green());
     println!("  {} CLAUDE.md instruction block updated", "✓".green());
     println!();
     println!("  Next: run {} in each project to index.", "graphmind init".cyan().bold());
@@ -110,11 +113,15 @@ fn install_claude_desktop_mcp() {
         return;
     }
 
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
     mcp_servers.as_object_mut().unwrap().insert(
         "graphmind".to_string(),
         json!({
             "command": graphmind_path,
-            "args": ["mcp"]
+            "args": ["mcp"],
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
         }),
     );
 
@@ -188,6 +195,66 @@ fn register_mcp_in_claude_code() {
     println!("    {} configured", "✓".green());
 }
 
+fn install_opencode_mcp() {
+    let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
+    let graphmind_path = find_graphmind_binary();
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+
+    let mut config: Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).unwrap_or_default();
+        // Strip JSONC line comments before parsing
+        let stripped: String = content.lines().map(|l| {
+            if let Some(idx) = l.find("//") {
+                // Only strip if // is not inside a string (simple heuristic)
+                let before = &l[..idx];
+                if before.chars().filter(|&c| c == '"').count() % 2 == 0 {
+                    return before.trim_end().to_string();
+                }
+            }
+            l.to_string()
+        }).collect::<Vec<_>>().join("\n");
+        serde_json::from_str(&stripped).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    let mcp = config
+        .as_object_mut()
+        .unwrap()
+        .entry("mcp")
+        .or_insert_with(|| json!({}));
+
+    if mcp.get("graphmind").is_some() {
+        println!("    {} already configured", "✓".green());
+        return;
+    }
+
+    mcp.as_object_mut().unwrap().insert(
+        "graphmind".to_string(),
+        json!({
+            "type": "local",
+            "command": [graphmind_path, "mcp"],
+            "environment": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
+        }),
+    );
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+
+    if std::process::Command::new("which").arg("opencode").output().is_ok_and(|o| o.status.success()) {
+        println!("    {} configured at {}", "✓".green(), config_path.display());
+    } else {
+        println!("    {} configured (opencode not detected, config written for future use)", "⊘".yellow());
+    }
+}
+
 fn claude_desktop_config_path() -> Option<PathBuf> {
     let candidates = [
         home_dir().join("Library/Application Support/Claude/claude_desktop_config.json"),
@@ -206,6 +273,11 @@ fn claude_desktop_config_path() -> Option<PathBuf> {
 }
 
 fn find_graphmind_binary() -> String {
+    // Prefer known install location — avoids relying on shell PATH
+    let local_path = home_dir().join(".graphmind").join("bin").join("graphmind");
+    if local_path.exists() {
+        return local_path.to_string_lossy().to_string();
+    }
     if let Ok(output) = std::process::Command::new("which")
         .arg("graphmind")
         .output()
@@ -217,7 +289,7 @@ fn find_graphmind_binary() -> String {
             }
         }
     }
-    "graphmind".to_string()
+    local_path.to_string_lossy().to_string()
 }
 
 fn gm_block() -> String {
@@ -315,19 +387,17 @@ fn install_claude_md_block() {
         String::new()
     };
 
-    let new_content = if content.contains("<!-- GM:START -->") {
-        // Replace existing block in place
-        let re_start = content.find("<!-- GM:START -->").unwrap();
-        let re_end = content.find("<!-- GM:END -->")
+    let new_content = if let Some(start) = content.find("<!-- GM:START -->") {
+        // Replace existing block in place — use char-safe slicing via find (returns byte indices on valid UTF-8 boundaries)
+        let end = content.find("<!-- GM:END -->")
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
-        format!("{}{}{}", &content[..re_start], gm_block(), &content[re_end..])
-    } else if content.contains("<!-- OMC:START -->") {
+        format!("{}{}{}", &content[..start], gm_block(), &content[end..])
+    } else if let Some(omc_start) = content.find("<!-- OMC:START -->") {
         // Insert before OMC block — highest attention weight position
-        let omc_start = content.find("<!-- OMC:START -->").unwrap();
         format!("{}{}\n\n{}", &content[..omc_start], gm_block(), &content[omc_start..])
     } else {
-        // No OMC block — prepend before other content
+        // No existing block — prepend before other content
         format!("{}\n\n{}", gm_block(), content)
     };
 

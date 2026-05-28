@@ -48,6 +48,84 @@ fn cursor_config_path() -> PathBuf {
     home_dir().join(".cursor").join("mcp.json")
 }
 
+fn opencode_config_path() -> PathBuf {
+    // Global config: ~/.config/opencode/opencode.jsonc (Linux/macOS)
+    #[cfg(target_os = "macos")]
+    {
+        home_dir().join(".config").join("opencode").join("opencode.jsonc")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        home_dir().join(".config").join("opencode").join("opencode.jsonc")
+    }
+}
+
+fn is_opencode_detected() -> bool {
+    // Detected if config file exists or binary is in PATH
+    if opencode_config_path().exists() {
+        return true;
+    }
+    std::process::Command::new("which")
+        .arg("opencode")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn is_opencode_mcp_configured() -> bool {
+    let config_path = opencode_config_path();
+    if !config_path.exists() {
+        return false;
+    }
+    let content = match fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Strip JSONC comments before parsing
+    let stripped = strip_jsonc_comments(&content);
+    let json: Value = match serde_json::from_str(&stripped) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    json.get("mcp").and_then(|m| m.get("graphmind")).is_some()
+}
+
+fn strip_jsonc_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if c == '"' && !in_string {
+            in_string = true;
+            out.push(c);
+        } else if c == '"' && in_string {
+            in_string = false;
+            out.push(c);
+        } else if !in_string && c == '/' {
+            if chars.peek() == Some(&'/') {
+                // Line comment — skip to end of line
+                for ch in chars.by_ref() {
+                    if ch == '\n' { out.push('\n'); break; }
+                }
+            } else if chars.peek() == Some(&'*') {
+                // Block comment — skip to */
+                chars.next();
+                loop {
+                    match chars.next() {
+                        Some('*') if chars.peek() == Some(&'/') => { chars.next(); break; }
+                        None => break,
+                        _ => {}
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn is_claude_detected() -> bool {
     claude_config_path().parent().is_some_and(|p| p.exists())
         || std::process::Command::new("which")
@@ -103,6 +181,7 @@ pub fn detect_clients() -> Vec<AiClient> {
     let claude_path = claude_config_path();
     let claude_desktop_path = claude_desktop_config_path();
     let cursor_path = cursor_config_path();
+    let opencode_path = opencode_config_path();
 
     vec![
         AiClient {
@@ -129,6 +208,14 @@ pub fn detect_clients() -> Vec<AiClient> {
             mcp_configured: is_mcp_configured(&cursor_path, "graphmind"),
             config_path: Some(cursor_path.to_string_lossy().to_string()),
         },
+        AiClient {
+            id: "opencode".to_string(),
+            name: "OpenCode".to_string(),
+            icon: "code".to_string(),
+            detected: is_opencode_detected(),
+            mcp_configured: is_opencode_mcp_configured(),
+            config_path: Some(opencode_path.to_string_lossy().to_string()),
+        },
     ]
 }
 
@@ -140,6 +227,7 @@ pub fn install_mcp_for_client(client_id: String) -> Result<(), String> {
         "claude-code" => install_claude_mcp(&binary_path),
         "claude-desktop" => install_claude_desktop_mcp(&binary_path),
         "cursor" => install_cursor_mcp(&binary_path),
+        "opencode" => install_opencode_mcp(&binary_path),
         _ => Err(format!("Unsupported client: {client_id}")),
     }
 }
@@ -150,6 +238,7 @@ pub fn uninstall_mcp_for_client(client_id: String) -> Result<(), String> {
         "claude-code" => uninstall_claude_mcp(),
         "claude-desktop" => uninstall_claude_desktop_mcp(),
         "cursor" => uninstall_cursor_mcp(),
+        "opencode" => uninstall_opencode_mcp(),
         _ => Err(format!("Unsupported client: {client_id}")),
     }
 }
@@ -251,6 +340,67 @@ fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
     write_json(&config_path, &json)
 }
 
+fn install_opencode_mcp(binary_path: &str) -> Result<(), String> {
+    let config_path = opencode_config_path();
+    let bin_dir = graphmind_bin_dir();
+
+    // Read existing JSONC or start fresh
+    let existing = if config_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = config_path.with_extension(format!("jsonc.{ts}.bak"));
+        fs::copy(&config_path, &backup).ok();
+        let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        let stripped = strip_jsonc_comments(&content);
+        serde_json::from_str::<Value>(&stripped).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        serde_json::json!({})
+    };
+
+    let mut json = existing;
+
+    let mcp = json
+        .as_object_mut()
+        .ok_or("Invalid config format")?
+        .entry("mcp")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+
+    mcp.as_object_mut()
+        .ok_or("mcp is not an object")?
+        .insert(
+            "graphmind".to_string(),
+            serde_json::json!({
+                "type": "local",
+                "command": [binary_path, "mcp"],
+                "environment": {
+                    "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
+                }
+            }),
+        );
+
+    let content = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    fs::write(&config_path, content).map_err(|e| e.to_string())
+}
+
+fn uninstall_opencode_mcp() -> Result<(), String> {
+    let config_path = opencode_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let stripped = strip_jsonc_comments(&content);
+    let mut json: Value = serde_json::from_str(&stripped).map_err(|e| e.to_string())?;
+
+    if let Some(mcp) = json.get_mut("mcp").and_then(|m| m.as_object_mut()) {
+        mcp.remove("graphmind");
+    }
+
+    let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    fs::write(&config_path, out).map_err(|e| e.to_string())
+}
+
 fn uninstall_claude_mcp() -> Result<(), String> {
     remove_mcp_entry(&claude_config_path())
 }
@@ -297,4 +447,177 @@ fn read_or_create_json(path: &PathBuf) -> Result<Value, String> {
 fn write_json(path: &PathBuf, json: &Value) -> Result<(), String> {
     let content = serde_json::to_string_pretty(json).map_err(|e| e.to_string())?;
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ── strip_jsonc_comments ────────────────────────────────────────────────
+
+    #[test]
+    fn test_strip_line_comments() {
+        let input = r#"{ // this is a comment
+  "key": "value" // another
+}"#;
+        let stripped = strip_jsonc_comments(input);
+        let v: Value = serde_json::from_str(&stripped).expect("should parse");
+        assert_eq!(v["key"], "value");
+    }
+
+    #[test]
+    fn test_strip_block_comments() {
+        let input = r#"{ /* block comment */ "key": "value" }"#;
+        let stripped = strip_jsonc_comments(input);
+        let v: Value = serde_json::from_str(&stripped).expect("should parse");
+        assert_eq!(v["key"], "value");
+    }
+
+    #[test]
+    fn test_preserve_url_in_string() {
+        let input = r#"{ "url": "https://example.com" }"#;
+        let stripped = strip_jsonc_comments(input);
+        let v: Value = serde_json::from_str(&stripped).expect("should parse");
+        assert_eq!(v["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_strip_full_opencode_config() {
+        let input = r#"{
+  // OpenCode configuration
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    /* existing server */
+    "other-tool": {
+      "type": "local",
+      "command": ["npx", "other-tool"] // some tool
+    }
+  }
+}"#;
+        let stripped = strip_jsonc_comments(input);
+        let v: Value = serde_json::from_str(&stripped).expect("should parse");
+        assert!(v["mcp"]["other-tool"].is_object());
+    }
+
+    // ── install_opencode_mcp (file-based) ───────────────────────────────────
+
+    #[test]
+    fn test_install_opencode_mcp_fresh() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("opencode.jsonc");
+
+        // Write fresh config directly using the logic
+        let binary = "/home/user/.graphmind/bin/graphmind";
+        let bin_dir = "/home/user/.graphmind/bin";
+
+        let json = serde_json::json!({
+            "mcp": {
+                "graphmind": {
+                    "type": "local",
+                    "command": [binary, "mcp"],
+                    "environment": {
+                        "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
+                    }
+                }
+            }
+        });
+
+        fs::write(&config_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let content = fs::read_to_string(&config_path).unwrap();
+        let v: Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(v["mcp"]["graphmind"]["type"], "local");
+        assert_eq!(v["mcp"]["graphmind"]["command"][0], binary);
+        assert_eq!(v["mcp"]["graphmind"]["command"][1], "mcp");
+        assert!(v["mcp"]["graphmind"]["environment"]["PATH"]
+            .as_str()
+            .unwrap()
+            .contains(".graphmind/bin"));
+    }
+
+    #[test]
+    fn test_install_opencode_mcp_preserves_existing_servers() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("opencode.jsonc");
+
+        // Pre-existing config with another server
+        let existing = serde_json::json!({
+            "mcp": {
+                "other-tool": {
+                    "type": "local",
+                    "command": ["npx", "other"]
+                }
+            }
+        });
+        fs::write(&config_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        // Simulate adding graphmind
+        let content = fs::read_to_string(&config_path).unwrap();
+        let stripped = strip_jsonc_comments(&content);
+        let mut v: Value = serde_json::from_str(&stripped).unwrap();
+        v["mcp"].as_object_mut().unwrap().insert(
+            "graphmind".to_string(),
+            serde_json::json!({ "type": "local", "command": ["/path/graphmind", "mcp"] }),
+        );
+        fs::write(&config_path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+        let result: Value = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(result["mcp"]["other-tool"].is_object(), "existing server preserved");
+        assert!(result["mcp"]["graphmind"].is_object(), "graphmind added");
+    }
+
+    #[test]
+    fn test_uninstall_opencode_mcp() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("opencode.jsonc");
+
+        let existing = serde_json::json!({
+            "mcp": {
+                "other-tool": { "type": "local", "command": ["npx", "other"] },
+                "graphmind": { "type": "local", "command": ["/path/graphmind", "mcp"] }
+            }
+        });
+        fs::write(&config_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        // Simulate uninstall
+        let content = fs::read_to_string(&config_path).unwrap();
+        let stripped = strip_jsonc_comments(&content);
+        let mut v: Value = serde_json::from_str(&stripped).unwrap();
+        if let Some(mcp) = v.get_mut("mcp").and_then(|m| m.as_object_mut()) {
+            mcp.remove("graphmind");
+        }
+        fs::write(&config_path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+        let result: Value = serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert!(result["mcp"]["other-tool"].is_object(), "other server preserved");
+        assert!(result["mcp"]["graphmind"].is_null(), "graphmind removed");
+    }
+
+    // ── is_mcp_configured ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_mcp_configured_true() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"mcpServers":{"graphmind":{"command":"graphmind"}}}"#).unwrap();
+        assert!(is_mcp_configured(&path, "graphmind"));
+    }
+
+    #[test]
+    fn test_is_mcp_configured_false() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"mcpServers":{"other":{"command":"other"}}}"#).unwrap();
+        assert!(!is_mcp_configured(&path, "graphmind"));
+    }
+
+    #[test]
+    fn test_is_mcp_configured_missing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent.json");
+        assert!(!is_mcp_configured(&path, "graphmind"));
+    }
 }
