@@ -29,7 +29,7 @@ fn make_tool(name: &'static str, description: &'static str, schema: serde_json::
 
 fn tool_defs() -> Vec<Tool> {
     vec![
-        make_tool("gm_query", "Find a symbol and its callers/callees. Use file and kind to disambiguate common names (e.g. create, resolve). Callers/callees return compact snippets (5 lines) instead of full source.", json!({
+        make_tool("gm_query", "Resolve a symbol name to its location + direct callers/callees (compact 5-line snippets, no full source). Faster than gm_fn — use when you need the call graph but not the full implementation. Use file= or kind= to disambiguate overloaded names.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
@@ -41,7 +41,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_fn", "Drill into a specific symbol: full source code + callers + callees. Use AFTER gm_search when you know the exact name, or directly when the user mentions a specific function. Gives you the call graph that gm_search doesn't.", json!({
+        make_tool("gm_fn", "Returns full source code + direct callers + direct callees for ONE symbol. Use when you know the exact name and need to read the implementation or understand the call graph. Slower than gm_query (includes full source). Pass file= or kind= when the name is ambiguous.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
@@ -53,7 +53,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_deps", "Get the dependency map for a file (what it imports/uses)", json!({
+        make_tool("gm_deps", "Returns all symbols a file imports or uses (outgoing dependencies). Use to understand what a file depends on before refactoring it. Complements gm_impact which shows the reverse (what depends on it).", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
@@ -62,7 +62,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_impact", "Get transitive reverse dependencies (what depends on this file)", json!({
+        make_tool("gm_impact", "Returns all files that transitively depend on a given file (reverse dependency fan-out). Use before deleting or changing a file's API to understand blast radius. Complements gm_deps (outgoing) — this is incoming.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
@@ -71,7 +71,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_fn_impact", "Get blast radius for a function (all callers)", json!({
+        make_tool("gm_fn_impact", "Returns all transitive callers of a function (full blast radius at symbol level). Use before changing a function's signature or behavior. Complements gm_impact (file-level) — this is symbol-level.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
@@ -79,20 +79,20 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_map", "Get top connected files in the project", json!({
+        make_tool("gm_map", "Lists the most connected files in the project ranked by edge count (imports + importers). Use as the first step to understand project architecture. Returns file names with connectivity scores — not a full dependency graph.", json!({
             "type": "object",
             "properties": {
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_cycles", "Detect circular dependencies between files", json!({
+        make_tool("gm_cycles", "Detects circular import/dependency chains between files in the project. Returns each cycle as an ordered list of files. Use when diagnosing build issues, layering violations, or before major refactors.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_memory_search", "Search declarative memory (decisions, patterns, conventions)", json!({
+        make_tool("gm_memory_search", "Searches saved memory entries by keyword (decisions, patterns, conventions, bugs). Call at session start with relevant topic keywords to recall prior context. Returns ranked entries with type and tags. Use gm_memory_list to browse all entries without filtering.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query" },
@@ -113,55 +113,55 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["content"]
         })),
-        make_tool("gm_memory_list", "List memory entries for a project", json!({
+        make_tool("gm_memory_list", "Lists all memory entries for a project without filtering (paginated). Use to audit what has been saved or when you don't have a specific search keyword. For keyword-based recall, prefer gm_memory_search.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" },
                 "limit": { "type": "integer", "description": "Max results (default 20)" }
             }
         })),
-        make_tool("gm_list_projects", "List all registered graphmind projects", json!({
+        make_tool("gm_list_projects", "Lists all projects registered with graphmind (name, slug, root path, last build time). Use to discover available project slugs before calling project-scoped tools. No parameters required.", json!({
             "type": "object",
             "properties": {}
         })),
-        make_tool("gm_status", "Health check — graph stats for a project", json!({
+        make_tool("gm_status", "Returns graph health stats for a project: symbol count, edge count, file count, last build time, and schema version. Use to verify the index is up to date before a complex analysis session.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_context", "Full session context: graph stats + recent memory + cross links", json!({
+        make_tool("gm_context", "Returns a combined session bootstrap payload: graph stats, recent memory entries, and cross-project links in one call. Use at session start when you need full context quickly. Equivalent to calling gm_status + gm_memory_list + gm_cross_links together.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_cross_query", "Search for a symbol across all projects", json!({
+        make_tool("gm_cross_query", "Searches for a symbol by name across ALL registered projects. Use when you don't know which project owns a symbol, or when tracing a call that crosses project boundaries. Returns matches with project slug and file location.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find" }
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_cross_deps", "Find cross-project dependencies for a project", json!({
+        make_tool("gm_cross_deps", "Lists all known cross-project dependency links for a specific project (what other projects it references or is referenced by). Use when analyzing inter-repo coupling or planning cross-project refactors. Requires project slug.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug" }
             },
             "required": ["project"]
         })),
-        make_tool("gm_cross_links", "List all cross-project links", json!({
+        make_tool("gm_cross_links", "Lists all cross-project dependency links across every registered project in one call. Use for a global view of inter-repo relationships. No parameters. For links scoped to one project, use gm_cross_deps instead.", json!({
             "type": "object",
             "properties": {}
         })),
-        make_tool("gm_diff_impact", "Analyze git diff impact on the code graph", json!({
+        make_tool("gm_diff_impact", "Analyzes the current git diff and returns which symbols and files are affected, plus their transitive dependents. Use before committing or reviewing a PR to understand the real blast radius of staged changes.", json!({
             "type": "object",
             "properties": {
                 "project": { "type": "string", "description": "Project slug (optional)" },
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
-        make_tool("gm_search", "Find symbols by name or keyword. Auto-expands with callers/callees when exactly 1 result matches. For multiple results, use gm_fn to drill into a specific one.", json!({
+        make_tool("gm_search", "Full-text + semantic search across all symbols by name or intent keyword. Use for discovery when you don't know the exact name. Returns ranked list with file and line. Auto-expands with callers/callees when exactly 1 result matches. Use gm_fn once you know the exact symbol name.", json!({
             "type": "object",
             "properties": {
                 "query": { "type": "string", "description": "Search query (natural language or FTS5 syntax, use ; for multi-query)" },
@@ -172,7 +172,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["query"]
         })),
-        make_tool("gm_listeners", "Find all functions/methods that listen to a domain event. Returns qualified names (e.g. Payments::BankCardPaymentListener#buy_order_created).", json!({
+        make_tool("gm_listeners", "Finds all functions/methods registered as listeners for a named domain event. Returns qualified names (e.g. Payments::BankCardPaymentListener#buy_order_created) with file locations. Use when tracing event-driven flows or mapping side effects of an event.", json!({
             "type": "object",
             "properties": {
                 "event": { "type": "string", "description": "Event name (e.g. buy_order_created, order_created)" },
@@ -180,7 +180,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["event"]
         })),
-        make_tool("gm_outline", "Get hierarchical file structure (Class > Methods, Module > Functions) with qualified names. Best for understanding a file before editing.", json!({
+        make_tool("gm_outline", "Returns the hierarchical symbol structure of a file (Class > Methods, Module > Functions) with line numbers and qualified names. Use before reading or editing a file to understand its shape without loading full source. Prefer over gm_file when you only need structure.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path (relative to project root)" },
@@ -188,7 +188,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_who_calls_chain", "Trace transitive callers of a symbol up to N depth (BFS). Answers 'how do we reach this function?' across the call graph.", json!({
+        make_tool("gm_who_calls_chain", "Traces transitive callers of a symbol up to N hops (BFS), showing the full path from entry points down. Answers 'how is this function reached?' Use for debugging call chains or understanding execution paths. gm_fn_impact gives the flat list; this gives the tree.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to trace callers for" },
@@ -197,7 +197,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["symbol"]
         })),
-        make_tool("gm_dead_code", "Find symbols (functions/methods) with no incoming edges — likely dead code candidates.", json!({
+        make_tool("gm_dead_code", "Finds symbols (functions/methods/classes) with zero incoming call edges — likely dead code candidates. Returns name, kind, and file location. Results are heuristic: public API symbols or test helpers may appear here even if used externally.", json!({
             "type": "object",
             "properties": {
                 "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class (default: Function+Method)" },
@@ -205,7 +205,7 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_export", "Export a file or symbol neighborhood as Mermaid flowchart or DOT graph text.", json!({
+        make_tool("gm_export", "Exports a file's dependency subgraph or a symbol's call neighborhood as Mermaid or DOT graph text. Use for visualizing architecture in docs or diagrams. Provide either file= (file subgraph) or symbol= (call neighborhood). Not for querying — use gm_deps or gm_fn for that.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path (exports file subgraph)" },
@@ -215,7 +215,7 @@ fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug (optional)" }
             }
         })),
-        make_tool("gm_file", "Read the raw source content of a file from a registered project. Use when you need the full file rather than individual symbols.", json!({
+        make_tool("gm_file", "Returns the full raw source content of a file from a registered project. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path relative to project root" },
@@ -223,7 +223,7 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_similar", "Find structurally similar symbols (same kind, similar size and callee count). Useful for detecting duplication.", json!({
+        make_tool("gm_similar", "Finds structurally similar symbols to a given one — same kind, comparable size and callee count. Use to detect duplication, find parallel implementations, or spot refactoring candidates. Returns symbols ranked by structural similarity score.", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find similar matches for" },
