@@ -3,7 +3,8 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
-fn home_dir() -> PathBuf {
+#[doc(hidden)]
+pub fn home_dir() -> PathBuf {
     dirs::home_dir().expect("Cannot determine home directory")
 }
 
@@ -86,7 +87,8 @@ fn print_step(n: u8, total: u8, label: &str) {
     println!("  {} {}", format!("[{n}/{total}]").cyan().bold(), label);
 }
 
-fn install_claude_desktop_mcp() {
+#[doc(hidden)]
+pub fn install_claude_desktop_mcp() {
     let config_path = claude_desktop_config_path();
     let Some(config_path) = config_path else {
         println!("    {} Claude Desktop config not found (not installed?)", "⊘".yellow());
@@ -135,7 +137,8 @@ fn install_claude_desktop_mcp() {
     println!("    {} configured at {}", "✓".green(), config_path.display());
 }
 
-fn register_mcp_in_claude_code() {
+#[doc(hidden)]
+pub fn register_mcp_in_claude_code() {
     let settings_path = home_dir().join(".claude").join("settings.json");
     let graphmind_path = find_graphmind_binary();
     let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
@@ -195,7 +198,8 @@ fn register_mcp_in_claude_code() {
     println!("    {} configured", "✓".green());
 }
 
-fn install_opencode_mcp() {
+#[doc(hidden)]
+pub fn install_opencode_mcp() {
     let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
     let graphmind_path = find_graphmind_binary();
     let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
@@ -330,7 +334,8 @@ Be selective — only facts useful in a future session. Skip task details and te
 <!-- GM:END -->"#)
 }
 
-fn install_shell_path() {
+#[doc(hidden)]
+pub fn install_shell_path() {
     let install_dir = home_dir().join(".graphmind").join("bin");
     let install_dir_str = install_dir.to_string_lossy();
     let export_line = format!("export PATH=\"{}:$PATH\"", install_dir_str);
@@ -373,7 +378,8 @@ fn install_shell_path() {
     }
 }
 
-fn install_claude_md_block() {
+#[doc(hidden)]
+pub fn install_claude_md_block() {
     let claude_md = home_dir().join(".claude").join("CLAUDE.md");
 
     let content = if claude_md.exists() {

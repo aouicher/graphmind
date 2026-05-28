@@ -1,6 +1,6 @@
 use clap::Parser;
 
-mod commands;
+use graphmind_cli::commands;
 
 #[derive(Parser)]
 #[command(name = "graphmind", version, about = "Local-first code intelligence CLI")]
