@@ -8,20 +8,22 @@ fn home_dir() -> PathBuf {
 }
 
 fn get_cli_binary_path() -> String {
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("graphmind")
-        .output()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return path;
-        }
-    }
     let local_path = home_dir().join(".graphmind").join("bin").join("graphmind");
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
-    "graphmind".to_string()
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("graphmind")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return path;
+            }
+        }
+    }
+    local_path.to_string_lossy().to_string()
 }
 
 fn claude_config_path() -> PathBuf {
@@ -134,6 +136,26 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = claude_config_path();
     let mut json = read_or_create_json(&config_path)?;
 
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+
+    // Inject ~/.graphmind/bin into env.PATH so Claude Code can resolve the binary
+    {
+        let env = json
+            .as_object_mut()
+            .ok_or("Invalid config format")?
+            .entry("env")
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        let current_path = env
+            .get("PATH")
+            .and_then(|v| v.as_str())
+            .unwrap_or("/usr/local/bin:/usr/bin:/bin")
+            .to_string();
+        if !current_path.contains(&graphmind_bin_dir) {
+            let new_path = format!("{}:{}", graphmind_bin_dir, current_path);
+            env.as_object_mut().unwrap().insert("PATH".to_string(), Value::String(new_path));
+        }
+    }
+
     let servers = json
         .as_object_mut()
         .ok_or("Invalid config format")?
@@ -146,7 +168,10 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
         serde_json::json!({
             "command": binary_path,
             "args": ["mcp"],
-            "type": "stdio"
+            "type": "stdio",
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
         }),
     );
 
