@@ -20,14 +20,19 @@ function UpdateBanner({
   onDismiss: () => void;
 }) {
   const [updating, setUpdating] = useState(false);
+  const [cliUpdating, setCliUpdating] = useState(false);
   const [done, setDone] = useState(false);
 
   const handleUpdate = async () => {
     setUpdating(true);
     try {
       await api.installAppUpdate();
-      api.updateCli().catch(() => {});
       setDone(true);
+      // Also update CLI — fire-and-forget, must not block or prevent app update
+      setCliUpdating(true);
+      api.updateCli()
+        .catch(() => {})
+        .finally(() => setCliUpdating(false));
     } catch (e) {
       console.error(e);
     }
@@ -37,8 +42,14 @@ function UpdateBanner({
   if (done) {
     return (
       <div className="flex items-center justify-between px-4 py-2 bg-success/10 border-b border-success/20 text-xs">
-        <span className="text-success font-medium">
+        <span className="text-success font-medium flex items-center gap-1.5">
           Updated to v{info.new_version}. Restart to apply.
+          {cliUpdating && (
+            <span className="text-text-muted font-normal flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Updating CLI...
+            </span>
+          )}
         </span>
         <button onClick={onDismiss} className="text-success/60 hover:text-success">
           <X className="w-3.5 h-3.5" />
