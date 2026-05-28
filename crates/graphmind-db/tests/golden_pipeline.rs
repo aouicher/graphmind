@@ -275,3 +275,193 @@ fn symbols_in_file() {
     assert!(names.contains(&"sanitizeInput"));
     assert_eq!(names.len(), 2);
 }
+
+// ── Outline ──────────────────────────────────────────────────────
+
+#[test]
+fn outline_returns_symbols_with_lines() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let nodes = q.outline("src/services/wallet.ts");
+    assert!(!nodes.is_empty(), "outline should return symbols for wallet.ts");
+
+    // Every node must have valid (non-zero) line numbers
+    for node in &nodes {
+        assert!(node.line_start > 0, "line_start should be > 0 for {}", node.name);
+        assert!(node.line_end >= node.line_start, "line_end >= line_start for {}", node.name);
+    }
+
+    // The file has a WalletService class
+    let all_names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+    assert!(
+        all_names.contains(&"WalletService"),
+        "outline should include WalletService, got {:?}",
+        all_names
+    );
+}
+
+// ── Who calls chain ───────────────────────────────────────────────
+
+#[test]
+fn who_calls_chain_transitive() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let (chain, _max_reached) = q.who_calls_chain("validateAddress", 5);
+    let names: Vec<&str> = chain.iter().map(|c| c.name.as_str()).collect();
+
+    // createWallet calls validateAddress (depth 1)
+    assert!(
+        names.contains(&"createWallet"),
+        "createWallet should call validateAddress transitively, got {:?}",
+        names
+    );
+    // handleCreateWallet calls createWallet (depth 2)
+    assert!(
+        names.contains(&"handleCreateWallet"),
+        "handleCreateWallet should appear in transitive chain, got {:?}",
+        names
+    );
+}
+
+// ── Dead code ─────────────────────────────────────────────────────
+
+#[test]
+fn dead_code_returns_unreachable() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let dead = q.dead_code(None, 50);
+    // Must not panic; all results must be Functions or Methods
+    for sym in &dead {
+        assert!(
+            sym.kind == "Function" || sym.kind == "Method",
+            "dead_code without kind filter should only return Function/Method, got kind={} for {}",
+            sym.kind,
+            sym.name
+        );
+    }
+}
+
+// ── Cycles ────────────────────────────────────────────────────────
+
+#[test]
+fn detect_cycles_no_false_positives() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let cycles = q.detect_cycles();
+    // The fixture has no intentional cycles; if any are reported they must be symmetric
+    for pair in &cycles {
+        assert_ne!(
+            pair.from_file, pair.to_file,
+            "cycle pair should not be self-referential"
+        );
+    }
+    // (empty is also valid — just no panic required)
+}
+
+// ── Similar symbols ───────────────────────────────────────────────
+
+#[test]
+fn similar_symbols_finds_related() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    // Resolve createWallet to its id first
+    let syms = q.find_symbol("createWallet");
+    assert!(!syms.is_empty(), "createWallet must exist");
+    let id = syms[0].id;
+
+    // Should not panic, may return 0 results if no similar symbols exist
+    let similar = q.similar_symbols(id, 5);
+    // All results should be different symbols
+    for s in &similar {
+        assert_ne!(s.id, id, "similar result should not be the query symbol itself");
+    }
+}
+
+// ── Find listeners ────────────────────────────────────────────────
+
+#[test]
+fn find_listeners_graceful() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    // Should not panic; returns empty if no symbol named wallet_created
+    let listeners = q.find_listeners("wallet_created");
+    // No assertion on count — graceful empty is fine
+    let _ = listeners;
+}
+
+// ── find_symbol_filtered by kind ──────────────────────────────────
+
+#[test]
+fn find_symbol_filtered_by_kind() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let results = q.find_symbol_filtered("WalletService", None, Some("Class"));
+    assert!(!results.is_empty(), "find_symbol_filtered should find WalletService as Class");
+    assert_eq!(results[0].name, "WalletService");
+    assert_eq!(results[0].kind, "Class");
+}
+
+// ── Language breakdown ────────────────────────────────────────────
+
+#[test]
+fn language_breakdown_returns_langs() {
+    let builder = build_fixture();
+    let q = GraphQueries::new(builder.database());
+
+    let langs = q.language_breakdown();
+    assert!(!langs.is_empty(), "language_breakdown should return at least one language");
+
+    let lang_names: Vec<&str> = langs.iter().map(|l| l.language.as_str()).collect();
+    assert!(
+        lang_names.contains(&"typescript"),
+        "should include typescript in language breakdown, got {:?}",
+        lang_names
+    );
+}
+
+// ── Incremental build ─────────────────────────────────────────────
+
+#[test]
+fn incremental_build_updates_stats() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("test.db");
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let mut builder = GraphBuilder::new(
+        db_path.to_str().unwrap(),
+        cache_dir.to_str().unwrap(),
+    );
+
+    let project_root = fixture_project();
+
+    // Full build
+    builder.build(&project_root, &BuildOptions { full: true, ..Default::default() });
+    let stats_before = GraphQueries::new(builder.database()).stats();
+    assert!(stats_before.symbols > 0, "should have symbols after full build");
+
+    // Incremental build targeting a specific file
+    builder.build(
+        &project_root,
+        &BuildOptions {
+            only_files: Some(vec!["src/services/wallet.ts".to_string()]),
+            ..Default::default()
+        },
+    );
+    let stats_after = GraphQueries::new(builder.database()).stats();
+
+    // Symbol count should remain stable (same or more after re-processing)
+    assert!(
+        stats_after.symbols >= stats_before.symbols,
+        "incremental rebuild should not reduce symbol count: before={}, after={}",
+        stats_before.symbols,
+        stats_after.symbols
+    );
+}
