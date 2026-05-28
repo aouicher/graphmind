@@ -1,4 +1,4 @@
-use graphmind_memory::store::{AddOptions, MemoryStore, MemoryType};
+use graphmind_memory::store::{AddOptions, MemoryStore};
 use graphmind_memory::cross_links::{CrossLinkStore, LinkType, NewCrossLink};
 use std::io::Write;
 
@@ -189,7 +189,7 @@ fn memory_jsonl_corrupted_line() {
         "priority": false
     });
     let mut f = std::fs::File::create(&global_path).unwrap();
-    writeln!(f, "{}", valid_entry.to_string()).unwrap();
+    writeln!(f, "{}", valid_entry).unwrap();
     writeln!(f, "{{this is not valid json}}").unwrap();
 
     let store = MemoryStore::new(&memory_dir);
