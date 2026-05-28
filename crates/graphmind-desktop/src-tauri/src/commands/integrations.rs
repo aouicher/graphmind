@@ -7,7 +7,12 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().expect("Cannot determine home directory")
 }
 
+fn graphmind_bin_dir() -> String {
+    home_dir().join(".graphmind").join("bin").to_string_lossy().to_string()
+}
+
 fn get_cli_binary_path() -> String {
+    // Prefer the known install location first — avoids relying on shell PATH
     let local_path = home_dir().join(".graphmind").join("bin").join("graphmind");
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
@@ -23,6 +28,7 @@ fn get_cli_binary_path() -> String {
             }
         }
     }
+    // Fall back to absolute path even if not yet present (install in progress)
     local_path.to_string_lossy().to_string()
 }
 
@@ -56,7 +62,23 @@ fn is_claude_desktop_detected() -> bool {
 }
 
 fn is_cursor_detected() -> bool {
-    home_dir().join(".cursor").exists()
+    // Require the actual Cursor app or config file — not just ~/.cursor directory
+    let config = cursor_config_path();
+    if config.exists() {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::path::Path::new("/Applications/Cursor.app").exists()
+            || home_dir().join("Applications/Cursor.app").exists()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::process::Command::new("which")
+            .arg("cursor")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
 }
 
 fn is_mcp_configured(config_path: &PathBuf, key: &str) -> bool {
@@ -135,10 +157,9 @@ pub fn uninstall_mcp_for_client(client_id: String) -> Result<(), String> {
 fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = claude_config_path();
     let mut json = read_or_create_json(&config_path)?;
+    let bin_dir = graphmind_bin_dir();
 
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
-
-    // Inject ~/.graphmind/bin into env.PATH so Claude Code can resolve the binary
+    // Inject ~/.graphmind/bin into global env.PATH so hooks can resolve graphmind
     {
         let env = json
             .as_object_mut()
@@ -150,8 +171,8 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
             .and_then(|v| v.as_str())
             .unwrap_or("/usr/local/bin:/usr/bin:/bin")
             .to_string();
-        if !current_path.contains(&graphmind_bin_dir) {
-            let new_path = format!("{}:{}", graphmind_bin_dir, current_path);
+        if !current_path.contains(&bin_dir) {
+            let new_path = format!("{}:{}", bin_dir, current_path);
             env.as_object_mut().unwrap().insert("PATH".to_string(), Value::String(new_path));
         }
     }
@@ -170,7 +191,7 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
             "args": ["mcp"],
             "type": "stdio",
             "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
             }
         }),
     );
@@ -203,6 +224,7 @@ fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
 fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = cursor_config_path();
     let mut json = read_or_create_json(&config_path)?;
+    let bin_dir = graphmind_bin_dir();
 
     let servers = json
         .as_object_mut()
@@ -216,7 +238,9 @@ fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
         serde_json::json!({
             "command": binary_path,
             "args": ["mcp"],
-            "type": "stdio"
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
+            }
         }),
     );
 
@@ -251,8 +275,9 @@ fn remove_mcp_entry(config_path: &PathBuf) -> Result<(), String> {
 
 fn read_or_create_json(path: &PathBuf) -> Result<Value, String> {
     if path.exists() {
-        // Backup before modifying
-        let backup = path.with_extension("json.bak");
+        // Timestamped backup before any modification
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = path.with_extension(format!("json.{ts}.bak"));
         fs::copy(path, &backup).ok();
 
         let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
