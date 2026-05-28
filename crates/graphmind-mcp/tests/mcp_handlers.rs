@@ -318,3 +318,273 @@ fn truncation_does_not_crash() {
     );
     assert!(!ctx.is_error(&resp));
 }
+
+// ---------------------------------------------------------------------------
+// Group 5: Extended tool coverage (18 previously untested tools)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn gm_query_returns_symbol() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_query", json!({ "symbol": "createWallet", "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(
+        text.contains("createWallet"),
+        "expected 'createWallet' in: {text}"
+    );
+}
+
+#[test]
+fn gm_query_unknown_symbol_not_found() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_query",
+        json!({ "symbol": "nonExistentXYZ999", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+}
+
+#[test]
+fn gm_impact_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_impact",
+        json!({ "file": "src/services/wallet.ts", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_impact_missing_file_returns_error() {
+    let resp = dispatch_tool("gm_impact", &json!({}));
+    assert_eq!(resp.get("isError"), Some(&json!(true)));
+}
+
+#[test]
+fn gm_fn_impact_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_fn_impact",
+        json!({ "symbol": "validateAddress", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_fn_impact_missing_symbol_returns_error() {
+    let resp = dispatch_tool("gm_fn_impact", &json!({}));
+    assert_eq!(resp.get("isError"), Some(&json!(true)));
+}
+
+#[test]
+fn gm_cycles_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_cycles", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_file_returns_content() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_file",
+        json!({ "file": "src/services/wallet.ts", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(
+        text.contains("wallet"),
+        "expected 'wallet' in: {text}"
+    );
+}
+
+#[test]
+fn gm_file_not_found_returns_error() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_file",
+        json!({ "file": "src/nonexistent.ts", "project": ctx.slug }),
+    );
+    // handler returns err_text when file cannot be read
+    assert_eq!(
+        resp.get("isError"),
+        Some(&json!(true)),
+        "expected isError=true for missing file"
+    );
+}
+
+#[test]
+fn gm_memory_add_returns_success() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_memory_add",
+        json!({ "content": "test memory entry", "type": "context" }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_memory_search_returns_output() {
+    let ctx = setup();
+    // First add a memory entry so search has something to find
+    ctx.dispatch(
+        "gm_memory_add",
+        json!({ "content": "test memory search entry unique123", "type": "context" }),
+    );
+    let resp = ctx.dispatch(
+        "gm_memory_search",
+        json!({ "query": "test memory" }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_memory_list_returns_output() {
+    let ctx = setup();
+    // Add an entry so the list is non-empty
+    ctx.dispatch(
+        "gm_memory_add",
+        json!({ "content": "memory list test entry", "type": "context" }),
+    );
+    let resp = ctx.dispatch("gm_memory_list", json!({}));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_context_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_context", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_who_calls_chain_returns_callers() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_who_calls_chain",
+        json!({ "symbol": "validateAddress", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_dead_code_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_dead_code", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_similar_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_similar",
+        json!({ "symbol": "createWallet", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_listeners_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_listeners",
+        json!({ "event": "wallet_created", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_listeners_missing_event_returns_error() {
+    let resp = dispatch_tool("gm_listeners", &json!({}));
+    assert_eq!(resp.get("isError"), Some(&json!(true)));
+}
+
+#[test]
+fn gm_export_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_export",
+        json!({
+            "file": "src/services/wallet.ts",
+            "format": "mermaid",
+            "project": ctx.slug
+        }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_export_missing_file_and_symbol_returns_error() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_export",
+        json!({ "format": "mermaid", "project": ctx.slug }),
+    );
+    assert_eq!(
+        resp.get("isError"),
+        Some(&json!(true)),
+        "expected isError=true when neither file nor symbol provided"
+    );
+}
+
+#[test]
+fn gm_diff_impact_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_diff_impact", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_cross_query_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_cross_query", json!({ "symbol": "createWallet" }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_cross_deps_returns_output() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_cross_deps", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(!text.is_empty());
+}
+
+#[test]
+fn gm_cross_links_returns_output() {
+    let _ctx = setup();
+    let resp = dispatch_tool("gm_cross_links", &json!({}));
+    assert_eq!(resp.get("isError"), None, "unexpected isError field");
+    let text = resp["content"][0]["text"].as_str().unwrap_or("");
+    assert!(!text.is_empty());
+}

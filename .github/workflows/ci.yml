@@ -35,6 +35,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
 
+  e2e-cli:
+    runs-on: ubuntu-latest
+    needs: [rust-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build debug binary
+        run: cargo build -p graphmind-cli
+      - name: Run CLI E2E tests
+        run: |
+          cargo test -p graphmind-cli \
+            --test cli_register_e2e \
+            --test cli_build_e2e \
+            --test cli_query_e2e \
+            --test cli_memory_e2e \
+            --test cli_memory_persistence_e2e \
+            --test cli_sync_e2e \
+            --test cli_export_e2e \
+            --test cli_exclude_e2e \
+            --test cli_clean_e2e \
+            --test cli_session_e2e \
+            --test cli_auth_e2e \
+            -- --test-threads=1
+
   verify-tag-on-main:
     if: startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push'
     runs-on: ubuntu-latest
