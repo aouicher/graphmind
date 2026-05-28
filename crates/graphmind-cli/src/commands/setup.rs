@@ -113,11 +113,15 @@ fn install_claude_desktop_mcp() {
         return;
     }
 
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
     mcp_servers.as_object_mut().unwrap().insert(
         "graphmind".to_string(),
         json!({
             "command": graphmind_path,
-            "args": ["mcp"]
+            "args": ["mcp"],
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
         }),
     );
 
@@ -269,6 +273,11 @@ fn claude_desktop_config_path() -> Option<PathBuf> {
 }
 
 fn find_graphmind_binary() -> String {
+    // Prefer known install location — avoids relying on shell PATH
+    let local_path = home_dir().join(".graphmind").join("bin").join("graphmind");
+    if local_path.exists() {
+        return local_path.to_string_lossy().to_string();
+    }
     if let Ok(output) = std::process::Command::new("which")
         .arg("graphmind")
         .output()
@@ -280,7 +289,7 @@ fn find_graphmind_binary() -> String {
             }
         }
     }
-    "graphmind".to_string()
+    local_path.to_string_lossy().to_string()
 }
 
 fn gm_block() -> String {
@@ -378,19 +387,17 @@ fn install_claude_md_block() {
         String::new()
     };
 
-    let new_content = if content.contains("<!-- GM:START -->") {
-        // Replace existing block in place
-        let re_start = content.find("<!-- GM:START -->").unwrap();
-        let re_end = content.find("<!-- GM:END -->")
+    let new_content = if let Some(start) = content.find("<!-- GM:START -->") {
+        // Replace existing block in place — use char-safe slicing via find (returns byte indices on valid UTF-8 boundaries)
+        let end = content.find("<!-- GM:END -->")
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
-        format!("{}{}{}", &content[..re_start], gm_block(), &content[re_end..])
-    } else if content.contains("<!-- OMC:START -->") {
+        format!("{}{}{}", &content[..start], gm_block(), &content[end..])
+    } else if let Some(omc_start) = content.find("<!-- OMC:START -->") {
         // Insert before OMC block — highest attention weight position
-        let omc_start = content.find("<!-- OMC:START -->").unwrap();
         format!("{}{}\n\n{}", &content[..omc_start], gm_block(), &content[omc_start..])
     } else {
-        // No OMC block — prepend before other content
+        // No existing block — prepend before other content
         format!("{}\n\n{}", gm_block(), content)
     };
 
