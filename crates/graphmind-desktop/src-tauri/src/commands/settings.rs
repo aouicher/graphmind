@@ -46,17 +46,20 @@ pub fn set_project_excludes(slug: String, excludes: Vec<String>) {
     });
 }
 
-fn hook_path() -> PathBuf {
+fn hooks_dir() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
         .join(".claude")
         .join("hooks")
-        .join("graphmind-search.sh")
 }
 
 #[tauri::command]
 pub fn get_hook_status() -> bool {
-    hook_path().exists()
+    // All 5 hooks must be present
+    let dir = hooks_dir();
+    ["graphmind-search.sh", "graphmind-session.sh", "graphmind-prompt.sh", "graphmind-post.sh", "graphmind-stop.sh"]
+        .iter()
+        .all(|f| dir.join(f).exists())
 }
 
 #[tauri::command]

@@ -202,6 +202,7 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
 fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = claude_desktop_config_path();
     let mut json = read_or_create_json(&config_path)?;
+    let bin_dir = graphmind_bin_dir();
 
     let servers = json
         .as_object_mut()
@@ -214,7 +215,10 @@ fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
         "graphmind".to_string(),
         serde_json::json!({
             "command": binary_path,
-            "args": ["mcp"]
+            "args": ["mcp"],
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
+            }
         }),
     );
 
