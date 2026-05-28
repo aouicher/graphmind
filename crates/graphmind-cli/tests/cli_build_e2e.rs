@@ -1,13 +1,18 @@
 mod common;
 use common::CliTestEnv;
 
+// build_creates_graph_db, build_full_flag, and build_all_flag are merged into a single
+// test to share the register+build cost. They test orthogonal flags on the same slug.
 #[test]
-fn build_creates_graph_db() {
+fn build_basic_flags() {
     let env = CliTestEnv::new();
     let fixture = env.fixture_path();
-    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "build-test"]);
-    env.run_ok(&["build", "build-test"]);
 
+    // 1. Register once
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "build-test"]);
+
+    // 2. Plain build — verifies graph.db is created
+    env.run_ok(&["build", "build-test"]);
     let graph_db = env
         .home
         .path()
@@ -16,14 +21,12 @@ fn build_creates_graph_db() {
         .join("build-test")
         .join("graph.db");
     assert!(graph_db.exists(), "graph.db should exist after build, path: {}", graph_db.display());
-}
 
-#[test]
-fn build_full_flag() {
-    let env = CliTestEnv::new();
-    let fixture = env.fixture_path();
-    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "build-full"]);
-    env.run_ok(&["build", "build-full", "--full"]);
+    // 3. --full flag
+    env.run_ok(&["build", "build-test", "--full"]);
+
+    // 4. --all flag (builds every registered project)
+    env.run_ok(&["build", "--all"]);
 }
 
 #[test]
@@ -46,12 +49,4 @@ fn build_unknown_slug_error() {
             || String::from_utf8_lossy(&out.stdout).contains("not found"),
         "building unknown slug should fail or warn"
     );
-}
-
-#[test]
-fn build_all_flag() {
-    let env = CliTestEnv::new();
-    let fixture = env.fixture_path();
-    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "build-all-test"]);
-    env.run_ok(&["build", "--all"]);
 }
