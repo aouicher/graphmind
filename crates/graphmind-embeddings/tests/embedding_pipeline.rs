@@ -642,6 +642,55 @@ fn voyage_full_pipeline_search() {
     );
 }
 
+#[test]
+fn semantic_search_memory_finds_relevant_entry() {
+    use graphmind_embeddings::search::semantic_search_memory;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("memory_embeddings.db");
+    let store = EmbeddingStore::open(&db_path).unwrap();
+
+    let entries = [
+        ("id-001", "Use SHA256 for device fingerprint — DefaultHasher is non-deterministic across restarts"),
+        ("id-002", "Auth tokens expire after 24h and are silently revalidated in the background"),
+        ("id-003", "SQLite FTS5 is used for full-text symbol search across the graph"),
+    ];
+
+    let rows: Vec<NewEmbeddingRow> = entries
+        .iter()
+        .map(|(id, text)| {
+            let emb = deterministic_vector(text, 64);
+            NewEmbeddingRow {
+                symbol_name: id.to_string(),
+                symbol_kind: "memory".to_string(),
+                file: String::new(),
+                text: text.to_string(),
+                embedding: float32_to_bytes(&emb),
+            }
+        })
+        .collect();
+    store.insert_batch(&rows).unwrap();
+
+    let results = semantic_search_memory(
+        &db_path,
+        "authentication token expiry",
+        &|text| Some(deterministic_vector(text, 64)),
+        3,
+    );
+
+    assert!(!results.is_empty(), "should return at least one result");
+    let ids: Vec<&str> = results.iter().map(|r| r.symbol_name.as_str()).collect();
+    assert!(
+        ids.contains(&"id-002"),
+        "auth token entry should rank in results, got: {:?}", ids
+    );
+    // All results should have kind "memory"
+    assert!(
+        results.iter().all(|r| r.symbol_kind == "memory"),
+        "all results should have kind=memory"
+    );
+}
+
 fn cosine_sim(a: &[f32], b: &[f32]) -> f64 {
     let mut dot = 0.0_f64;
     let mut na = 0.0_f64;
