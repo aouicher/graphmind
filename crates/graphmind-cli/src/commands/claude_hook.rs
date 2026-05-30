@@ -400,12 +400,6 @@ pub fn install_hook() {
     ];
 
     for (path, content, name) in &scripts {
-        // Backup existing hook before overwriting
-        if path.exists() {
-            let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-            let backup = path.with_extension(format!("sh.{ts}.bak"));
-            fs::copy(path, &backup).ok();
-        }
         fs::write(path, content).unwrap_or_else(|e| {
             eprintln!("{} Failed to write {} hook: {}", "Error:".red().bold(), name, e);
             std::process::exit(1);
