@@ -346,26 +346,43 @@ fn consolidate_step_e(
 
     let prompt = format!(
         "You are a memory extraction assistant for a code intelligence tool.\n\n\
-Analyze this session transcript and extract ONLY facts that would be useful in a FUTURE session on this same codebase. Be very selective - only extract:\n\
-- Architectural decisions made (why something was built a certain way)\n\
-- Conventions established (naming, patterns, file structure)\n\
-- Non-obvious bugs found and their root cause\n\
-- Critical constraints or requirements discovered\n\n\
-Do NOT extract:\n\
-- Task summaries or what was done\n\
-- Obvious facts derivable from reading the code\n\
-- Temporary state or in-progress work\n\
-- Git commit messages\n\n\
+Analyze this session transcript and extract ONLY facts that would be useful in a FUTURE session on this same codebase.\n\n\
+EXTRACT these 6 categories (with examples):\n\n\
+1. ARCHITECTURAL DECISIONS — why something was built a certain way\n\
+   Example: \"RRF fusion chosen over pure semantic search because FTS5 handles exact symbol names better\"\n\
+   Example: \"SQLite chosen over a dedicated vector DB to keep the tool local-first with zero infrastructure\"\n\n\
+2. NEGATIVE DECISIONS — what was tried and rejected, and why\n\
+   Example: \"fastembed local embeddings abandoned — quality too low for cross-language symbol matching, switched to Voyage AI\"\n\
+   Example: \"DefaultHasher rejected for device fingerprint — non-deterministic across Rust versions, use SHA256\"\n\n\
+3. INTER-MODULE CONTRACTS — implicit interfaces the code doesn't make obvious\n\
+   Example: \"Global memory lives in global.jsonl, project memory in <slug>.jsonl — never mixed, list() merges both\"\n\
+   Example: \"EmbeddingStore symbol_name field stores entry id for memory entries, not a symbol name\"\n\n\
+4. CONVENTIONS — naming, patterns, file structure rules\n\
+   Example: \"All MCP handlers follow handle_<tool_name>(args: &Value) -> Value signature\"\n\
+   Example: \"Integration tests use OnceLock<SharedProject> to build graph once, copy per test\"\n\n\
+5. NON-OBVIOUS BUGS & ROOT CAUSES — subtle failures and their fix\n\
+   Example: \"cargo test --doc cannot be mixed with --lib --bins — drop --doc flag\"\n\
+   Example: \"UTF-8 char-boundary panic in symbol truncation — must use char_indices not byte slicing\"\n\n\
+6. CRITICAL CONSTRAINTS — environment, API keys, external dependencies\n\
+   Example: \"Embedding disabled silently if no VOYAGE_API_KEY — check config.embedding.mode before assuming semantic search works\"\n\
+   Example: \"graphmind init requires project to be git-tracked — post-commit hook install fails silently otherwise\"\n\n\
+DO NOT extract:\n\
+- Task summaries (what was done, what was built)\n\
+- Facts obvious from reading the code or README\n\
+- Temporary state, in-progress work, TODO items\n\
+- Git commit messages\n\
+- Generic programming advice not specific to this codebase\n\n\
 Return a JSON array (no markdown, raw JSON only):\n\
 [\n\
   {{\n\
-    \"content\": \"one clear atomic fact\",\n\
+    \"content\": \"one clear atomic fact — specific, not generic\",\n\
     \"type\": \"decision|pattern|convention|bug|context\",\n\
     \"tags\": [\"tag1\", \"tag2\"],\n\
     \"priority\": false,\n\
     \"confidence\": 0.0\n\
   }}\n\
 ]\n\n\
+Set priority=true only for facts that MUST be known at the start of every future session (critical constraints, always-apply conventions).\n\
 Only include entries with confidence >= 0.7. Return [] if nothing worth saving.\n\n\
 Transcript:\n\
 {truncated}"
