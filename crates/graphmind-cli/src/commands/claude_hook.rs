@@ -190,7 +190,7 @@ jq -n --arg msg "$MSG" '{
 "#;
 
 const STOP_HOOK: &str = r#"#!/usr/bin/env bash
-# graphmind Stop hook — auto-save session knowledge to persistent memory
+# graphmind Stop hook — auto-consolidate memory + remind Claude to save knowledge
 
 export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
@@ -202,6 +202,15 @@ INPUT=$(cat)
 # Skip if no meaningful session (< 3 turns)
 TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
 if [ "$TURN_COUNT" -lt 3 ]; then exit 0; fi
+
+# Run memory consolidation in background (expire, dedup, auto-promote, LLM extraction)
+# This is tool-agnostic: runs silently regardless of which AI tool triggered the hook.
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  graphmind memory consolidate --transcript "$TRANSCRIPT_PATH" &>/dev/null &
+else
+  graphmind memory clean &>/dev/null &
+fi
 
 # Detect if we're in a registered project
 IN_PROJECT=false

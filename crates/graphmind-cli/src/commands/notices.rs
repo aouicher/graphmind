@@ -292,6 +292,32 @@ fn load_dismissed() -> DismissedList {
     }
 }
 
+fn memory_clean_stamp_path() -> PathBuf {
+    graphmind_config::paths::graphmind_dir().join("memory-clean.stamp")
+}
+
+/// Run memory clean (expire, commit purge, dedup, auto-promote) at most once per day.
+/// Runs in a background thread — non-blocking, silent on failure.
+pub fn memory_auto_clean() {
+    const ONE_DAY: u64 = 86_400;
+    let stamp = memory_clean_stamp_path();
+    let now = now_secs();
+
+    // Throttle: skip if already ran within the last 24h
+    if let Ok(raw) = fs::read_to_string(&stamp) {
+        if let Ok(ts) = raw.trim().parse::<u64>() {
+            if now.saturating_sub(ts) < ONE_DAY {
+                return;
+            }
+        }
+    }
+
+    std::thread::spawn(move || {
+        super::memory::clean(None);
+        let _ = fs::write(&stamp, now.to_string());
+    });
+}
+
 fn version_cmp(a: &str, b: &str) -> i32 {
     let parse = |v: &str| -> Vec<u32> {
         v.split('.')

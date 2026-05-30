@@ -15,6 +15,15 @@ pub enum MemoryType {
     Session,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MemorySource {
+    #[default]
+    Manual,
+    Consolidate,
+    Heuristic,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: String,
@@ -29,6 +38,20 @@ pub struct MemoryEntry {
     pub session: String,
     #[serde(default)]
     pub priority: bool,
+    #[serde(default)]
+    pub ttl_days: Option<u32>,
+    #[serde(default)]
+    pub recall_count: u32,
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+    #[serde(default)]
+    pub source: MemorySource,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+}
+
+fn default_confidence() -> f32 {
+    1.0
 }
 
 pub struct AddOptions {
@@ -37,6 +60,9 @@ pub struct AddOptions {
     pub entry_type: MemoryType,
     pub tags: Vec<String>,
     pub priority: bool,
+    pub ttl_days: Option<u32>,
+    pub confidence: f32,
+    pub source: MemorySource,
 }
 
 impl Default for AddOptions {
@@ -47,7 +73,20 @@ impl Default for AddOptions {
             entry_type: MemoryType::Context,
             tags: Vec::new(),
             priority: false,
+            ttl_days: None,
+            confidence: 1.0,
+            source: MemorySource::Manual,
         }
+    }
+}
+
+/// Return the default TTL in days for a given MemoryType.
+pub fn default_ttl_for_type(entry_type: &MemoryType) -> Option<u32> {
+    match entry_type {
+        MemoryType::Decision | MemoryType::Pattern | MemoryType::Convention => None,
+        MemoryType::Bug => Some(90),
+        MemoryType::Context => Some(30),
+        MemoryType::Session => Some(7),
     }
 }
 
@@ -65,6 +104,13 @@ impl MemoryStore {
 
     pub fn add(&self, content: &str, options: AddOptions) -> MemoryEntry {
         let now = chrono::Utc::now().to_rfc3339();
+
+        // Compute expires_at from ttl_days if provided
+        let expires_at = options.ttl_days.map(|days| {
+            let dur = chrono::Duration::days(days as i64);
+            (chrono::Utc::now() + dur).to_rfc3339()
+        });
+
         let entry = MemoryEntry {
             id: Uuid::new_v4().to_string(),
             created: now.clone(),
@@ -76,6 +122,11 @@ impl MemoryStore {
             tags: options.tags,
             session: now[..10].to_string(),
             priority: options.priority,
+            ttl_days: options.ttl_days,
+            recall_count: 0,
+            confidence: options.confidence,
+            source: options.source,
+            expires_at,
         };
 
         let file_path = if entry.global {
@@ -146,15 +197,68 @@ impl MemoryStore {
         false
     }
 
-    fn global_path(&self) -> PathBuf {
+    /// Increment the recall_count for the entry with the given id.
+    /// Rewrites the JSONL file with the updated count.
+    pub fn increment_recall(&self, id: &str, project: Option<&str>) {
+        let mut paths = vec![self.global_path()];
+        if let Some(proj) = project {
+            paths.push(self.project_path(proj));
+        }
+
+        for file_path in &paths {
+            if !file_path.exists() {
+                continue;
+            }
+            let mut entries = self.read_jsonl(file_path);
+            let mut found = false;
+            for entry in &mut entries {
+                if entry.id == id {
+                    entry.recall_count += 1;
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                let content = if entries.is_empty() {
+                    String::new()
+                } else {
+                    entries
+                        .iter()
+                        .map(|e| serde_json::to_string(e).unwrap_or_default())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        + "\n"
+                };
+                self.atomic_write(file_path, &content);
+                return;
+            }
+        }
+    }
+
+    /// Rewrite a JSONL file with the given entries (used by consolidate).
+    pub fn rewrite_file(&self, file_path: &Path, entries: &[MemoryEntry]) {
+        let content = if entries.is_empty() {
+            String::new()
+        } else {
+            entries
+                .iter()
+                .map(|e| serde_json::to_string(e).unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        };
+        self.atomic_write(file_path, &content);
+    }
+
+    pub fn global_path(&self) -> PathBuf {
         self.memory_dir.join("global.jsonl")
     }
 
-    fn project_path(&self, slug: &str) -> PathBuf {
+    pub fn project_path(&self, slug: &str) -> PathBuf {
         self.memory_dir.join(format!("{slug}.jsonl"))
     }
 
-    fn read_jsonl(&self, file_path: &Path) -> Vec<MemoryEntry> {
+    pub fn read_jsonl(&self, file_path: &Path) -> Vec<MemoryEntry> {
         let content = match fs::read_to_string(file_path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),

@@ -315,12 +315,31 @@ enum MemoryAction {
         limit: usize,
         #[arg(long)]
         priority: bool,
+        /// Run clean (expire, dedup, auto-promote) before listing
+        #[arg(long)]
+        clean: bool,
     },
     /// Delete a memory entry
     Delete {
         id: String,
         #[arg(long, alias = "in")]
         slug: Option<String>,
+    },
+    /// Remove expired entries, [commit] noise, duplicates, and auto-promote high-recall entries
+    Clean {
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+    },
+    /// Full consolidate: clean + optional LLM extraction from a session transcript
+    Consolidate {
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+        /// Dry-run: show what would be done without writing anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Path to a session transcript file for LLM-based memory extraction
+        #[arg(long)]
+        transcript: Option<String>,
     },
 }
 
@@ -439,6 +458,7 @@ fn main() {
         commands::notices::check_announcements();
         commands::notices::check_cli_update();
         commands::notices::check_schema_version();
+        commands::notices::memory_auto_clean();
     }
 
     // Silent license revalidation every 24h (non-blocking)
@@ -581,11 +601,17 @@ fn main() {
             MemoryAction::Search { query, slug, limit } => {
                 commands::memory::search(&query, slug.as_deref(), limit);
             }
-            MemoryAction::List { slug, limit, priority } => {
-                commands::memory::list(slug.as_deref(), limit, priority);
+            MemoryAction::List { slug, limit, priority, clean } => {
+                commands::memory::list(slug.as_deref(), limit, priority, clean);
             }
             MemoryAction::Delete { id, slug } => {
                 commands::memory::delete(&id, slug.as_deref());
+            }
+            MemoryAction::Clean { slug } => {
+                commands::memory::clean(slug.as_deref());
+            }
+            MemoryAction::Consolidate { slug, dry_run, transcript } => {
+                commands::memory::consolidate(slug.as_deref(), dry_run, transcript.as_deref());
             }
         },
         Commands::Cross { action } => match action {
