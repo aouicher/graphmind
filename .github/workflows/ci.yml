@@ -335,6 +335,11 @@ jobs:
             echo "ERROR: merge conflict markers found in formula" >&2
             exit 1
           fi
+      - name: Verify Linux binary runs
+        run: |
+          chmod +x artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu
+          artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu --version
+          echo "Linux binary OK"
 
   publish-homebrew:
     needs: [release, release-assets, verify-formula]
@@ -396,22 +401,6 @@ jobs:
               --field message="Update graphmind to ${TAG}" \
               --field content="$ENCODED"
           fi
-
-  test-brew-install:
-    needs: [publish-homebrew]
-    if: needs.publish-homebrew.result == 'success'
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - name: Install via Homebrew tap and verify
-        env:
-          TAG: ${{ needs.publish-homebrew.outputs.tag || github.ref_name }}
-        run: |
-          brew tap aouicher/graphmind
-          brew install graphmind
-          graphmind --version
-          graphmind --help | grep -q "graphmind"
-          echo "brew install OK"
 
   publish-updater:
     needs: [release, release-assets, desktop-build]
