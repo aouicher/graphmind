@@ -284,8 +284,65 @@ jobs:
             done
           done
 
-  publish-homebrew:
+  verify-formula:
     needs: [release, release-assets]
+    if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Generate and validate formula syntax
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+          SHA_ARM64="placeholder"
+          SHA_X64="placeholder"
+          SHA_LINUX="placeholder"
+          cat > /tmp/graphmind.rb <<FORMULA
+class Graphmind < Formula
+  desc "Local-first code intelligence CLI with MCP server"
+  homepage "https://github.com/${REPO}"
+  license "MIT"
+  version "${VERSION}"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
+      sha256 "${SHA_ARM64}"
+    else
+      url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
+      sha256 "${SHA_X64}"
+    end
+  end
+
+  on_linux do
+    url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
+    sha256 "${SHA_LINUX}"
+  end
+
+  def install
+    binary = Dir["graphmind-*"].first || "graphmind"
+    bin.install binary => "graphmind"
+  end
+
+  test do
+    assert_match "graphmind", shell_output("#{bin}/graphmind --help")
+  end
+end
+FORMULA
+          ruby -c /tmp/graphmind.rb
+          echo "Formula syntax OK"
+          # Verify no merge conflict markers
+          if grep -qE '^(<<<<<<<|=======|>>>>>>>)' /tmp/graphmind.rb; then
+            echo "ERROR: merge conflict markers found in formula" >&2
+            exit 1
+          fi
+
+  publish-homebrew:
+    needs: [release, release-assets, verify-formula]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -329,7 +386,7 @@ jobs:
           FORMULA+="    bin.install binary => \"graphmind\"\n"
           FORMULA+="  end\n\n"
           FORMULA+="  test do\n"
-          FORMULA+="    assert_match \"graphmind\", shell_output(\"\#{bin}/graphmind --help\")\n"
+          FORMULA+="    assert_match \"graphmind\", shell_output(\"#{bin}/graphmind --help\")\n"
           FORMULA+="  end\n"
           FORMULA+="end\n"
           ENCODED=$(printf '%b' "$FORMULA" | base64 -w 0)
