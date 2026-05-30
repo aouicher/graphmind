@@ -301,40 +301,33 @@ jobs:
           SHA_ARM64="placeholder"
           SHA_X64="placeholder"
           SHA_LINUX="placeholder"
-          cat > /tmp/graphmind.rb <<ENDF
-class Graphmind < Formula
-  desc "Local-first code intelligence CLI with MCP server"
-  homepage "https://github.com/${REPO}"
-  license "MIT"
-  version "${VERSION}"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
-      sha256 "placeholder"
-    else
-      url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
-      sha256 "placeholder"
-    end
-  end
-
-  on_linux do
-    url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
-    sha256 "placeholder"
-  end
-
-  def install
-    binary = Dir["graphmind-*"].first || "graphmind"
-    bin.install binary => "graphmind"
-  end
-
-  test do
-    assert_match "graphmind", shell_output("BINPATH/graphmind --help")
-  end
-end
-ENDF
-          # Fix the test line: replace BINPATH placeholder with #{bin} Ruby interpolation
-          sed -i 's|BINPATH|#{bin}|g' /tmp/graphmind.rb
+          F="class Graphmind < Formula\n"
+          F+="  desc \"Local-first code intelligence CLI with MCP server\"\n"
+          F+="  homepage \"https://github.com/${REPO}\"\n"
+          F+="  license \"MIT\"\n"
+          F+="  version \"${VERSION}\"\n\n"
+          F+="  on_macos do\n"
+          F+="    if Hardware::CPU.arm?\n"
+          F+="      url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64\"\n"
+          F+="      sha256 \"placeholder\"\n"
+          F+="    else\n"
+          F+="      url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64\"\n"
+          F+="      sha256 \"placeholder\"\n"
+          F+="    end\n"
+          F+="  end\n\n"
+          F+="  on_linux do\n"
+          F+="    url \"https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64\"\n"
+          F+="    sha256 \"placeholder\"\n"
+          F+="  end\n\n"
+          F+="  def install\n"
+          F+="    binary = Dir[\"graphmind-*\"].first || \"graphmind\"\n"
+          F+="    bin.install binary => \"graphmind\"\n"
+          F+="  end\n\n"
+          F+="  test do\n"
+          F+='    assert_match "graphmind", shell_output("#{bin}/graphmind --help")'
+          F+="\n  end\n"
+          F+="end\n"
+          printf '%b' "$F" > /tmp/graphmind.rb
           ruby -c /tmp/graphmind.rb
           echo "Formula syntax OK"
           # Verify no merge conflict markers
