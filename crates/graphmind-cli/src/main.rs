@@ -456,6 +456,8 @@ fn main() {
         commands::notices::check_cli_update();
         commands::notices::check_schema_version();
         commands::notices::memory_auto_clean();
+        // Auto-reinstall hooks/skills/CLAUDE.md when binary is newer than installed setup version
+        commands::notices::auto_setup_if_outdated();
     }
 
     // Silent license revalidation every 24h (non-blocking)

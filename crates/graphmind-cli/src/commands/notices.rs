@@ -125,6 +125,33 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+/// Auto-reinstall hooks/skills/CLAUDE.md in background when binary version is newer than installed setup.
+/// Runs at most once per day (stamp file). Triggered by brew upgrade or any binary replacement.
+pub fn auto_setup_if_outdated() {
+    let config = graphmind_config::load_config();
+    let local = config.setup_version;
+    let expected = graphmind_config::SETUP_VERSION;
+    if local >= expected {
+        return;
+    }
+
+    const ONE_DAY: u64 = 86_400;
+    let stamp = graphmind_config::paths::graphmind_dir().join("auto-setup.stamp");
+    let now = now_secs();
+    if let Ok(raw) = fs::read_to_string(&stamp) {
+        if let Ok(ts) = raw.trim().parse::<u64>() {
+            if now.saturating_sub(ts) < ONE_DAY {
+                return;
+            }
+        }
+    }
+
+    std::thread::spawn(move || {
+        super::setup::setup();
+        let _ = fs::write(&stamp, now.to_string());
+    });
+}
+
 pub fn check_setup_version() {
     let config = graphmind_config::load_config();
     let local = config.setup_version;

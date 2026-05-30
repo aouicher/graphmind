@@ -110,6 +110,13 @@ pub fn install_claude_desktop_mcp() {
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
 
+    // Backup before modifying
+    if config_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = config_path.with_extension(format!("json.{ts}.bak"));
+        fs::copy(&config_path, &backup).ok();
+    }
+
     if mcp_servers.get("graphmind").is_some() {
         println!("    {} already configured", "✓".green());
         return;
@@ -191,6 +198,13 @@ pub fn register_mcp_in_claude_code() {
         mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
     }
 
+    // Backup before writing
+    if settings_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = settings_path.with_extension(format!("json.{ts}.bak"));
+        fs::copy(&settings_path, &backup).ok();
+    }
+
     let formatted = serde_json::to_string_pretty(&config).unwrap();
     fs::write(&settings_path, formatted).unwrap_or_else(|e| {
         println!("    {} failed to write settings: {e}", "✗".red());
@@ -227,6 +241,13 @@ pub fn install_opencode_mcp() {
         .unwrap()
         .entry("mcp")
         .or_insert_with(|| json!({}));
+
+    // Backup before modifying
+    if config_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = config_path.with_extension(format!("jsonc.{ts}.bak"));
+        fs::copy(&config_path, &backup).ok();
+    }
 
     if mcp.get("graphmind").is_some() {
         println!("    {} already configured", "✓".green());
