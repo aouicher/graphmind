@@ -330,16 +330,13 @@ enum MemoryAction {
         #[arg(long, alias = "in")]
         slug: Option<String>,
     },
-    /// Full consolidate: clean + optional LLM extraction from a session transcript
+    /// Full consolidate: expire, purge noise, dedup, auto-promote
     Consolidate {
         #[arg(long, alias = "in")]
         slug: Option<String>,
         /// Dry-run: show what would be done without writing anything
         #[arg(long)]
         dry_run: bool,
-        /// Path to a session transcript file for LLM-based memory extraction
-        #[arg(long)]
-        transcript: Option<String>,
     },
 }
 
@@ -610,8 +607,8 @@ fn main() {
             MemoryAction::Clean { slug } => {
                 commands::memory::clean(slug.as_deref());
             }
-            MemoryAction::Consolidate { slug, dry_run, transcript } => {
-                commands::memory::consolidate(slug.as_deref(), dry_run, transcript.as_deref());
+            MemoryAction::Consolidate { slug, dry_run } => {
+                commands::memory::consolidate(slug.as_deref(), dry_run);
             }
         },
         Commands::Cross { action } => match action {
