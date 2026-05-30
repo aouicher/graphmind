@@ -1,6 +1,6 @@
 use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
 use graphmind_memory::search::search as memory_search;
-use graphmind_memory::store::{AddOptions, MemoryStore, MemoryType};
+use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
 use serde_json::Value;
 
 use crate::formatting::{err_text, text_content};
@@ -80,6 +80,8 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
         let preview: String = r.content.lines().next().unwrap_or("").chars().take(100).collect();
         let r_type = format!("{:?}", r.entry_type).to_lowercase();
         lines.push(format!("  [{r_type}] {preview}"));
+        // Increment recall count so high-signal entries get auto-promoted
+        store.increment_recall(&r.id, project_slug);
     }
     text_content(&lines.join("\n"))
 }
@@ -113,6 +115,7 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
 
     let priority = args.get("priority").and_then(|v| v.as_bool()).unwrap_or(false);
 
+    let ttl_days = default_ttl_for_type(&entry_type);
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
     let entry = store.add(
         content,
@@ -122,6 +125,9 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
             entry_type,
             tags,
             priority,
+            ttl_days,
+            confidence: 1.0,
+            source: MemorySource::Manual,
         },
     );
 
