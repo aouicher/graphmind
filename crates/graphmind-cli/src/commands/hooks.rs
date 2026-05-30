@@ -5,17 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 const POST_COMMIT_HOOK: &str = r#"#!/bin/sh
-# graphmind: auto-rebuild + memory
+# graphmind: auto-rebuild
 export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 graphmind build 2>/dev/null &
-
-# Save commit context to memory
-MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null)
-FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | head -5 | tr '\n' ', ' | sed 's/,$//')
-if [ -n "$MSG" ] && [ -n "$FILES" ]; then
-  graphmind memory add "[commit] $MSG ($FILES)" 2>/dev/null &
-fi
 "#;
 
 const PRE_PUSH_HOOK: &str = "#!/bin/sh\n# graphmind: diff-impact\nexport PATH=\"$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH\"\necho \"\"\necho \"  graphmind diff-impact:\"\ngraphmind diff-impact 2>/dev/null\necho \"\"\n";
@@ -26,15 +19,24 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
     if hook_path.exists() {
         let existing = fs::read_to_string(&hook_path).unwrap_or_default();
         if existing.contains("graphmind") {
-            println!("  {}: already installed", name.dimmed());
-            return false;
+            // Force-update if hook contains outdated patterns
+            let is_outdated = existing.contains("memory add \"[commit]")
+                || existing.contains("memory add '[commit]");
+            if is_outdated {
+                fs::write(&hook_path, content).ok();
+                println!("  {}: updated (removed outdated patterns)", name.dimmed());
+            } else {
+                println!("  {}: already installed", name.dimmed());
+                return false;
+            }
+        } else {
+            let stripped: String = content
+                .lines()
+                .filter(|l| !l.starts_with("#!"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(&hook_path, format!("{existing}\n{stripped}")).ok();
         }
-        let stripped: String = content
-            .lines()
-            .filter(|l| !l.starts_with("#!"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(&hook_path, format!("{existing}\n{stripped}")).ok();
     } else {
         fs::write(&hook_path, content).ok();
     }
