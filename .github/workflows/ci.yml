@@ -301,7 +301,7 @@ jobs:
           SHA_ARM64="placeholder"
           SHA_X64="placeholder"
           SHA_LINUX="placeholder"
-          cat > /tmp/graphmind.rb <<FORMULA
+          cat > /tmp/graphmind.rb <<ENDF
 class Graphmind < Formula
   desc "Local-first code intelligence CLI with MCP server"
   homepage "https://github.com/${REPO}"
@@ -311,16 +311,16 @@ class Graphmind < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-arm64"
-      sha256 "${SHA_ARM64}"
+      sha256 "placeholder"
     else
       url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-macos-x64"
-      sha256 "${SHA_X64}"
+      sha256 "placeholder"
     end
   end
 
   on_linux do
     url "https://github.com/${REPO}/releases/download/${TAG}/graphmind-cli-linux-x64"
-    sha256 "${SHA_LINUX}"
+    sha256 "placeholder"
   end
 
   def install
@@ -329,10 +329,12 @@ class Graphmind < Formula
   end
 
   test do
-    assert_match "graphmind", shell_output("#{bin}/graphmind --help")
+    assert_match "graphmind", shell_output("BINPATH/graphmind --help")
   end
 end
-FORMULA
+ENDF
+          # Fix the test line: replace BINPATH placeholder with #{bin} Ruby interpolation
+          sed -i 's|BINPATH|#{bin}|g' /tmp/graphmind.rb
           ruby -c /tmp/graphmind.rb
           echo "Formula syntax OK"
           # Verify no merge conflict markers
@@ -386,8 +388,8 @@ FORMULA
           FORMULA+="    bin.install binary => \"graphmind\"\n"
           FORMULA+="  end\n\n"
           FORMULA+="  test do\n"
-          FORMULA+="    assert_match \"graphmind\", shell_output(\"#{bin}/graphmind --help\")\n"
-          FORMULA+="  end\n"
+          FORMULA+='    assert_match "graphmind", shell_output("#{bin}/graphmind --help")'
+          FORMULA+="\n  end\n"
           FORMULA+="end\n"
           ENCODED=$(printf '%b' "$FORMULA" | base64 -w 0)
           CURRENT_SHA=$(gh api "repos/${TAP_REPO}/contents/Formula/graphmind.rb" --jq '.sha' 2>/dev/null || echo "")
