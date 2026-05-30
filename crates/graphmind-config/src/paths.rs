@@ -59,3 +59,7 @@ pub fn meta_path(slug: &str) -> PathBuf {
 pub fn embedding_db_path(slug: &str) -> PathBuf {
     graph_dir(slug).join("embeddings.db")
 }
+
+pub fn memory_embedding_db_path() -> PathBuf {
+    memory_dir().join("memory_embeddings.db")
+}

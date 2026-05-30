@@ -67,6 +67,17 @@ fn rrf_merge(rankings: &[Vec<SearchResult>], k: usize) -> Vec<SearchResult> {
     results
 }
 
+/// Semantic search over memory entries stored in a flat embedding DB.
+/// Memory entries use `symbol_name` = entry id, `symbol_kind` = "memory", `file` = "".
+pub fn semantic_search_memory(
+    db_path: &Path,
+    query: &str,
+    embed_fn: &dyn Fn(&str) -> Option<Vec<f32>>,
+    limit: usize,
+) -> Vec<SearchResult> {
+    semantic_search(db_path, query, embed_fn, limit, Some("memory"))
+}
+
 pub fn semantic_search(
     db_path: &Path,
     query: &str,
