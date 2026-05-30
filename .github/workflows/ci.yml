@@ -402,6 +402,22 @@ FORMULA
               --field content="$ENCODED"
           fi
 
+  test-brew-install:
+    needs: [publish-homebrew]
+    if: needs.publish-homebrew.result == 'success'
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - name: Install via Homebrew tap and verify
+        env:
+          TAG: ${{ needs.publish-homebrew.outputs.tag || github.ref_name }}
+        run: |
+          brew tap aouicher/graphmind
+          brew install graphmind
+          graphmind --version
+          graphmind --help | grep -q "graphmind"
+          echo "brew install OK"
+
   publish-updater:
     needs: [release, release-assets, desktop-build]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
