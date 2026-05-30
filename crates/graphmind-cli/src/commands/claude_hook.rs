@@ -215,37 +215,43 @@ INPUT=$(cat)
 TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
 if [ "$TURN_COUNT" -lt 3 ]; then exit 0; fi
 
-# Run memory consolidation in background (expire, dedup, auto-promote, LLM extraction)
-# This is tool-agnostic: runs silently regardless of which AI tool triggered the hook.
-TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  graphmind memory consolidate --transcript "$TRANSCRIPT_PATH" &>/dev/null &
-else
-  graphmind memory clean &>/dev/null &
-fi
+# Run memory consolidation in background (expire, dedup, auto-promote) — local only, no external API
+graphmind memory consolidate &>/dev/null &
 
 # Detect if we're in a registered project
 IN_PROJECT=false
 graphmind status &>/dev/null && IN_PROJECT=true
 
 if [ "$IN_PROJECT" = true ]; then
-  SCOPE_NOTE="Save project-specific facts without extra flags. For cross-project or user-level facts, add --global."
-  EXAMPLE="graphmind memory add \"<content>\" [--type <type>] [--priority] [--global]"
+  SCOPE="Save project-specific facts without extra flags. For cross-project or user-level facts, add --global."
 else
-  SCOPE_NOTE="Not in a registered project — save with --global for facts that apply across sessions and projects."
-  EXAMPLE="graphmind memory add \"<content>\" --global [--type <type>] [--priority]"
+  SCOPE="Not in a registered project — use --global for facts that apply across sessions and projects."
 fi
 
-MSG="Session ended ($TURN_COUNT turns). Review this session and save any reusable knowledge to graphmind memory:
-- Architectural decisions made → --type decision
-- Patterns or conventions established → --type pattern or --type convention
-- Important bugs found or fixed → --type bug
-- Critical facts that should always be in context → add --priority
+MSG="Session ended ($TURN_COUNT turns). Review this session and call gm_memory_add for any of these categories:
 
-$SCOPE_NOTE
-Be selective: only save facts useful in a FUTURE session. Skip task details, temporary state, and anything obvious from the code.
+1. ARCHITECTURAL DECISIONS — why something was built a certain way
+   Example: \"RRF fusion chosen over pure semantic search because FTS5 handles exact symbol names better\"
 
-$EXAMPLE"
+2. NEGATIVE DECISIONS — what was tried and rejected, and why
+   Example: \"DefaultHasher rejected for device fingerprint — non-deterministic across Rust versions, use SHA256\"
+
+3. INTER-MODULE CONTRACTS — implicit interfaces the code does not make obvious
+   Example: \"Global memory lives in global.jsonl, project memory in <slug>.jsonl — never mixed, list() merges both\"
+
+4. CONVENTIONS — naming, patterns, file structure rules
+   Example: \"All MCP handlers follow handle_<tool_name>(args: &Value) -> Value signature\"
+
+5. NON-OBVIOUS BUGS & ROOT CAUSES — subtle failures and their fix
+   Example: \"cargo test --doc cannot be mixed with --lib --bins — drop --doc flag\"
+
+6. CRITICAL CONSTRAINTS — environment, API keys, external dependencies
+   Example: \"Embedding disabled silently if no VOYAGE_API_KEY — check config.embedding.mode first\"
+
+DO NOT save: task summaries, obvious code facts, temporary state, git commit messages.
+Use --priority for facts needed at every session start. Be atomic: one fact per entry.
+
+$SCOPE"
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
