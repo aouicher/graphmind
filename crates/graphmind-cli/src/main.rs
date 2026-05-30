@@ -458,6 +458,7 @@ fn main() {
         commands::notices::check_announcements();
         commands::notices::check_cli_update();
         commands::notices::check_schema_version();
+        commands::notices::memory_auto_clean();
     }
 
     // Silent license revalidation every 24h (non-blocking)
