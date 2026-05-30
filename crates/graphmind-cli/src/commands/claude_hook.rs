@@ -116,6 +116,14 @@ if [ ${#PROMPT} -lt 10 ]; then exit 0; fi
 # Check if we're in a graphmind-registered project
 graphmind status &>/dev/null || exit 0
 
+# --- Memory checkpoint every 10 turns ---
+# Inject a strong save reminder mid-session so long sessions don't lose knowledge.
+TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
+CHECKPOINT_MSG=""
+if [ "$TURN_COUNT" -gt 0 ] && [ $((TURN_COUNT % 10)) -eq 0 ]; then
+  CHECKPOINT_MSG="[graphmind checkpoint — turn $TURN_COUNT] Review the last 10 turns and call gm_memory_add NOW for any decisions, conventions, or non-obvious facts that emerged. Be specific and atomic. Use --type decision|pattern|convention|bug. Use --priority for facts needed every session. Do this before continuing."
+fi
+
 # --- Priority memories: ALWAYS injected regardless of prompt content ---
 PRIORITY_MEM=$(graphmind memory list --priority --limit 10 2>/dev/null | grep -v "^>>" | grep -v "^$" | head -15)
 
@@ -164,8 +172,12 @@ fi
 # Build context message — always provide something useful
 MSG=""
 
+if [ -n "$CHECKPOINT_MSG" ]; then
+  MSG="$CHECKPOINT_MSG\n\n"
+fi
+
 if [ -n "$PRIORITY_MEM" ]; then
-  MSG="[graphmind ★ active context]\n$PRIORITY_MEM\n\n"
+  MSG="${MSG}[graphmind ★ active context]\n$PRIORITY_MEM\n\n"
 fi
 
 if [ -n "$MEMORY" ]; then
@@ -269,13 +281,34 @@ track_file() {
   fi
 }
 
+EDIT_MEMORY_STAMP="/tmp/graphmind-edit-memory.stamp"
+
 case "$TOOL_NAME" in
   Read|Edit|Write)
     FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty')
     track_file "$FILE"
+
+    # After Edit/Write on a source file, remind Claude to save any decision that drove the change.
+    # Throttle: at most once every 5 minutes to avoid noise.
+    if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
+      if echo "$FILE" | grep -qE '\.(rs|ts|tsx|py|go|rb|js|jsx)$'; then
+        LAST_EDIT_STAMP=0
+        [ -f "$EDIT_MEMORY_STAMP" ] && LAST_EDIT_STAMP=$(cat "$EDIT_MEMORY_STAMP" 2>/dev/null || echo 0)
+        if [ $((NOW - LAST_EDIT_STAMP)) -gt 300 ]; then
+          echo "$NOW" > "$EDIT_MEMORY_STAMP"
+          MSG="[graphmind] You just modified $FILE. If an architectural decision, convention, or non-obvious constraint drove this change, save it now via gm_memory_add before continuing."
+          jq -n --arg msg "$MSG" '{
+            "hookSpecificOutput": {
+              "hookEventName": "PostToolUse",
+              "additionalContext": $msg
+            }
+          }'
+          exit 0
+        fi
+      fi
+    fi
     ;;
   Bash)
-    # Extract file paths from command (common patterns: cargo test FILE, vim FILE, etc.)
     CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
     FILES=$(echo "$CMD" | grep -oE '[a-zA-Z0-9_/.-]+\.(rs|ts|tsx|py|go|rb|js|jsx)' | head -3)
     for F in $FILES; do track_file "$F"; done
