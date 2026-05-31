@@ -91,7 +91,7 @@ pub fn default_ttl_for_type(entry_type: &MemoryType) -> Option<u32> {
 }
 
 pub struct MemoryStore {
-    memory_dir: PathBuf,
+    pub memory_dir: PathBuf,
 }
 
 impl MemoryStore {

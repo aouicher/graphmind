@@ -187,6 +187,18 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
     let mut file_paths = vec![store.global_path()];
     if let Some(proj) = project {
         file_paths.push(store.project_path(proj));
+    } else {
+        // No specific project — consolidate all project files
+        if let Ok(entries) = std::fs::read_dir(&store.memory_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                    && path != store.global_path()
+                {
+                    file_paths.push(path);
+                }
+            }
+        }
     }
 
     let mut total_expired = 0usize;
