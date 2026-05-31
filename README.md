@@ -62,7 +62,8 @@ Then run `graphmind setup` once to configure Claude Code, hooks, and skill.
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install aouicher/graphmind/graphmind
+brew install aouicher/graphmind/graphmind                # CLI
+brew install --cask aouicher/graphmind/graphmind         # Desktop app (macOS only)
 ```
 
 ### CLI — Linux (direct download)
