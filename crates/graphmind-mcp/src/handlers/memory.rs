@@ -154,6 +154,99 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
     ))
 }
 
+/// gm_session_analyze — batch save multiple facts with dedup.
+/// Claude passes an array of facts; the tool deduplicates against existing entries
+/// and saves only new ones. Returns a summary: N saved, M skipped.
+pub(crate) fn handle_session_analyze(args: &Value) -> Value {
+    let facts = match args.get("facts").and_then(|v| v.as_array()) {
+        Some(f) => f,
+        None => return err_text("Missing required parameter: facts (array)"),
+    };
+    let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
+    let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
+    let existing = store.list(project.as_deref());
+
+    let emb_db_path = graphmind_config::paths::memory_embedding_db_path();
+    let engine = load_embed_engine();
+
+    let mut saved = 0usize;
+    let mut skipped = 0usize;
+    let mut saved_ids: Vec<String> = Vec::new();
+
+    for fact in facts {
+        let content = match fact.get("content").and_then(|v| v.as_str()) {
+            Some(c) if !c.trim().is_empty() => c,
+            _ => { skipped += 1; continue; }
+        };
+
+        // Jaccard dedup against existing entries
+        let is_duplicate = existing.iter().any(|e| {
+            let tokens_a: std::collections::HashSet<&str> = e.content.split_whitespace().collect();
+            let tokens_b: std::collections::HashSet<&str> = content.split_whitespace().collect();
+            if tokens_a.is_empty() && tokens_b.is_empty() { return true; }
+            let inter = tokens_a.intersection(&tokens_b).count();
+            let union = tokens_a.union(&tokens_b).count();
+            if union == 0 { return false; }
+            (inter as f64 / union as f64) > 0.80
+        });
+
+        if is_duplicate { skipped += 1; continue; }
+
+        let type_str = fact.get("type").and_then(|v| v.as_str()).unwrap_or("context");
+        let entry_type = match type_str {
+            "decision" => MemoryType::Decision,
+            "pattern" => MemoryType::Pattern,
+            "convention" => MemoryType::Convention,
+            "bug" => MemoryType::Bug,
+            "session" => MemoryType::Session,
+            _ => MemoryType::Context,
+        };
+        let priority = fact.get("priority").and_then(|v| v.as_bool()).unwrap_or(false);
+        let tags: Vec<String> = fact.get("tags").and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let ttl_days = default_ttl_for_type(&entry_type);
+
+        let entry = store.add(content, AddOptions {
+            project: project.clone(),
+            global,
+            entry_type,
+            tags,
+            priority,
+            ttl_days,
+            confidence: 1.0,
+            source: MemorySource::Consolidate,
+        });
+
+        // Vectorize (best-effort)
+        if let Some(ref eng) = engine {
+            if let Ok(emb_store) = EmbeddingStore::open(&emb_db_path) {
+                if let Ok(vec) = eng.embed(content) {
+                    let _ = emb_store.insert_batch(&[NewEmbeddingRow {
+                        symbol_name: entry.id.clone(),
+                        symbol_kind: "memory".to_string(),
+                        file: String::new(),
+                        text: content.to_string(),
+                        embedding: float32_to_bytes(&vec),
+                    }]);
+                }
+            }
+        }
+
+        saved_ids.push(format!("{} [{}]", &entry.id[..8], type_str));
+        saved += 1;
+    }
+
+    text_content(&format!(
+        "✓ Session analyzed: {} saved, {} skipped (duplicates)\n{}",
+        saved,
+        skipped,
+        saved_ids.iter().map(|s| format!("  + {s}")).collect::<Vec<_>>().join("\n")
+    ))
+}
+
 pub(crate) fn handle_memory_list(args: &Value) -> Value {
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let limit = args

@@ -121,7 +121,7 @@ graphmind status &>/dev/null || exit 0
 TURN_COUNT=$(echo "$INPUT" | jq -r '.num_turns // 0')
 CHECKPOINT_MSG=""
 if [ "$TURN_COUNT" -gt 0 ] && [ $((TURN_COUNT % 10)) -eq 0 ]; then
-  CHECKPOINT_MSG="[graphmind checkpoint — turn $TURN_COUNT] Review the last 10 turns and call gm_memory_add NOW for any decisions, conventions, or non-obvious facts that emerged. Be specific and atomic. Use --type decision|pattern|convention|bug. Use --priority for facts needed every session. Do this before continuing."
+  CHECKPOINT_MSG="[graphmind checkpoint — turn $TURN_COUNT] Review the last 10 turns. Call gm_session_analyze with an array of facts (decisions, conventions, bugs, constraints) that emerged — it batch-saves and deduplicates in one call. Use priority=true for facts needed every session. Do this before continuing."
 fi
 
 # --- Priority memories: ALWAYS injected regardless of prompt content ---
@@ -228,7 +228,7 @@ else
   SCOPE="Not in a registered project — use --global for facts that apply across sessions and projects."
 fi
 
-MSG="Session ended ($TURN_COUNT turns). Review this session and call gm_memory_add for any of these categories:
+MSG="Session ended ($TURN_COUNT turns). Review this session and call gm_session_analyze with an array of facts. Prefer gm_session_analyze over individual gm_memory_add calls — it batch-saves and deduplicates in one call. Extract facts from these categories:
 
 1. ARCHITECTURAL DECISIONS — why something was built a certain way
    Example: \"RRF fusion chosen over pure semantic search because FTS5 handles exact symbol names better\"
