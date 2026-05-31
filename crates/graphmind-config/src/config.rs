@@ -212,38 +212,6 @@ pub fn slugify(input: &str) -> String {
         .collect()
 }
 
-#[cfg(test)]
-mod startup_config_tests {
-    use super::*;
-
-    #[test]
-    fn global_config_default_startup_fields_are_false() {
-        let cfg = GlobalConfig::default();
-        assert!(!cfg.launch_at_login);
-        assert!(!cfg.build_all_on_startup);
-    }
-
-    #[test]
-    fn startup_fields_serialize_deserialize() {
-        let mut cfg = GlobalConfig::default();
-        cfg.launch_at_login = true;
-        cfg.build_all_on_startup = true;
-        let json = serde_json::to_string(&cfg).unwrap();
-        let parsed: GlobalConfig = serde_json::from_str(&json).unwrap();
-        assert!(parsed.launch_at_login);
-        assert!(parsed.build_all_on_startup);
-    }
-
-    #[test]
-    fn missing_startup_fields_deserialize_to_false() {
-        // Old config without the new fields should deserialize fine
-        let json = r#"{"version":"1","projects":{},"global_exclude":[],"defaults":{"embedding_model":"minilm","watch_debounce":2000,"max_depth":5,"exclude_tests":true},"mcp":{"transport":"stdio","http_port":37378,"restrict_to_projects":null}}"#;
-        let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
-        assert!(!cfg.launch_at_login);
-        assert!(!cfg.build_all_on_startup);
-    }
-}
-
 pub struct Registry;
 
 impl Registry {
@@ -317,5 +285,38 @@ impl Registry {
 
     pub fn get_config() -> GlobalConfig {
         load_config()
+    }
+}
+
+#[cfg(test)]
+mod startup_config_tests {
+    use super::*;
+
+    #[test]
+    fn global_config_default_startup_fields_are_false() {
+        let cfg = GlobalConfig::default();
+        assert!(!cfg.launch_at_login);
+        assert!(!cfg.build_all_on_startup);
+    }
+
+    #[test]
+    fn startup_fields_serialize_deserialize() {
+        let cfg = GlobalConfig {
+            launch_at_login: true,
+            build_all_on_startup: true,
+            ..GlobalConfig::default()
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: GlobalConfig = serde_json::from_str(&json).unwrap();
+        assert!(parsed.launch_at_login);
+        assert!(parsed.build_all_on_startup);
+    }
+
+    #[test]
+    fn missing_startup_fields_deserialize_to_false() {
+        let json = r#"{"version":"1","projects":{},"global_exclude":[],"defaults":{"embedding_model":"minilm","watch_debounce":2000,"max_depth":5,"exclude_tests":true},"mcp":{"transport":"stdio","http_port":37378,"restrict_to_projects":null}}"#;
+        let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
+        assert!(!cfg.launch_at_login);
+        assert!(!cfg.build_all_on_startup);
     }
 }
