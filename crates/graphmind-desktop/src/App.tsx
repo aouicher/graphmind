@@ -193,7 +193,12 @@ export default function App() {
       }).catch(() => {});
       api.checkAnnouncements().then(setAnnouncements).catch(() => {});
 
-      // Trigger build-all if backend emitted the startup event
+      // Trigger build-all on startup if enabled in settings
+      api.getStartupSettings().then((s) => {
+        if (s.build_all_on_startup) api.buildAllProjects(false).catch(() => {});
+      }).catch(() => {});
+
+      // Keep listening for explicit startup-build-all events (e.g. future use)
       const unlisten = listen("startup-build-all", () => {
         api.buildAllProjects(false).catch(() => {});
       });
