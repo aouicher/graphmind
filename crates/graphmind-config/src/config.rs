@@ -144,6 +144,10 @@ pub struct GlobalConfig {
     pub setup_version: u32,
     #[serde(default)]
     pub license: LicenseConfig,
+    #[serde(default)]
+    pub launch_at_login: bool,
+    #[serde(default)]
+    pub build_all_on_startup: bool,
 }
 
 impl Default for GlobalConfig {
@@ -157,6 +161,8 @@ impl Default for GlobalConfig {
             embedding: EmbeddingConfig::default(),
             setup_version: 0,
             license: LicenseConfig::default(),
+            launch_at_login: false,
+            build_all_on_startup: false,
         }
     }
 }
@@ -204,6 +210,38 @@ pub fn slugify(input: &str) -> String {
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-')
         .collect()
+}
+
+#[cfg(test)]
+mod startup_config_tests {
+    use super::*;
+
+    #[test]
+    fn global_config_default_startup_fields_are_false() {
+        let cfg = GlobalConfig::default();
+        assert!(!cfg.launch_at_login);
+        assert!(!cfg.build_all_on_startup);
+    }
+
+    #[test]
+    fn startup_fields_serialize_deserialize() {
+        let mut cfg = GlobalConfig::default();
+        cfg.launch_at_login = true;
+        cfg.build_all_on_startup = true;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: GlobalConfig = serde_json::from_str(&json).unwrap();
+        assert!(parsed.launch_at_login);
+        assert!(parsed.build_all_on_startup);
+    }
+
+    #[test]
+    fn missing_startup_fields_deserialize_to_false() {
+        // Old config without the new fields should deserialize fine
+        let json = r#"{"version":"1","projects":{},"global_exclude":[],"defaults":{"embedding_model":"minilm","watch_debounce":2000,"max_depth":5,"exclude_tests":true},"mcp":{"transport":"stdio","http_port":37378,"restrict_to_projects":null}}"#;
+        let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
+        assert!(!cfg.launch_at_login);
+        assert!(!cfg.build_all_on_startup);
+    }
 }
 
 pub struct Registry;

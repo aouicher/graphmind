@@ -262,3 +262,92 @@ pub fn set_embedding_settings(settings: EmbeddingSettingsInput) -> Result<Embedd
 
     Ok(EmbeddingSettingsResult { projects_needing_embedding })
 }
+
+// ---------------------------------------------------------------------------
+// Startup settings
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct StartupSettings {
+    pub launch_at_login: bool,
+    pub build_all_on_startup: bool,
+}
+
+#[tauri::command]
+pub fn get_startup_settings() -> StartupSettings {
+    let config = load_config();
+    StartupSettings {
+        launch_at_login: config.launch_at_login,
+        build_all_on_startup: config.build_all_on_startup,
+    }
+}
+
+#[tauri::command]
+pub fn set_launch_at_login(
+    enabled: bool,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable().map_err(|e| format!("autostart enable failed: {e}"))?;
+    } else {
+        autostart.disable().map_err(|e| format!("autostart disable failed: {e}"))?;
+    }
+    let mut config = load_config();
+    config.launch_at_login = enabled;
+    save_config(&config);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_build_all_on_startup(enabled: bool) -> Result<(), String> {
+    let mut config = load_config();
+    config.build_all_on_startup = enabled;
+    save_config(&config);
+    Ok(())
+}
+
+#[cfg(test)]
+mod startup_settings_tests {
+    use super::*;
+
+    fn with_temp_home(f: impl FnOnce()) {
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()); }
+        f();
+    }
+
+    #[test]
+    fn get_startup_settings_defaults_to_false() {
+        with_temp_home(|| {
+            let s = get_startup_settings();
+            assert!(!s.launch_at_login);
+            assert!(!s.build_all_on_startup);
+        });
+    }
+
+    #[test]
+    fn set_build_all_on_startup_persists() {
+        with_temp_home(|| {
+            set_build_all_on_startup(true).unwrap();
+            let s = get_startup_settings();
+            assert!(s.build_all_on_startup);
+
+            set_build_all_on_startup(false).unwrap();
+            let s2 = get_startup_settings();
+            assert!(!s2.build_all_on_startup);
+        });
+    }
+
+    #[test]
+    fn startup_settings_roundtrip_with_other_config() {
+        with_temp_home(|| {
+            // Ensure build_all_on_startup persists independently from other config
+            set_build_all_on_startup(true).unwrap();
+            let cfg = graphmind_config::load_config();
+            assert!(cfg.build_all_on_startup);
+            assert!(!cfg.launch_at_login); // unrelated field untouched
+        });
+    }
+}

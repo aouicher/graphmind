@@ -90,6 +90,11 @@ export interface AppUpdateInfo {
   new_version: string | null;
 }
 
+export interface StartupSettings {
+  launch_at_login: boolean;
+  build_all_on_startup: boolean;
+}
+
 export interface SetupStatus {
   outdated: boolean;
   local_version: number;
@@ -145,6 +150,9 @@ export const api = {
   embedProjects: (slugs: string[]) => invoke<void>("embed_projects", { slugs }),
   checkAppUpdate: () => invoke<AppUpdateInfo>("check_app_update"),
   installAppUpdate: () => invoke<string>("install_app_update"),
+  getStartupSettings: () => invoke<StartupSettings>("get_startup_settings"),
+  setLaunchAtLogin: (enabled: boolean) => invoke<void>("set_launch_at_login", { enabled }),
+  setBuildAllOnStartup: (enabled: boolean) => invoke<void>("set_build_all_on_startup", { enabled }),
   checkSetupStatus: () => invoke<SetupStatus>("check_setup_status"),
   runSetup: () => invoke<string>("run_setup"),
   checkAnnouncements: () => invoke<Announcement[]>("check_announcements"),

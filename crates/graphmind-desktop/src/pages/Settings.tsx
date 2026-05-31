@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api, AppUpdateInfo, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save, Brain, Download, RefreshCw } from "lucide-react";
+import { Plus, X, Save, Brain, Download, RefreshCw, Power } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -16,6 +16,8 @@ export function Settings() {
   const [embOpenaiKey, setEmbOpenaiKey] = useState("");
   const [embVoyageKey, setEmbVoyageKey] = useState("");
   const [embSaving, setEmbSaving] = useState(false);
+  const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [buildAllOnStartup, setBuildAllOnStartup] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [cliVersion, setCliVersion] = useState<string | null>(null);
   const [cliUpdateAvailable, setCliUpdateAvailable] = useState(false);
@@ -36,6 +38,10 @@ export function Settings() {
       setEmbOpenaiKey(s.openai_key || "");
       setEmbVoyageKey(s.voyage_key || "");
     });
+    api.getStartupSettings().then((s) => {
+      setLaunchAtLogin(s.launch_at_login);
+      setBuildAllOnStartup(s.build_all_on_startup);
+    }).catch(() => {});
     api.getAppVersion().then(setAppVersion).catch(() => {});
     api.checkCliInstalled().then((s) => setCliVersion(s.version ?? null)).catch(() => {});
     api.checkCliUpdate().then((u) => { if (u.update_available) setCliUpdateAvailable(true); }).catch(() => {});
@@ -374,6 +380,60 @@ export function Settings() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Startup */}
+      <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+        <Power className="w-4 h-4" />
+        Startup
+      </h2>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between py-2 border-b border-border">
+          <div>
+            <p className="text-sm text-text-primary">Launch at login</p>
+            <p className="text-xs text-text-muted mt-0.5">Start GraphMind automatically when you log in to macOS.</p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={launchAtLogin}
+            onClick={async () => {
+              const next = !launchAtLogin;
+              try {
+                await api.setLaunchAtLogin(next);
+                setLaunchAtLogin(next);
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${launchAtLogin ? "bg-accent" : "bg-border"}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${launchAtLogin ? "translate-x-4" : "translate-x-1"}`} />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between py-2">
+          <div>
+            <p className="text-sm text-text-primary">Rebuild all projects on startup</p>
+            <p className="text-xs text-text-muted mt-0.5">Automatically re-index all projects each time the app opens.</p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={buildAllOnStartup}
+            onClick={async () => {
+              const next = !buildAllOnStartup;
+              try {
+                await api.setBuildAllOnStartup(next);
+                setBuildAllOnStartup(next);
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${buildAllOnStartup ? "bg-accent" : "bg-border"}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${buildAllOnStartup ? "translate-x-4" : "translate-x-1"}`} />
+          </button>
+        </div>
       </section>
 
       {/* Updates */}

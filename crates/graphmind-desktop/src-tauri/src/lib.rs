@@ -5,6 +5,7 @@ mod types;
 
 use state::AppState;
 use std::sync::Mutex;
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,9 +13,20 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
             tray::create_tray(app)?;
+
+            // Signal frontend to trigger build-all if enabled in config
+            let config = graphmind_config::load_config();
+            if config.build_all_on_startup {
+                app.emit("startup-build-all", ()).ok();
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -58,6 +70,9 @@ pub fn run() {
             commands::settings::set_embedding_settings,
             commands::updater::check_app_update,
             commands::updater::install_app_update,
+            commands::settings::get_startup_settings,
+            commands::settings::set_launch_at_login,
+            commands::settings::set_build_all_on_startup,
             commands::notices::check_setup_status,
             commands::notices::run_setup,
             commands::notices::check_announcements,
