@@ -642,3 +642,113 @@ fn gm_cross_links_returns_output() {
     let text = resp["content"][0]["text"].as_str().unwrap_or("");
     assert!(!text.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Group 6: gm_session_analyze
+// ---------------------------------------------------------------------------
+
+#[test]
+fn gm_session_analyze_missing_facts_returns_error() {
+    let resp = dispatch_tool("gm_session_analyze", &json!({}));
+    assert_eq!(resp.get("isError"), Some(&json!(true)));
+    let text = resp["content"][0]["text"].as_str().unwrap_or("");
+    assert!(text.contains("facts"), "expected 'facts' in: {text}");
+}
+
+#[test]
+fn gm_session_analyze_saves_facts() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_session_analyze",
+        json!({
+            "facts": [
+                { "content": "RRF fusion chosen over pure semantic search", "type": "decision" },
+                { "content": "Memory consolidate scans all JSONL files", "type": "convention" }
+            ]
+        }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("2 saved"), "expected '2 saved' in: {text}");
+    assert!(text.contains("0 skipped"), "expected '0 skipped' in: {text}");
+}
+
+#[test]
+fn gm_session_analyze_deduplicates_on_second_call() {
+    let ctx = setup();
+    let facts = json!({
+        "facts": [
+            { "content": "Jaccard dedup threshold is 0.80 for session analyze", "type": "convention" }
+        ]
+    });
+    // First call: should save
+    ctx.dispatch("gm_session_analyze", facts.clone());
+    // Second call: same fact — should be skipped
+    let resp = ctx.dispatch("gm_session_analyze", facts);
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("1 skipped"), "expected '1 skipped' in: {text}");
+}
+
+#[test]
+fn gm_session_analyze_empty_facts_array_returns_zero_saved() {
+    let ctx = setup();
+    let resp = ctx.dispatch("gm_session_analyze", json!({ "facts": [] }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("0 saved"), "expected '0 saved' in: {text}");
+}
+
+#[test]
+fn gm_session_analyze_skips_empty_content() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_session_analyze",
+        json!({
+            "facts": [
+                { "content": "", "type": "context" },
+                { "content": "   ", "type": "context" },
+                { "content": "valid fact for empty content test", "type": "context" }
+            ]
+        }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("1 saved"), "expected '1 saved' in: {text}");
+    assert!(text.contains("2 skipped"), "expected '2 skipped' in: {text}");
+}
+
+#[test]
+fn gm_session_analyze_respects_priority_flag() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_session_analyze",
+        json!({
+            "facts": [
+                { "content": "critical constraint: always use --slug not --project on CLI", "type": "bug", "priority": true }
+            ]
+        }),
+    );
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("1 saved"), "expected '1 saved' in: {text}");
+    // Verify it's searchable
+    let search = ctx.dispatch("gm_memory_search", json!({ "query": "slug not project CLI" }));
+    assert!(!ctx.is_error(&search));
+    let search_text = ctx.text(&search);
+    assert!(search_text.contains("results"), "expected search results: {search_text}");
+}
+
+#[test]
+fn gm_session_analyze_saved_entries_appear_in_memory_list() {
+    let ctx = setup();
+    let unique = "session_analyze_unique_marker_abc123";
+    ctx.dispatch(
+        "gm_session_analyze",
+        json!({ "facts": [{ "content": unique, "type": "context" }] }),
+    );
+    let list = ctx.dispatch("gm_memory_list", json!({}));
+    assert!(!ctx.is_error(&list));
+    let text = ctx.text(&list);
+    assert!(text.contains(unique), "entry should appear in memory list: {text}");
+}
