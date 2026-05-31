@@ -402,6 +402,62 @@ jobs:
               --field content="$ENCODED"
           fi
 
+  publish-cask:
+    needs: [release, release-assets, desktop-build]
+    if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+          TAP_REPO="aouicher/homebrew-graphmind"
+          SHA_ARM64=$(shasum -a 256 artifacts/graphmind-desktop-aarch64/*.dmg 2>/dev/null | head -1 | cut -d' ' -f1)
+          SHA_X64=$(shasum -a 256 artifacts/graphmind-desktop-x86_64/*.dmg 2>/dev/null | head -1 | cut -d' ' -f1)
+          CASK="cask \"graphmind\" do\n"
+          CASK+="  version \"${VERSION}\"\n\n"
+          CASK+="  on_arm do\n"
+          CASK+="    url \"https://github.com/${REPO}/releases/download/${TAG}/GraphMind-macos-arm64.dmg\"\n"
+          CASK+="    sha256 \"${SHA_ARM64}\"\n"
+          CASK+="  end\n\n"
+          CASK+="  on_intel do\n"
+          CASK+="    url \"https://github.com/${REPO}/releases/download/${TAG}/GraphMind-macos-x64.dmg\"\n"
+          CASK+="    sha256 \"${SHA_X64}\"\n"
+          CASK+="  end\n\n"
+          CASK+="  name \"GraphMind\"\n"
+          CASK+="  desc \"Local-first code intelligence with MCP server\"\n"
+          CASK+="  homepage \"https://getgraphmind.com\"\n\n"
+          CASK+="  app \"GraphMind.app\"\n\n"
+          CASK+="  zap trash: [\n"
+          CASK+='    "~/.graphmind",'
+          CASK+="\n"
+          CASK+='    "~/Library/Application Support/GraphMind",'
+          CASK+="\n"
+          CASK+='    "~/Library/Preferences/com.graphmind.app.plist",'
+          CASK+="\n"
+          CASK+='    "~/Library/Caches/com.graphmind.app",'
+          CASK+="\n"
+          CASK+="  ]\n"
+          CASK+="end\n"
+          ENCODED=$(printf '%b' "$CASK" | base64 -w 0)
+          CURRENT_SHA=$(gh api "repos/${TAP_REPO}/contents/Casks/graphmind.rb" --jq '.sha' 2>/dev/null || echo "")
+          if [ -n "$CURRENT_SHA" ]; then
+            gh api --method PUT "repos/${TAP_REPO}/contents/Casks/graphmind.rb" \
+              --field message="Update GraphMind cask to ${TAG}" \
+              --field content="$ENCODED" \
+              --field sha="$CURRENT_SHA"
+          else
+            gh api --method PUT "repos/${TAP_REPO}/contents/Casks/graphmind.rb" \
+              --field message="Update GraphMind cask to ${TAG}" \
+              --field content="$ENCODED"
+          fi
+
   publish-updater:
     needs: [release, release-assets, desktop-build]
     if: needs.release.outputs.released == 'true' && needs.release.outputs.prerelease == 'false'
