@@ -414,8 +414,8 @@ export function Settings() {
 
         <div className="flex items-center justify-between py-2">
           <div>
-            <p className="text-sm text-text-primary">Rebuild all projects on startup</p>
-            <p className="text-xs text-text-muted mt-0.5">Automatically re-index all projects each time the app opens.</p>
+            <p className="text-sm text-text-primary">Update all projects on startup</p>
+            <p className="text-xs text-text-muted mt-0.5">Automatically update all projects each time the app opens.</p>
           </div>
           <button
             role="switch"
