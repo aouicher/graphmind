@@ -120,6 +120,28 @@ fn tool_defs() -> Vec<Tool> {
                 "limit": { "type": "integer", "description": "Max results (default 20)" }
             }
         })),
+        make_tool("gm_session_analyze", "Batch-save multiple facts from a session in one call with automatic dedup. Pass an array of facts (content, type, tags, priority). Skips entries too similar to existing ones (Jaccard>0.80). Use at session checkpoints or end-of-session instead of multiple gm_memory_add calls.", json!({
+            "type": "object",
+            "properties": {
+                "facts": {
+                    "type": "array",
+                    "description": "Array of facts to save",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string", "description": "The fact — atomic, specific, one clear statement" },
+                            "type": { "type": "string", "description": "Memory type: decision, pattern, convention, bug, context" },
+                            "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tags" },
+                            "priority": { "type": "boolean", "description": "Inject at every session start (for critical conventions/constraints)" }
+                        },
+                        "required": ["content"]
+                    }
+                },
+                "project": { "type": "string", "description": "Project slug (optional — scopes to project)" },
+                "global": { "type": "boolean", "description": "Store as global memory (default false)" }
+            },
+            "required": ["facts"]
+        })),
         make_tool("gm_list_projects", "Lists all projects registered with graphmind (name, slug, root path, last build time). Use to discover available project slugs before calling project-scoped tools. No parameters required.", json!({
             "type": "object",
             "properties": {}

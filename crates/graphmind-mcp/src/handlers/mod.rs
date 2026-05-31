@@ -86,6 +86,7 @@ pub fn dispatch_tool(name: &str, args: &Value) -> Value {
         "gm_memory_search" => memory::handle_memory_search(args),
         "gm_memory_add" => memory::handle_memory_add(args),
         "gm_memory_list" => memory::handle_memory_list(args),
+        "gm_session_analyze" => memory::handle_session_analyze(args),
         // Meta
         "gm_list_projects" => meta::handle_list_projects(args),
         "gm_status" => meta::handle_status(args),
