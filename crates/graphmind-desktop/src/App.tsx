@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Projects } from "./pages/Projects";
 import { Integrations } from "./pages/Integrations";
@@ -191,6 +192,12 @@ export default function App() {
         if (status.outdated) setSetupOutdated(true);
       }).catch(() => {});
       api.checkAnnouncements().then(setAnnouncements).catch(() => {});
+
+      // Trigger build-all if backend emitted the startup event
+      const unlisten = listen("startup-build-all", () => {
+        api.buildAllProjects(false).catch(() => {});
+      });
+      return () => { unlisten.then((fn) => fn()); };
     }
   }, [needsSetup]);
 
