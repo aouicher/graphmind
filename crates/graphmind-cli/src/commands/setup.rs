@@ -281,34 +281,47 @@ pub fn install_opencode_mcp() {
 }
 
 fn claude_desktop_config_path() -> Option<PathBuf> {
-    let candidates = [
-        home_dir().join("Library/Application Support/Claude/claude_desktop_config.json"),
-        home_dir().join(".config/claude/claude_desktop_config.json"),
-    ];
+    let candidates: Vec<PathBuf> = if cfg!(target_os = "windows") {
+        // %APPDATA%\Claude — derived from HOME so test HOME-override works
+        vec![
+            home_dir().join("AppData").join("Roaming").join("Claude").join("claude_desktop_config.json"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            home_dir().join("Library/Application Support/Claude/claude_desktop_config.json"),
+        ]
+    } else {
+        vec![
+            home_dir().join(".config/claude/claude_desktop_config.json"),
+        ]
+    };
     for p in &candidates {
         if p.exists() {
             return Some(p.clone());
         }
     }
-    if cfg!(target_os = "macos") {
-        Some(candidates[0].clone())
-    } else {
-        Some(candidates[1].clone())
-    }
+    candidates.into_iter().next()
 }
 
 fn find_graphmind_binary() -> String {
     // Prefer known install location — avoids relying on shell PATH
-    let local_path = home_dir().join(".graphmind").join("bin").join("graphmind");
+    let bin_name = if cfg!(target_os = "windows") { "graphmind.exe" } else { "graphmind" };
+    let local_path = home_dir().join(".graphmind").join("bin").join(bin_name);
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
-    if let Ok(output) = std::process::Command::new("which")
+    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    if let Ok(output) = std::process::Command::new(which_cmd)
         .arg("graphmind")
         .output()
     {
         if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let path = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if !path.is_empty() {
                 return path;
             }
@@ -357,6 +370,14 @@ Be selective — only facts useful in a future session. Skip task details and te
 
 #[doc(hidden)]
 pub fn install_shell_path() {
+    if cfg!(target_os = "windows") {
+        install_shell_path_windows();
+    } else {
+        install_shell_path_unix();
+    }
+}
+
+fn install_shell_path_unix() {
     let install_dir = home_dir().join(".graphmind").join("bin");
     let install_dir_str = install_dir.to_string_lossy();
     let export_line = format!("export PATH=\"{}:$PATH\"", install_dir_str);
@@ -396,6 +417,71 @@ pub fn install_shell_path() {
     } else {
         println!("    {} added to: {}", "✓".green(), updated.join(", "));
         println!("    {} restart your shell or run: source ~/{}", "→".cyan(), updated[0]);
+    }
+}
+
+fn install_shell_path_windows() {
+    let install_dir = home_dir().join(".graphmind").join("bin");
+    let install_dir_str = install_dir.to_string_lossy().to_string();
+
+    // 1. Add to user PATH via registry (persistent, non-interactive shells)
+    let ps_set_path = format!(
+        r#"$current = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($current -notlike '*{0}*') {{ [Environment]::SetEnvironmentVariable('PATH', '{0};' + $current, 'User'); Write-Output 'updated' }} else {{ Write-Output 'already' }}"#,
+        install_dir_str
+    );
+    match std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_set_path])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if result == "already" {
+                println!("    {} PATH already configured (user environment)", "✓".green());
+            } else {
+                println!("    {} added to user PATH (registry)", "✓".green());
+            }
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            println!("    {} failed to set user PATH: {}", "✗".red(), err.trim());
+        }
+        Err(e) => {
+            println!("    {} powershell not available: {e}", "✗".red());
+        }
+    }
+
+    // 2. Also add to PowerShell profile for interactive sessions
+    let ps_get_profile = "$PROFILE";
+    if let Ok(out) = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", ps_get_profile])
+        .output()
+    {
+        if out.status.success() {
+            let profile_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let profile_path = std::path::PathBuf::from(&profile_path);
+            let add_line = format!("$env:PATH = '{};' + $env:PATH", install_dir_str);
+            let content = if profile_path.exists() {
+                fs::read_to_string(&profile_path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !content.contains(&install_dir_str) {
+                if let Some(parent) = profile_path.parent() {
+                    fs::create_dir_all(parent).ok();
+                }
+                let new_content = if content.is_empty() {
+                    format!("{}\n", add_line)
+                } else {
+                    format!("{}\n{}\n", content.trim_end(), add_line)
+                };
+                if let Err(e) = fs::write(&profile_path, new_content) {
+                    println!("    {} failed to update PowerShell profile: {e}", "✗".red());
+                } else {
+                    println!("    {} added to PowerShell profile", "✓".green());
+                    println!("    {} restart PowerShell to pick up changes", "→".cyan());
+                }
+            }
+        }
     }
 }
 
