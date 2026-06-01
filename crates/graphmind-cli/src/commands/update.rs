@@ -1,6 +1,7 @@
 use colored::Colorize;
 use graphmind_config::update_crosses_breaking;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -73,6 +74,7 @@ fn download_and_replace(version: &str) -> Result<(), String> {
     }
 
     // Verify downloaded binary is valid
+    #[cfg(unix)]
     fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| format!("Failed to set permissions: {e}"))?;
 

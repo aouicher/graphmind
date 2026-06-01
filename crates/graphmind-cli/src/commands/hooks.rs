@@ -1,6 +1,7 @@
 use graphmind_config::{Registry, resolve_project_slug};
 use colored::Colorize;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -54,6 +55,7 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
         fs::write(&hook_path, content).ok();
     }
 
+    #[cfg(unix)]
     fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755)).ok();
     true
 }
