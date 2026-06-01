@@ -90,22 +90,29 @@ cd ~/projects/myapp
 graphmind init           # per project — registers, installs git hooks, builds graph
 ```
 
-That's it. Claude Code and Claude Desktop will use graphmind automatically.
+That's it. Claude Code, Claude Desktop, Cursor, and VS Code will use graphmind automatically.
 
 ### `graphmind setup` (once, global)
 
 Configures your machine so all AI tools can use graphmind:
-1. Claude Code hooks (rewrites grep/find, injects session context, pre-fetches on prompts)
-2. Claude Code skill (3-layer rule: graph → memory → raw files)
-3. Claude Desktop MCP (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-4. Claude Code MCP (`~/.claude/settings.json`)
+1. Shell PATH (`~/.zshenv`, `~/.zshrc`, `~/.bashrc`)
+2. Claude Code hooks (rewrites grep/find, injects session context, pre-fetches on prompts)
+3. Claude Code skill (`/gm` + 19 sub-skills)
+4. Claude Desktop MCP (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+5. Claude Code MCP (`~/.claude/settings.json`)
+6. OpenCode MCP (`~/.config/opencode/opencode.jsonc`)
+7. Cursor global MCP (`~/.cursor/mcp.json`) — available in all Cursor projects
+8. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
 
 ### `graphmind init` (per project)
 
-Registers and indexes a project:
-1. Registers current directory
-2. Installs git hooks (auto-rebuild on commit, impact check on push)
-3. Builds the code graph
+Registers and indexes a project, then writes MCP config for editors that support project-level config:
+1. Registers current directory in the graphmind registry
+2. MCP project configs — written automatically:
+   - Claude Code: `~/.claude.json` under `projects.<path>.mcpServers` (local scope)
+   - VS Code: `<project>/.vscode/mcp.json`
+3. Git hooks (auto-rebuild on commit, impact check on push)
+4. Builds the code graph
 
 ```bash
 cd ~/projects/api && graphmind init
@@ -120,7 +127,7 @@ Both commands are idempotent — safe to re-run.
 <details>
 <summary>Click to expand</summary>
 
-#### MCP server for Claude Code
+#### MCP server for Claude Code (global)
 
 ```bash
 claude mcp add graphmind -- graphmind mcp
@@ -131,8 +138,29 @@ Or manually in `~/.claude/settings.json`:
 {
   "mcpServers": {
     "graphmind": {
-      "command": "graphmind",
-      "args": ["mcp"]
+      "command": "/home/user/.graphmind/bin/graphmind",
+      "args": ["mcp"],
+      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+    }
+  }
+}
+```
+
+#### MCP server for Claude Code (per project)
+
+`graphmind init` writes this automatically to `~/.claude.json`:
+```json
+{
+  "projects": {
+    "/absolute/path/to/project": {
+      "mcpServers": {
+        "graphmind": {
+          "type": "stdio",
+          "command": "/home/user/.graphmind/bin/graphmind",
+          "args": ["mcp"],
+          "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+        }
+      }
     }
   }
 }
@@ -147,7 +175,8 @@ Claude Desktop does not inherit your shell PATH. Use the full path:
   "mcpServers": {
     "graphmind": {
       "command": "/opt/homebrew/bin/graphmind",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "env": { "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }
     }
   }
 }
@@ -159,20 +188,36 @@ Config file location:
 
 > **Tip**: Run `which graphmind` to find the correct path on your system.
 
-#### Per-project `.mcp.json` (optional)
+#### MCP server for Cursor (global)
 
+`graphmind setup` writes this automatically to `~/.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
     "graphmind": {
-      "command": "graphmind",
-      "args": ["mcp"]
+      "command": "/home/user/.graphmind/bin/graphmind",
+      "args": ["mcp"],
+      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
     }
   }
 }
 ```
 
-Picked up automatically by Claude Code when you open the project.
+#### MCP server for VS Code (per project)
+
+`graphmind init` writes this automatically to `<project>/.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "graphmind": {
+      "type": "stdio",
+      "command": "/home/user/.graphmind/bin/graphmind",
+      "args": ["mcp"],
+      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+    }
+  }
+}
+```
 
 #### Claude Code search hook
 
