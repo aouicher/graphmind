@@ -87,9 +87,6 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
         project.path.dimmed()
     );
 
-    // Ensure per-project MCP configs are in place (idempotent)
-    super::setup::ensure_project_mcp_configs(&project.path);
-
     let db_path = paths::graph_db_path(slug);
     let cache_dir = paths::cache_dir_path(slug);
     let db_path_str = db_path.to_string_lossy().to_string();
