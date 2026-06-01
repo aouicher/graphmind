@@ -137,15 +137,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Wrap cl.exe to strip GCC-only flags (-Wno-*, -W[0-9]) that tree-sitter grammars pass
-          $wrapper = @'
-import sys, subprocess, os
-args = [a for a in sys.argv[1:] if not (a.startswith('-Wno-') or (a.startswith('-W') and not a.startswith('-WX')))]
-cl = os.environ.get('CL_REAL', 'cl.exe')
-sys.exit(subprocess.call([cl] + args))
-'@
-          $wrapper | Set-Content "$env:TEMP\cl_wrapper.py"
-          $bat = "@python `"$env:TEMP\cl_wrapper.py`" %*"
+          $bat = "@python `"${{ github.workspace }}\scripts\cl_wrapper.py`" %*"
           $bat | Set-Content "C:\Windows\System32\cl_wrapper.bat"
       - name: Build release binary
         env:
