@@ -110,6 +110,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: graphmind-x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: graphmind-x86_64-pc-windows-msvc.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -119,17 +122,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Inject version from tag
+      - name: Inject version from tag (unix)
+        if: runner.os != 'Windows'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
+      - name: Inject version from tag (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          (Get-Content Cargo.toml) -replace '^version = "[^"]*"', "version = `"$version`"" | Set-Content Cargo.toml
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
-      - name: Package binary
+      - name: Package binary (unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/graphmind dist/${{ matrix.binary }}
           chmod +x dist/${{ matrix.binary }}
+      - name: Package binary (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/graphmind.exe" "dist/${{ matrix.binary }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.binary }}
@@ -255,9 +272,11 @@ jobs:
           cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
           cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
           cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
+          cp "artifacts/graphmind-x86_64-pc-windows-msvc.exe/graphmind-x86_64-pc-windows-msvc.exe" /tmp/graphmind-cli-windows-x64.exe
           gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$REPO" --clobber
+          gh release upload "$TAG" /tmp/graphmind-cli-windows-x64.exe --repo "$REPO" --clobber
           for dir in artifacts/graphmind-desktop-*; do
             [ -d "$dir" ] || continue
             ARCH=$(basename "$dir" | sed 's/graphmind-desktop-//')
