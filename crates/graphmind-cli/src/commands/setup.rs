@@ -15,25 +15,28 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 7, "Shell PATH configuration");
+    print_step(1, 8, "Shell PATH configuration");
     install_shell_path();
 
-    print_step(2, 7, "Claude Code hooks");
+    print_step(2, 8, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(3, 7, "Claude Code skills");
+    print_step(3, 8, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(4, 7, "Claude Desktop MCP config");
+    print_step(4, 8, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(5, 7, "Claude Code MCP server");
+    print_step(5, 8, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(6, 7, "OpenCode MCP config");
+    print_step(6, 8, "OpenCode MCP config");
     install_opencode_mcp();
 
-    print_step(7, 7, "CLAUDE.md instruction");
+    print_step(7, 8, "Cursor global MCP config");
+    install_cursor_global_mcp();
+
+    print_step(8, 8, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -46,7 +49,7 @@ pub fn setup() {
     println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
-    println!("  {} MCP server configured (Claude Desktop + Claude Code + OpenCode)", "✓".green());
+    println!("  {} MCP server configured (Claude Desktop + Claude Code + Cursor + OpenCode)", "✓".green());
     println!("  {} CLAUDE.md instruction block updated", "✓".green());
     println!();
     println!("  Next: run {} in each project to index.", "graphmind init".cyan().bold());
@@ -64,17 +67,20 @@ pub fn init(path: Option<&str>, skip_build: bool) {
         project_path
     );
 
-    print_step(1, 3, &format!("Register project ({})", project_path));
+    print_step(1, 4, &format!("Register project ({})", project_path));
     super::register::register(project_path, None, &[]);
 
-    print_step(2, 3, "Git hooks (post-commit + pre-push)");
+    print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
+    ensure_project_mcp_configs(project_path);
+
+    print_step(3, 4, "Git hooks (post-commit + pre-push)");
     super::hooks::install(None);
 
     if !skip_build {
-        print_step(3, 3, "Build code graph");
+        print_step(4, 4, "Build code graph");
         super::build::build(None, false, false, false, false);
     } else {
-        println!("  {} Build skipped (use {} to index later)", "[3/3]".cyan().bold(), "graphmind build".dimmed());
+        println!("  {} Build skipped (use {} to index later)", "[4/4]".cyan().bold(), "graphmind build".dimmed());
     }
 
     println!("\n{}", "─".repeat(50).dimmed());
@@ -277,6 +283,181 @@ pub fn install_opencode_mcp() {
         println!("    {} configured at {}", "✓".green(), config_path.display());
     } else {
         println!("    {} configured (opencode not detected, config written for future use)", "⊘".yellow());
+    }
+}
+
+#[doc(hidden)]
+pub fn install_cursor_global_mcp() {
+    let config_path = home_dir().join(".cursor").join("mcp.json");
+    let graphmind_path = find_graphmind_binary();
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+
+    let mut config: Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    if config.get("mcpServers").and_then(|m| m.get("graphmind")).is_some() {
+        println!("    {} already configured", "✓".green());
+        return;
+    }
+
+    // Backup before modifying
+    if config_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = config_path.with_extension(format!("json.{ts}.bak"));
+        fs::copy(&config_path, &backup).ok();
+    }
+
+    let mcp_servers = config
+        .as_object_mut()
+        .unwrap()
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+    mcp_servers.as_object_mut().unwrap().insert(
+        "graphmind".to_string(),
+        json!({
+            "command": graphmind_path,
+            "args": ["mcp"],
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
+        }),
+    );
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+    println!("    {} configured at {}", "✓".green(), config_path.display());
+}
+
+/// Ensure per-project MCP configs are in place for Claude Code (~/.claude.json)
+/// and VS Code (<project>/.vscode/mcp.json).
+/// Idempotent — safe to call on every build.
+#[doc(hidden)]
+pub fn ensure_project_mcp_configs(project_path: &str) {
+    let abs_path = std::path::Path::new(project_path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
+    let abs_str = abs_path.to_string_lossy().to_string();
+
+    let graphmind_path = find_graphmind_binary();
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+    let path_env = format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir);
+
+    // 1. Claude Code — ~/.claude.json project-scoped entry
+    {
+        let claude_json_path = home_dir().join(".claude.json");
+        let mut config: Value = if claude_json_path.exists() {
+            let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
+            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+        } else {
+            json!({})
+        };
+
+        let already = config
+            .get("projects")
+            .and_then(|p| p.get(&abs_str))
+            .and_then(|p| p.get("mcpServers"))
+            .and_then(|m| m.get("graphmind"))
+            .is_some();
+
+        if already {
+            println!("    {} Claude Code (~/.claude.json) already configured", "✓".green());
+        } else {
+            if claude_json_path.exists() {
+                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
+                fs::copy(&claude_json_path, &backup).ok();
+            }
+
+            let projects = config
+                .as_object_mut()
+                .unwrap()
+                .entry("projects")
+                .or_insert_with(|| json!({}));
+            let project_entry = projects
+                .as_object_mut()
+                .unwrap()
+                .entry(abs_str.clone())
+                .or_insert_with(|| json!({}));
+            let mcp_servers = project_entry
+                .as_object_mut()
+                .unwrap()
+                .entry("mcpServers")
+                .or_insert_with(|| json!({}));
+            mcp_servers.as_object_mut().unwrap().insert(
+                "graphmind".to_string(),
+                json!({
+                    "type": "stdio",
+                    "command": graphmind_path,
+                    "args": ["mcp"],
+                    "env": { "PATH": path_env }
+                }),
+            );
+
+            let formatted = serde_json::to_string_pretty(&config).unwrap();
+            fs::write(&claude_json_path, formatted).unwrap_or_else(|e| {
+                println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
+            });
+            println!("    {} Claude Code (~/.claude.json) configured", "✓".green());
+        }
+    }
+
+    // 2. VS Code — <project>/.vscode/mcp.json
+    {
+        let vscode_dir = abs_path.join(".vscode");
+        let vscode_mcp = vscode_dir.join("mcp.json");
+
+        let mut config: Value = if vscode_mcp.exists() {
+            let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
+            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+        } else {
+            json!({})
+        };
+
+        let already = config
+            .get("servers")
+            .and_then(|m| m.get("graphmind"))
+            .is_some();
+
+        if already {
+            println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
+        } else {
+            if vscode_mcp.exists() {
+                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
+                fs::copy(&vscode_mcp, &backup).ok();
+            }
+
+            let servers = config
+                .as_object_mut()
+                .unwrap()
+                .entry("servers")
+                .or_insert_with(|| json!({}));
+            servers.as_object_mut().unwrap().insert(
+                "graphmind".to_string(),
+                json!({
+                    "type": "stdio",
+                    "command": graphmind_path,
+                    "args": ["mcp"],
+                    "env": { "PATH": path_env }
+                }),
+            );
+
+            fs::create_dir_all(&vscode_dir).ok();
+            let formatted = serde_json::to_string_pretty(&config).unwrap();
+            fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
+                println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
+            });
+            println!("    {} VS Code (.vscode/mcp.json) configured", "✓".green());
+        }
     }
 }
 
