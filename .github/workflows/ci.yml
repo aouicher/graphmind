@@ -111,8 +111,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary: graphmind-x86_64-unknown-linux-gnu
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary: graphmind-x86_64-pc-windows-msvc.exe
+            target: x86_64-pc-windows-gnu
+            binary: graphmind-x86_64-pc-windows-gnu.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -133,11 +133,13 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           (Get-Content Cargo.toml) -replace '^version = "[^"]*"', "version = `"$version`"" | Set-Content Cargo.toml
+      - name: Install MinGW (windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-gcc
+          update: false
       - name: Build release binary
-        env:
-          # MSVC does not support GCC-style -Wno-* flags used by some tree-sitter grammars.
-          # Override CFLAGS for the Windows MSVC target to suppress unknown-flag errors.
-          CFLAGS_x86_64_pc_windows_msvc: /W0
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
       - name: Package binary (unix)
         if: runner.os != 'Windows'
@@ -276,7 +278,7 @@ jobs:
           cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
           cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
           cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
-          cp "artifacts/graphmind-x86_64-pc-windows-msvc.exe/graphmind-x86_64-pc-windows-msvc.exe" /tmp/graphmind-cli-windows-x64.exe
+          cp "artifacts/graphmind-x86_64-pc-windows-gnu.exe/graphmind-x86_64-pc-windows-gnu.exe" /tmp/graphmind-cli-windows-x64.exe
           gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$REPO" --clobber
