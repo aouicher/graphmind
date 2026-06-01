@@ -111,8 +111,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary: graphmind-x86_64-unknown-linux-gnu
           - os: windows-latest
-            target: x86_64-pc-windows-gnu
-            binary: graphmind-x86_64-pc-windows-gnu.exe
+            target: x86_64-pc-windows-msvc
+            binary: graphmind-x86_64-pc-windows-msvc.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -133,13 +133,24 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           (Get-Content Cargo.toml) -replace '^version = "[^"]*"', "version = `"$version`"" | Set-Content Cargo.toml
-      - name: Install MinGW (windows)
+      - name: Install cl wrapper (windows)
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          install: mingw-w64-x86_64-gcc
-          update: false
+        shell: pwsh
+        run: |
+          # Wrap cl.exe to strip GCC-only flags (-Wno-*, -W[0-9]) that tree-sitter grammars pass
+          $wrapper = @'
+import sys, subprocess, os
+args = [a for a in sys.argv[1:] if not (a.startswith('-Wno-') or (a.startswith('-W') and not a.startswith('-WX')))]
+cl = os.environ.get('CL_REAL', 'cl.exe')
+sys.exit(subprocess.call([cl] + args))
+'@
+          $wrapper | Set-Content "$env:TEMP\cl_wrapper.py"
+          $bat = "@python `"$env:TEMP\cl_wrapper.py`" %*"
+          $bat | Set-Content "C:\Windows\System32\cl_wrapper.bat"
       - name: Build release binary
+        env:
+          CC: cl_wrapper.bat
+          CL_REAL: cl.exe
         run: cargo build --release --target ${{ matrix.target }} -p graphmind-cli
       - name: Package binary (unix)
         if: runner.os != 'Windows'
@@ -278,7 +289,7 @@ jobs:
           cp artifacts/graphmind-aarch64-apple-darwin/graphmind-aarch64-apple-darwin /tmp/graphmind-cli-macos-arm64
           cp artifacts/graphmind-x86_64-apple-darwin/graphmind-x86_64-apple-darwin /tmp/graphmind-cli-macos-x64
           cp artifacts/graphmind-x86_64-unknown-linux-gnu/graphmind-x86_64-unknown-linux-gnu /tmp/graphmind-cli-linux-x64
-          cp "artifacts/graphmind-x86_64-pc-windows-gnu.exe/graphmind-x86_64-pc-windows-gnu.exe" /tmp/graphmind-cli-windows-x64.exe
+          cp "artifacts/graphmind-x86_64-pc-windows-msvc.exe/graphmind-x86_64-pc-windows-msvc.exe" /tmp/graphmind-cli-windows-x64.exe
           gh release upload "$TAG" /tmp/graphmind-cli-macos-arm64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-macos-x64 --repo "$REPO" --clobber
           gh release upload "$TAG" /tmp/graphmind-cli-linux-x64 --repo "$REPO" --clobber
