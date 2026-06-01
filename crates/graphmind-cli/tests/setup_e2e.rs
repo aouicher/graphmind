@@ -9,7 +9,7 @@
 ///   cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
 use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_claude_desktop_mcp, install_claude_md_block,
-    install_opencode_mcp, install_shell_path, register_mcp_in_claude_code,
+    install_cursor_global_mcp, install_opencode_mcp, install_shell_path, register_mcp_in_claude_code,
 };
 use serde_json::Value;
 use std::fs;
@@ -361,6 +361,54 @@ fn setup_claude_md_block_backup_created() {
             !bak_files.is_empty(),
             "a .bak backup file should be created in ~/.claude/"
         );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 11. Cursor global MCP — written
+// ---------------------------------------------------------------------------
+
+#[test]
+fn setup_cursor_global_mcp_written() {
+    with_home(|home| {
+        install_cursor_global_mcp();
+
+        let config_path = home.join(".cursor").join("mcp.json");
+        assert!(config_path.exists(), "~/.cursor/mcp.json should be created");
+        let content = fs::read_to_string(&config_path).unwrap();
+        let json: Value = serde_json::from_str(&content).expect("valid JSON");
+
+        assert!(
+            json["mcpServers"]["graphmind"].is_object(),
+            "mcpServers.graphmind should exist"
+        );
+        let path_val = json["mcpServers"]["graphmind"]["env"]["PATH"]
+            .as_str()
+            .unwrap_or("");
+        let bin_dir = home.join(".graphmind").join("bin");
+        assert!(
+            path_val.contains(bin_dir.to_str().unwrap()),
+            "env.PATH should contain .graphmind/bin, got: {path_val}"
+        );
+    });
+}
+
+#[test]
+fn setup_cursor_global_mcp_idempotent() {
+    with_home(|_home| {
+        install_cursor_global_mcp();
+        install_cursor_global_mcp();
+
+        let config_path = home_dir().join(".cursor").join("mcp.json");
+        let content = fs::read_to_string(&config_path).unwrap();
+        let json: Value = serde_json::from_str(&content).expect("valid JSON");
+        let count = json["mcpServers"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .filter(|k| *k == "graphmind")
+            .count();
+        assert_eq!(count, 1, "graphmind should appear exactly once");
     });
 }
 

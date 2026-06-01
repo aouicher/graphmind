@@ -15,25 +15,28 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 7, "Shell PATH configuration");
+    print_step(1, 8, "Shell PATH configuration");
     install_shell_path();
 
-    print_step(2, 7, "Claude Code hooks");
+    print_step(2, 8, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(3, 7, "Claude Code skills");
+    print_step(3, 8, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(4, 7, "Claude Desktop MCP config");
+    print_step(4, 8, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(5, 7, "Claude Code MCP server");
+    print_step(5, 8, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(6, 7, "OpenCode MCP config");
+    print_step(6, 8, "OpenCode MCP config");
     install_opencode_mcp();
 
-    print_step(7, 7, "CLAUDE.md instruction");
+    print_step(7, 8, "Cursor global MCP config");
+    install_cursor_global_mcp();
+
+    print_step(8, 8, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -46,7 +49,7 @@ pub fn setup() {
     println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
-    println!("  {} MCP server configured (Claude Desktop + Claude Code + OpenCode)", "✓".green());
+    println!("  {} MCP server configured (Claude Desktop + Claude Code + Cursor + OpenCode)", "✓".green());
     println!("  {} CLAUDE.md instruction block updated", "✓".green());
     println!();
     println!("  Next: run {} in each project to index.", "graphmind init".cyan().bold());
@@ -281,6 +284,57 @@ pub fn install_opencode_mcp() {
     } else {
         println!("    {} configured (opencode not detected, config written for future use)", "⊘".yellow());
     }
+}
+
+#[doc(hidden)]
+pub fn install_cursor_global_mcp() {
+    let config_path = home_dir().join(".cursor").join("mcp.json");
+    let graphmind_path = find_graphmind_binary();
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+
+    let mut config: Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    if config.get("mcpServers").and_then(|m| m.get("graphmind")).is_some() {
+        println!("    {} already configured", "✓".green());
+        return;
+    }
+
+    // Backup before modifying
+    if config_path.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = config_path.with_extension(format!("json.{ts}.bak"));
+        fs::copy(&config_path, &backup).ok();
+    }
+
+    let mcp_servers = config
+        .as_object_mut()
+        .unwrap()
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+    mcp_servers.as_object_mut().unwrap().insert(
+        "graphmind".to_string(),
+        json!({
+            "command": graphmind_path,
+            "args": ["mcp"],
+            "env": {
+                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
+            }
+        }),
+    );
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+    println!("    {} configured at {}", "✓".green(), config_path.display());
 }
 
 /// Ensure per-project MCP configs are in place for Claude Code (~/.claude.json),
