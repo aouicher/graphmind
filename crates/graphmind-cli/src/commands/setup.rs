@@ -70,7 +70,7 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     print_step(1, 4, &format!("Register project ({})", project_path));
     super::register::register(project_path, None, &[]);
 
-    print_step(2, 4, "MCP project configs (Claude Code, Cursor, VS Code)");
+    print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
     ensure_project_mcp_configs(project_path);
 
     print_step(3, 4, "Git hooks (post-commit + pre-push)");
@@ -337,8 +337,8 @@ pub fn install_cursor_global_mcp() {
     println!("    {} configured at {}", "✓".green(), config_path.display());
 }
 
-/// Ensure per-project MCP configs are in place for Claude Code (~/.claude.json),
-/// Cursor (<project>/.cursor/mcp.json), and VS Code (<project>/.vscode/mcp.json).
+/// Ensure per-project MCP configs are in place for Claude Code (~/.claude.json)
+/// and VS Code (<project>/.vscode/mcp.json).
 /// Idempotent — safe to call on every build.
 #[doc(hidden)]
 pub fn ensure_project_mcp_configs(project_path: &str) {
@@ -410,56 +410,7 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
         }
     }
 
-    // 2. Cursor — <project>/.cursor/mcp.json
-    {
-        let cursor_dir = abs_path.join(".cursor");
-        let cursor_mcp = cursor_dir.join("mcp.json");
-
-        let mut config: Value = if cursor_mcp.exists() {
-            let content = fs::read_to_string(&cursor_mcp).unwrap_or_default();
-            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-        } else {
-            json!({})
-        };
-
-        let already = config
-            .get("mcpServers")
-            .and_then(|m| m.get("graphmind"))
-            .is_some();
-
-        if already {
-            println!("    {} Cursor (.cursor/mcp.json) already configured", "✓".green());
-        } else {
-            if cursor_mcp.exists() {
-                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let backup = cursor_mcp.with_extension(format!("json.{ts}.bak"));
-                fs::copy(&cursor_mcp, &backup).ok();
-            }
-
-            let mcp_servers = config
-                .as_object_mut()
-                .unwrap()
-                .entry("mcpServers")
-                .or_insert_with(|| json!({}));
-            mcp_servers.as_object_mut().unwrap().insert(
-                "graphmind".to_string(),
-                json!({
-                    "command": graphmind_path,
-                    "args": ["mcp"],
-                    "env": { "PATH": path_env }
-                }),
-            );
-
-            fs::create_dir_all(&cursor_dir).ok();
-            let formatted = serde_json::to_string_pretty(&config).unwrap();
-            fs::write(&cursor_mcp, formatted).unwrap_or_else(|e| {
-                println!("    {} failed to write .cursor/mcp.json: {e}", "✗".red());
-            });
-            println!("    {} Cursor (.cursor/mcp.json) configured", "✓".green());
-        }
-    }
-
-    // 3. VS Code — <project>/.vscode/mcp.json
+    // 2. VS Code — <project>/.vscode/mcp.json
     {
         let vscode_dir = abs_path.join(".vscode");
         let vscode_mcp = vscode_dir.join("mcp.json");

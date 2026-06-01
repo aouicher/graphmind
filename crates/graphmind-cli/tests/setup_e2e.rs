@@ -450,17 +450,7 @@ fn ensure_project_mcp_configs_written() {
             "env.PATH should contain .graphmind/bin"
         );
 
-        // 2. <project>/.cursor/mcp.json
-        let cursor_mcp = abs_path.join(".cursor").join("mcp.json");
-        assert!(cursor_mcp.exists(), ".cursor/mcp.json should be created");
-        let content = fs::read_to_string(&cursor_mcp).unwrap();
-        let json: Value = serde_json::from_str(&content).expect("valid JSON");
-        assert!(
-            json["mcpServers"]["graphmind"].is_object(),
-            "mcpServers.graphmind should exist in .cursor/mcp.json"
-        );
-
-        // 3. <project>/.vscode/mcp.json
+        // 2. <project>/.vscode/mcp.json
         let vscode_mcp = abs_path.join(".vscode").join("mcp.json");
         assert!(vscode_mcp.exists(), ".vscode/mcp.json should be created");
         let content = fs::read_to_string(&vscode_mcp).unwrap();
@@ -503,13 +493,6 @@ fn ensure_project_mcp_configs_idempotent() {
             .expect("mcpServers object");
         let count = mcp_servers.keys().filter(|k| *k == "graphmind").count();
         assert_eq!(count, 1, "graphmind should appear exactly once in ~/.claude.json mcpServers");
-
-        // .cursor/mcp.json
-        let cursor_mcp = abs_path.join(".cursor").join("mcp.json");
-        let content = fs::read_to_string(&cursor_mcp).unwrap();
-        let json: Value = serde_json::from_str(&content).expect("valid JSON");
-        let count = json["mcpServers"].as_object().unwrap().keys().filter(|k| *k == "graphmind").count();
-        assert_eq!(count, 1, "graphmind should appear exactly once in .cursor/mcp.json");
 
         // .vscode/mcp.json
         let vscode_mcp = abs_path.join(".vscode").join("mcp.json");
