@@ -607,6 +607,12 @@ function StepEmbeddings({ onNext }: { onNext: () => void }) {
 
   const providers = [
     {
+      id: "disabled",
+      name: "Disabled",
+      desc: "Text search only, no semantic embeddings",
+      badge: null,
+    },
+    {
       id: "local",
       name: "Local",
       desc: "all-MiniLM-L6-v2 — no API key, runs on device",
@@ -622,12 +628,6 @@ function StepEmbeddings({ onNext }: { onNext: () => void }) {
       id: "openai",
       name: "OpenAI",
       desc: "text-embedding-3-small — general purpose",
-      badge: null,
-    },
-    {
-      id: "disabled",
-      name: "Disabled",
-      desc: "Text search only, no semantic embeddings",
       badge: null,
     },
   ];

@@ -123,7 +123,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            mode: EmbeddingMode::Local,
+            mode: EmbeddingMode::Disabled,
             model: None,
             openai_base_url: None,
             api_keys: ApiKeys::default(),
