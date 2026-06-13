@@ -7,6 +7,7 @@ members = [
     "crates/graphmind-mcp",
     "crates/graphmind-config",
     "crates/graphmind-license",
+    "crates/graphmind-api-client",
     "crates/graphmind-cli",
     "crates/graphmind-desktop/src-tauri",
 ]

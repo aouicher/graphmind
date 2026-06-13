@@ -85,8 +85,38 @@ pub(crate) fn fuse_fts_and_semantic(
 
 pub(crate) fn load_embed_engine() -> Option<Box<dyn graphmind_embeddings::engine::EmbeddingEngine>> {
     let config = graphmind_config::config::load_config();
+    // Remote embed mode: the MCP server handles semantic search via remote_semantic_search()
+    if graphmind_api_client::is_remote_embed(&config) {
+        return None;
+    }
     if config.embedding.mode == graphmind_config::config::EmbeddingMode::Disabled {
         return None;
     }
     graphmind_embeddings::factory::create_engine(&config.embedding).ok()
+}
+
+/// Perform semantic search against the remote server (used when remote.mode = embed|full).
+pub(crate) fn remote_semantic_search(
+    slug: &str,
+    query: &str,
+    limit: usize,
+) -> Vec<graphmind_embeddings::search::SearchResult> {
+    let config = graphmind_config::config::load_config();
+    let client = match graphmind_api_client::ApiClient::from_config(&config) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    match client.search_embeddings(slug, query, limit) {
+        Ok(results) => results
+            .into_iter()
+            .map(|r| graphmind_embeddings::search::SearchResult {
+                symbol_name: r.symbol_name,
+                symbol_kind: String::new(),
+                file: r.file_path.unwrap_or_default(),
+                text: String::new(),
+                score: r.score as f64,
+            })
+            .collect(),
+        Err(_) => vec![],
+    }
 }

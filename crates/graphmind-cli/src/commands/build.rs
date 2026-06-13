@@ -1,5 +1,6 @@
 use graphmind_config::{paths, Registry, resolve_project_slug};
 use graphmind_config::config::{EmbeddingMode, load_config};
+use graphmind_api_client::{ApiClient, EmbedChunk, is_remote_embed};
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
@@ -167,10 +168,15 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let meta_path = paths::meta_path(slug);
     std::fs::write(meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default()).ok();
 
-    // Embedding step
+    // Embedding + remote sync step
     let global_config = load_config();
-    if global_config.embedding.mode != EmbeddingMode::Disabled {
+    if is_remote_embed(&global_config) {
+        run_remote_embed_step(slug, &queries, &global_config);
+    } else if global_config.embedding.mode != EmbeddingMode::Disabled {
         run_embedding_step(slug, &queries, &global_config.embedding, None);
+    }
+    if graphmind_api_client::is_remote_full(&global_config) {
+        run_remote_sync_step(slug, &queries, &global_config);
     }
 
     println!(
@@ -560,6 +566,197 @@ fn run_embedding_for_files(
     }
 }
 
+fn build_embed_chunks_from_queries(_slug: &str, queries: &GraphQueries) -> Vec<EmbedChunk> {
+    queries.all_symbols()
+        .into_iter()
+        .filter(|s| s.content.is_some() || s.signature.is_some())
+        .map(|s| {
+            let mut text = format!("{} {} ({})", s.kind, s.name, s.file);
+            if let Some(sig) = &s.signature { text.push_str(&format!("\n{sig}")); }
+            if let Some(content) = &s.content {
+                text.push_str(&format!("\n{}", content.chars().take(512).collect::<String>()));
+            }
+            EmbedChunk {
+                symbol_name: s.name.clone(),
+                content: text,
+                file_path: Some(s.file.clone()),
+            }
+        })
+        .collect()
+}
+
+fn run_remote_embed_step(slug: &str, queries: &GraphQueries, config: &graphmind_config::config::GlobalConfig) {
+    let client = match ApiClient::from_config(config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{} Remote embed: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    let chunks = build_embed_chunks_from_queries(slug, queries);
+    if chunks.is_empty() {
+        return;
+    }
+
+    println!("{} Remote embedding {} symbols...", ">>".cyan().bold(), chunks.len());
+
+    match client.embed_chunks(slug, chunks) {
+        Ok(result) => println!(
+            "{} Remote embed: {} stored, {} skipped",
+            "OK".green().bold(), result.stored, result.skipped
+        ),
+        Err(e) => eprintln!("{} Remote embed: {}", "Warning:".yellow().bold(), e),
+    }
+}
+
+fn run_remote_embed_for_files(slug: &str, changed_rel_paths: &[String], config: &graphmind_config::config::GlobalConfig) {
+    if changed_rel_paths.is_empty() {
+        return;
+    }
+
+    let client = match ApiClient::from_config(config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{} Remote embed: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    let graph_db_path = paths::graph_db_path(slug);
+    let db = match init_database(&graph_db_path.to_string_lossy()) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{} Graph DB: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+    let queries = GraphQueries::new(&db);
+
+    let chunks: Vec<EmbedChunk> = changed_rel_paths.iter()
+        .flat_map(|file| queries.symbols_in_file(file))
+        .filter(|s| s.content.is_some() || s.signature.is_some())
+        .map(|s| {
+            let mut text = format!("{} {} ({})", s.kind, s.name, s.file);
+            if let Some(sig) = &s.signature { text.push_str(&format!("\n{sig}")); }
+            if let Some(content) = &s.content {
+                text.push_str(&format!("\n{}", content.chars().take(512).collect::<String>()));
+            }
+            EmbedChunk {
+                symbol_name: s.name.clone(),
+                content: text,
+                file_path: Some(s.file.clone()),
+            }
+        })
+        .collect();
+
+    if chunks.is_empty() {
+        return;
+    }
+
+    match client.embed_chunks(slug, chunks) {
+        Ok(result) => println!(
+            "{} Remote embeddings updated ({} stored, {} skipped)",
+            ">>".cyan().bold(), result.stored, result.skipped
+        ),
+        Err(e) => eprintln!("{} Remote embed: {}", "Warning:".yellow().bold(), e),
+    }
+}
+
+fn run_remote_sync_step(slug: &str, queries: &GraphQueries, config: &graphmind_config::config::GlobalConfig) {
+    use graphmind_api_client::{ApiClient, GraphSyncPayload, SyncSymbol, SyncCallEdge};
+
+    let client = match ApiClient::from_config(config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{} Remote sync: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+
+    // Build symbols payload from graph DB
+    let symbols: Vec<SyncSymbol> = queries.all_symbols()
+        .into_iter()
+        .map(|s| SyncSymbol {
+            name: s.name,
+            kind: s.kind,
+            file_path: s.file,
+            line_start: s.line_start,
+            line_end: if s.line_end > 0 { Some(s.line_end) } else { None },
+            source_code: s.content,
+            signature: s.signature,
+            parent_name: None,
+            qualified_name: None,
+        })
+        .collect();
+
+    // Build call edges payload — query directly from the graph DB
+    let call_edges: Vec<SyncCallEdge> = {
+        let db_path = paths::graph_db_path(slug);
+        match init_database(&db_path.to_string_lossy()) {
+            Ok(db) => {
+                let mut stmt = db.prepare(
+                    "SELECT s1.name, s1.file, s2.name, s2.file \
+                     FROM edges e \
+                     JOIN symbols s1 ON s1.id = e.from_id \
+                     JOIN symbols s2 ON s2.id = e.to_id \
+                     WHERE e.kind = 'calls'"
+                ).unwrap_or_else(|_| panic!("prepare edges query"));
+                stmt.query_map([], |row| {
+                    Ok(SyncCallEdge {
+                        caller_name: row.get(0)?,
+                        caller_file: row.get(1)?,
+                        callee_name: row.get(2)?,
+                        callee_file: row.get(3)?,
+                    })
+                })
+                .unwrap_or_else(|_| panic!("query edges"))
+                .filter_map(|r| r.ok())
+                .collect()
+            }
+            Err(e) => {
+                eprintln!("{} Remote sync DB: {}", "Warning:".yellow().bold(), e);
+                return;
+            }
+        }
+    };
+
+    let since = config.remote.last_sync_at.clone();
+    let is_incremental = since.is_some();
+
+    println!(
+        "{} Remote sync: {} symbols, {} edges{}...",
+        ">>".cyan().bold(),
+        symbols.len(),
+        call_edges.len(),
+        if is_incremental { " (incremental)" } else { " (full)" }
+    );
+
+    let payload = GraphSyncPayload {
+        project_slug: slug.to_string(),
+        since,
+        symbols,
+        call_edges,
+        file_imports: vec![],
+        cross_project_links: None,
+        event_listeners: None,
+    };
+
+    match client.sync_graph(&payload) {
+        Ok(result) => {
+            println!(
+                "{} Remote sync: {} symbols, {} edges, version {}",
+                "OK".green().bold(), result.symbols, result.edges, result.version
+            );
+            // Persist last_sync_at so next build is incremental
+            let mut updated_config = graphmind_config::config::load_config();
+            updated_config.remote.last_sync_at = Some(result.synced_at);
+            graphmind_config::config::save_config(&updated_config);
+        }
+        Err(e) => eprintln!("{} Remote sync: {}", "Warning:".yellow().bold(), e),
+    }
+}
+
 fn watch_project(slug: &str) {
     let project = match Registry::get(slug) {
         Some(p) => p,
@@ -659,7 +856,9 @@ fn watch_project(slug: &str) {
 
                 // Incremental embedding update
                 let global_config = load_config();
-                if global_config.embedding.mode != EmbeddingMode::Disabled {
+                if is_remote_embed(&global_config) {
+                    run_remote_embed_for_files(slug, &display, &global_config);
+                } else if global_config.embedding.mode != EmbeddingMode::Disabled {
                     run_embedding_for_files(slug, &display, &global_config.embedding);
                 }
 

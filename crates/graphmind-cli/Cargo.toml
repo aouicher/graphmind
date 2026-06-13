@@ -36,6 +36,7 @@ tokio = { version = "1", features = ["full"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
 graphmind-embeddings = { path = "../graphmind-embeddings" }
+graphmind-api-client = { path = "../graphmind-api-client" }
 which = "6"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 

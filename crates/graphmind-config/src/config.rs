@@ -101,6 +101,25 @@ pub enum EmbeddingMode {
     Disabled,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum RemoteMode {
+    #[default]
+    Off,
+    Embed,
+    Full,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RemoteConfig {
+    #[serde(default)]
+    pub mode: RemoteMode,
+    /// ISO-8601 datetime of the last successful graph sync to the server.
+    /// Used to compute the incremental sync window (the `since` param).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiKeys {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +167,8 @@ pub struct GlobalConfig {
     pub launch_at_login: bool,
     #[serde(default)]
     pub build_all_on_startup: bool,
+    #[serde(default)]
+    pub remote: RemoteConfig,
 }
 
 impl Default for GlobalConfig {
@@ -163,6 +184,7 @@ impl Default for GlobalConfig {
             license: LicenseConfig::default(),
             launch_at_login: false,
             build_all_on_startup: false,
+            remote: RemoteConfig::default(),
         }
     }
 }
