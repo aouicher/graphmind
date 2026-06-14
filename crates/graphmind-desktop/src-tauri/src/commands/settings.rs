@@ -308,6 +308,63 @@ pub fn set_build_all_on_startup(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Remote settings
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct RemoteSettings {
+    pub mode: String,
+    pub tier: String,
+    pub last_sync_at: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_remote_settings() -> RemoteSettings {
+    use graphmind_license::LicenseManager;
+    let config = load_config();
+    let manager = LicenseManager::from_config(&config);
+    RemoteSettings {
+        mode: format!("{:?}", config.remote.mode).to_lowercase(),
+        tier: format!("{:?}", manager.tier()).to_lowercase(),
+        last_sync_at: config.remote.last_sync_at.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn set_remote_mode(mode: String) -> Result<(), String> {
+    use graphmind_config::config::{Feature, RemoteMode};
+    use graphmind_license::LicenseManager;
+
+    let mut config = load_config();
+    let manager = LicenseManager::from_config(&config);
+
+    let new_mode = match mode.as_str() {
+        "off" => RemoteMode::Off,
+        "embed" => {
+            if !manager.has_feature(&Feature::RemoteEmbeddings) {
+                return Err("Remote embed requires the Embeddings tier or higher.".to_string());
+            }
+            RemoteMode::Embed
+        }
+        "full" => {
+            if !manager.has_feature(&Feature::RemoteMcp) {
+                return Err("Remote full mode requires the Pro or Team tier.".to_string());
+            }
+            RemoteMode::Full
+        }
+        other => return Err(format!("Unknown mode '{}'. Use: off, embed, full", other)),
+    };
+
+    let prev_mode = std::mem::replace(&mut config.remote.mode, new_mode);
+    if matches!(prev_mode, RemoteMode::Full) && !matches!(config.remote.mode, RemoteMode::Full) {
+        config.remote.last_sync_at = None;
+    }
+
+    save_config(&config);
+    Ok(())
+}
+
 #[cfg(test)]
 mod startup_settings_tests {
     use super::*;

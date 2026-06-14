@@ -69,7 +69,8 @@ pub fn set(mode: &str) {
             println!("  Run {} to apply now.", "graphmind build".bold());
         }
         RemoteMode::Off => {
-            println!("  Back to local-only mode. Local embeddings will be used on next build.");
+            println!("  Back to local-only mode. Local embeddings will be rebuilt on next build.");
+            println!("  {}", "Note: semantic search will be unavailable until you run graphmind build.".yellow());
         }
     }
 }

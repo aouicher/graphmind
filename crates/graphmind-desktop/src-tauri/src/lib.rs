@@ -80,6 +80,8 @@ pub fn run() {
             commands::license::get_license_status,
             commands::license::activate_license,
             commands::license::open_upgrade_page,
+            commands::settings::get_remote_settings,
+            commands::settings::set_remote_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
