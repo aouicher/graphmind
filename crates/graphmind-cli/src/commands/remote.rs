@@ -67,6 +67,7 @@ pub fn set(mode: &str) {
         RemoteMode::Full => {
             println!("  Graph will sync to server + MCP will use remote SSE after next build.");
             println!("  Run {} to apply now.", "graphmind build".bold());
+            println!("  {}", "Note: your IDE MCP config will be updated automatically during the build.".dimmed());
         }
         RemoteMode::Off => {
             println!("  Back to local-only mode. Local embeddings will be rebuilt on next build.");

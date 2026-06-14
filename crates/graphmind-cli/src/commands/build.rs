@@ -691,33 +691,34 @@ fn run_remote_sync_step(slug: &str, queries: &GraphQueries, config: &graphmind_c
         .collect();
 
     // Build call edges payload — query directly from the graph DB
-    let call_edges: Vec<SyncCallEdge> = {
-        let db_path = paths::graph_db_path(slug);
-        match init_database(&db_path.to_string_lossy()) {
-            Ok(db) => {
-                let mut stmt = db.prepare(
-                    "SELECT s1.name, s1.file, s2.name, s2.file \
-                     FROM edges e \
-                     JOIN symbols s1 ON s1.id = e.from_id \
-                     JOIN symbols s2 ON s2.id = e.to_id \
-                     WHERE e.kind = 'calls'"
-                ).unwrap_or_else(|_| panic!("prepare edges query"));
-                stmt.query_map([], |row| {
-                    Ok(SyncCallEdge {
-                        caller_name: row.get(0)?,
-                        caller_file: row.get(1)?,
-                        callee_name: row.get(2)?,
-                        callee_file: row.get(3)?,
-                    })
-                })
-                .unwrap_or_else(|_| panic!("query edges"))
-                .filter_map(|r| r.ok())
-                .collect()
-            }
-            Err(e) => {
-                eprintln!("{} Remote sync DB: {}", "Warning:".yellow().bold(), e);
-                return;
-            }
+    let edges_db_path = paths::graph_db_path(slug);
+    let edges_db = match init_database(&edges_db_path.to_string_lossy()) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("{} Remote sync DB: {}", "Warning:".yellow().bold(), e);
+            return;
+        }
+    };
+    let call_edges: Vec<SyncCallEdge> = match edges_db.prepare(
+        "SELECT s1.name, s1.file, s2.name, s2.file \
+         FROM edges e \
+         JOIN symbols s1 ON s1.id = e.from_id \
+         JOIN symbols s2 ON s2.id = e.to_id \
+         WHERE e.kind = 'calls'"
+    ).and_then(|mut stmt| {
+        stmt.query_map([], |row| {
+            Ok(SyncCallEdge {
+                caller_name: row.get(0)?,
+                caller_file: row.get(1)?,
+                callee_name: row.get(2)?,
+                callee_file: row.get(3)?,
+            })
+        }).map(|rows| rows.filter_map(|r| r.ok()).collect())
+    }) {
+        Ok(edges) => edges,
+        Err(e) => {
+            eprintln!("{} Remote sync edges query: {}", "Warning:".yellow().bold(), e);
+            return;
         }
     };
 
