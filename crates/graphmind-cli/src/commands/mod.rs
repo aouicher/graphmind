@@ -12,6 +12,7 @@ pub mod memory;
 pub mod notices;
 pub mod query;
 pub mod register;
+pub mod remote;
 pub mod search;
 pub mod session;
 pub mod setup;
