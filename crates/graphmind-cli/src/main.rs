@@ -104,6 +104,9 @@ enum Commands {
         slug: Option<String>,
         #[arg(long, default_value = "3")]
         depth: usize,
+        /// Filter by file path to disambiguate common symbol names
+        #[arg(long)]
+        file: Option<String>,
     },
     /// Show graph map overview
     Map {
@@ -519,8 +522,8 @@ fn main() {
         Commands::Impact { file, slug, depth } => {
             commands::query::impact(&file, slug.as_deref(), depth);
         }
-        Commands::FnImpact { name, slug, depth } => {
-            commands::query::fn_impact(&name, slug.as_deref(), depth);
+        Commands::FnImpact { name, slug, depth, file } => {
+            commands::query::fn_impact(&name, slug.as_deref(), depth, file.as_deref());
         }
         Commands::Map { slug } => {
             commands::query::map(slug.as_deref());

@@ -253,12 +253,12 @@ pub fn impact(file: &str, slug: Option<&str>, depth: usize) {
     }
 }
 
-pub fn fn_impact(name: &str, slug: Option<&str>, depth: usize) {
+pub fn fn_impact(name: &str, slug: Option<&str>, depth: usize, file: Option<&str>) {
     let slug = require_slug(slug);
     let db = open_db(&slug);
     let q = GraphQueries::new(&db);
 
-    let symbols = q.find_symbol(name);
+    let symbols = q.find_symbol_filtered(name, file, None);
     if symbols.is_empty() {
         println!("{} No symbol found: {}", "!".yellow(), name);
         return;
