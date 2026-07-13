@@ -141,3 +141,36 @@ pub fn install_skill() {
         }
     }
 }
+
+/// Remove the /gm skill and all sub-skills installed by `install_skill()`.
+/// Only touches `~/.claude/skills/graphmind` and the exact sub-skill dirs
+/// from `SUB_SKILLS` — leaves any other directory under `~/.claude/skills/` untouched.
+pub fn uninstall_skill() {
+    let skills_base = dirs::home_dir()
+        .expect("Could not find home directory")
+        .join(".claude")
+        .join("skills");
+
+    let mut removed = 0;
+
+    let skill_dir = skills_base.join("graphmind");
+    if skill_dir.exists() {
+        fs::remove_dir_all(&skill_dir).ok();
+        removed += 1;
+    }
+
+    for (name, _) in SUB_SKILLS {
+        let dir = skills_base.join(name);
+        if dir.exists() {
+            fs::remove_dir_all(&dir).ok();
+            removed += 1;
+        }
+    }
+
+    println!(
+        "    {} removed {} skill dir(s) ({})",
+        "✓".green().bold(),
+        removed,
+        skills_base.display()
+    );
+}
