@@ -436,6 +436,45 @@ fn gm_fn_impact_missing_symbol_returns_error() {
 }
 
 #[test]
+fn gm_fn_impact_file_filter_narrows_ambiguous_symbol() {
+    // "fetch_balance" is defined identically in wallet.rs and wallet.rb in the
+    // fixture. Without `file`, callers from both definitions are merged;
+    // with `file`, only callers of the file-scoped definition are returned.
+    let ctx = setup();
+    let unfiltered = ctx.dispatch(
+        "gm_fn_impact",
+        json!({ "symbol": "fetch_balance", "project": ctx.slug }),
+    );
+    assert!(!ctx.is_error(&unfiltered), "unexpected error: {}", ctx.text(&unfiltered));
+    let unfiltered_json: Value = serde_json::from_str(&ctx.text(&unfiltered)).unwrap();
+    let unfiltered_count = unfiltered_json["caller_count"].as_i64().unwrap();
+
+    let filtered = ctx.dispatch(
+        "gm_fn_impact",
+        json!({
+            "symbol": "fetch_balance",
+            "file": "src/services/wallet.rs",
+            "project": ctx.slug
+        }),
+    );
+    assert!(!ctx.is_error(&filtered), "unexpected error: {}", ctx.text(&filtered));
+    let filtered_json: Value = serde_json::from_str(&ctx.text(&filtered)).unwrap();
+    let filtered_count = filtered_json["caller_count"].as_i64().unwrap();
+
+    assert!(
+        filtered_count < unfiltered_count,
+        "expected file filter to narrow results: filtered={filtered_count} unfiltered={unfiltered_count}"
+    );
+    for caller in filtered_json["callers"].as_array().unwrap() {
+        assert_eq!(
+            caller["file"].as_str().unwrap(),
+            "src/services/wallet.rs",
+            "file filter leaked a caller from another file: {caller}"
+        );
+    }
+}
+
+#[test]
 fn gm_cycles_returns_output() {
     let ctx = setup();
     let resp = ctx.dispatch("gm_cycles", json!({ "project": ctx.slug }));
