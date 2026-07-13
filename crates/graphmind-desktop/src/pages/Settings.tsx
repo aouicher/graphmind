@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { api, AppUpdateInfo, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save, Brain, Download, RefreshCw, Power } from "lucide-react";
+import { api, AppUpdateInfo, ProjectInfo, RemoteSettings } from "../lib/tauri";
+import { Plus, X, Save, Brain, Download, RefreshCw, Power, Zap } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -16,6 +16,13 @@ export function Settings() {
   const [embOpenaiKey, setEmbOpenaiKey] = useState("");
   const [embVoyageKey, setEmbVoyageKey] = useState("");
   const [embSaving, setEmbSaving] = useState(false);
+  const [remoteSettings, setRemoteSettings] = useState<RemoteSettings | null>(null);
+  const [remoteSaving, setRemoteSaving] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [licenseStatus, setLicenseStatus] = useState<{ display: string; tier: string; is_expired: boolean } | null>(null);
+  const [licenseActivating, setLicenseActivating] = useState(false);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [buildAllOnStartup, setBuildAllOnStartup] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -42,6 +49,8 @@ export function Settings() {
       setLaunchAtLogin(s.launch_at_login);
       setBuildAllOnStartup(s.build_all_on_startup);
     }).catch(() => {});
+    api.getRemoteSettings().then(setRemoteSettings).catch(() => {});
+    api.getLicenseStatus().then(setLicenseStatus).catch(() => {});
     api.getAppVersion().then(setAppVersion).catch(() => {});
     api.checkCliInstalled().then((s) => setCliVersion(s.version ?? null)).catch(() => {});
     api.checkCliUpdate().then((u) => { if (u.update_available) setCliUpdateAvailable(true); }).catch(() => {});
@@ -378,6 +387,191 @@ export function Settings() {
                 Later
               </button>
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Remote & License */}
+      <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+        <Zap className="w-4 h-4" />
+        Remote & License
+      </h2>
+
+      <section className="space-y-4">
+        {/* License key + status */}
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-text-secondary">License</p>
+          {licenseStatus && (
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                licenseStatus.tier === "free" ? "bg-border text-text-muted" :
+                licenseStatus.tier === "embeddings" ? "bg-blue-500/15 text-blue-400" :
+                licenseStatus.tier === "pro" ? "bg-accent/15 text-accent" :
+                "bg-purple-500/15 text-purple-400"
+              }`}>
+                {licenseStatus.tier.charAt(0).toUpperCase() + licenseStatus.tier.slice(1)}
+              </span>
+              <span className="text-xs text-text-muted">{licenseStatus.display}</span>
+              {licenseStatus.is_expired && (
+                <span className="text-xs text-red-400 font-medium">— expired</span>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={licenseKey}
+              onChange={(e) => setLicenseKey(e.target.value)}
+              placeholder="gm_live_..."
+              className="flex-1 text-xs bg-bg-card px-3 py-1.5 rounded border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+            />
+            <button
+              onClick={async () => {
+                if (!licenseKey.trim()) return;
+                setLicenseActivating(true);
+                setLicenseError(null);
+                try {
+                  const status = await api.activateLicense(licenseKey.trim());
+                  setLicenseStatus(status);
+                  setLicenseKey("");
+                  api.getRemoteSettings().then(setRemoteSettings).catch(() => {});
+                } catch (e) {
+                  setLicenseError(String(e));
+                } finally {
+                  setLicenseActivating(false);
+                }
+              }}
+              disabled={licenseActivating || !licenseKey.trim()}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+            >
+              {licenseActivating ? "Activating..." : "Activate"}
+            </button>
+          </div>
+          {licenseError && <p className="text-xs text-red-400">{licenseError}</p>}
+        </div>
+
+        {/* Remote mode — upsell for free, controls for paid */}
+        {remoteSettings && (
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs font-medium text-text-secondary">Remote mode</p>
+
+            {licenseStatus?.tier === "free" ? (
+              <div className="p-4 rounded-lg border border-accent/30 bg-accent/5 space-y-3">
+                <p className="text-sm font-medium text-text-primary">Unlock server-side intelligence</p>
+                <ul className="text-xs text-text-secondary space-y-1.5">
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">◆</span>
+                    <span><span className="font-medium text-text-primary">Embeddings tier</span> — server-side semantic search, no GPU or API key needed</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-accent mt-0.5">◆</span>
+                    <span><span className="font-medium text-text-primary">Pro / Team</span> — graph sync + remote MCP SSE, accessible from any machine</span>
+                  </li>
+                </ul>
+                <button
+                  onClick={() => api.openUpgradePage()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent/90"
+                >
+                  <Zap className="w-3 h-3" />
+                  View plans at getgraphmind.com
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Embed toggle — available for embeddings+ */}
+                <div className="flex items-center justify-between py-2 border-b border-border">
+                  <div>
+                    <p className="text-sm text-text-primary">Server-side embeddings</p>
+                    <p className="text-xs text-text-muted mt-0.5">Semantic search via GraphMind server. No local GPU or API key needed.</p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={remoteSettings.mode === "embed" || remoteSettings.mode === "full"}
+                    disabled={remoteSaving}
+                    onClick={async () => {
+                      const isOn = remoteSettings.mode === "embed" || remoteSettings.mode === "full";
+                      const next = isOn ? "off" : "embed";
+                      setRemoteSaving(true);
+                      setRemoteError(null);
+                      try {
+                        await api.setRemoteMode(next);
+                        const s = await api.getRemoteSettings();
+                        setRemoteSettings(s);
+                      } catch (e) {
+                        setRemoteError(String(e));
+                      } finally {
+                        setRemoteSaving(false);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                      remoteSettings.mode === "embed" || remoteSettings.mode === "full" ? "bg-accent" : "bg-border"
+                    }`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                      remoteSettings.mode === "embed" || remoteSettings.mode === "full" ? "translate-x-4" : "translate-x-1"
+                    }`} />
+                  </button>
+                </div>
+
+                {/* Full mode toggle — Pro/Team only */}
+                {(licenseStatus?.tier === "pro" || licenseStatus?.tier === "team") && (
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <p className="text-sm text-text-primary">Full remote mode</p>
+                      <p className="text-xs text-text-muted mt-0.5">Graph sync + remote MCP SSE. Enables cloud-based code intelligence.</p>
+                      {remoteSettings.last_sync_at && (
+                        <p className="text-xs text-text-muted mt-0.5">Last sync: {remoteSettings.last_sync_at}</p>
+                      )}
+                      {remoteSettings.mode === "full" && !remoteSettings.last_sync_at && (
+                        <p className="text-xs text-yellow-400 mt-0.5">Never synced — run graphmind build to apply</p>
+                      )}
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={remoteSettings.mode === "full"}
+                      disabled={remoteSaving}
+                      onClick={async () => {
+                        const next = remoteSettings.mode === "full" ? "embed" : "full";
+                        setRemoteSaving(true);
+                        setRemoteError(null);
+                        try {
+                          await api.setRemoteMode(next);
+                          const s = await api.getRemoteSettings();
+                          setRemoteSettings(s);
+                        } catch (e) {
+                          setRemoteError(String(e));
+                        } finally {
+                          setRemoteSaving(false);
+                        }
+                      }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                        remoteSettings.mode === "full" ? "bg-accent" : "bg-border"
+                      }`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        remoteSettings.mode === "full" ? "translate-x-4" : "translate-x-1"
+                      }`} />
+                    </button>
+                  </div>
+                )}
+
+                {remoteError && <p className="text-xs text-red-400">{remoteError}</p>}
+
+                {/* Upsell full mode for embeddings tier */}
+                {licenseStatus?.tier === "embeddings" && (
+                  <div className="p-3 rounded-md border border-border bg-bg-card text-xs text-text-muted space-y-1.5 mt-2">
+                    <p className="font-medium text-text-secondary">Want full remote mode?</p>
+                    <p>Graph sync + remote MCP SSE requires the Pro or Team plan.</p>
+                    <button
+                      onClick={() => api.openUpgradePage()}
+                      className="text-accent hover:underline"
+                    >
+                      Upgrade at getgraphmind.com →
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </section>

@@ -268,6 +268,11 @@ enum Commands {
         #[command(subcommand)]
         action: AuthAction,
     },
+    /// Configure remote mode (off, embed, full)
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -281,6 +286,17 @@ enum AuthAction {
     Status,
     /// Remove licence key (revert to Free)
     Logout,
+}
+
+#[derive(clap::Subcommand)]
+enum RemoteAction {
+    /// Set remote mode: off, embed, full
+    Set {
+        /// Mode to activate: off | embed | full
+        mode: String,
+    },
+    /// Show current remote mode and sync status
+    Status,
 }
 
 #[derive(clap::Subcommand)]
@@ -693,6 +709,14 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::Remote { action } => match action {
+            RemoteAction::Set { mode } => {
+                commands::remote::set(&mode);
+            }
+            RemoteAction::Status => {
+                commands::remote::status();
+            }
+        },
         Commands::Auth { action } => match action {
             AuthAction::Login { key } => {
                 commands::auth::login(&key);

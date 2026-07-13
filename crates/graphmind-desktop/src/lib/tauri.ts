@@ -108,6 +108,12 @@ export interface Announcement {
   url: string | null;
 }
 
+export interface RemoteSettings {
+  mode: "off" | "embed" | "full";
+  tier: "free" | "embeddings" | "pro" | "team";
+  last_sync_at: string | null;
+}
+
 export const api = {
   listProjects: () => invoke<ProjectInfo[]>("list_projects"),
   addProject: (path: string) => invoke<ProjectInfo>("add_project", { path }),
@@ -157,4 +163,9 @@ export const api = {
   runSetup: () => invoke<string>("run_setup"),
   checkAnnouncements: () => invoke<Announcement[]>("check_announcements"),
   dismissAnnouncement: (id: string) => invoke<void>("dismiss_announcement", { id }),
+  getRemoteSettings: () => invoke<RemoteSettings>("get_remote_settings"),
+  setRemoteMode: (mode: string) => invoke<void>("set_remote_mode", { mode }),
+  getLicenseStatus: () => invoke<{ display: string; tier: string; is_expired: boolean }>("get_license_status"),
+  activateLicense: (key: string) => invoke<{ display: string; tier: string; is_expired: boolean }>("activate_license", { key }),
+  openUpgradePage: () => invoke<void>("open_upgrade_page"),
 };

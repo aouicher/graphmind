@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::formatting::{compact_edge_line, compact_symbol_line, err_text, json_text, text_content};
 use crate::graph_helpers::{all_project_slugs, compact_edges};
-use crate::search_helpers::{fuse_fts_and_semantic, load_embed_engine, FusedResult};
+use crate::search_helpers::{fuse_fts_and_semantic, load_embed_engine, remote_semantic_search, FusedResult};
 
 pub(crate) fn handle_search(args: &Value) -> Value {
     let raw_query = match args.get("query").and_then(|v| v.as_str()) {
@@ -70,7 +70,7 @@ pub(crate) fn handle_search(args: &Value) -> Value {
             .take(limit as usize)
             .collect();
 
-        // Semantic search via embeddings (if available)
+        // Semantic search via embeddings (local engine or remote API)
         let merged = if let Some(ref engine) = embed_engine {
             let emb_db_path = graphmind_config::paths::embedding_db_path(slug);
             if emb_db_path.exists() {
@@ -88,6 +88,9 @@ pub(crate) fn handle_search(args: &Value) -> Value {
                     .map(|s| FusedResult::from_symbol(s, None))
                     .collect()
             }
+        } else if graphmind_api_client::is_remote_embed(&graphmind_config::config::load_config()) {
+            let semantic_results = remote_semantic_search(slug, raw_query, limit as usize);
+            fuse_fts_and_semantic(&fts_results, &semantic_results, limit as usize)
         } else {
             fts_results
                 .into_iter()

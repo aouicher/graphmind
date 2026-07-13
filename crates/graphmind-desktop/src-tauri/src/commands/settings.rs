@@ -308,12 +308,74 @@ pub fn set_build_all_on_startup(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Remote settings
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct RemoteSettings {
+    pub mode: String,
+    pub tier: String,
+    pub last_sync_at: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_remote_settings() -> RemoteSettings {
+    use graphmind_license::LicenseManager;
+    let config = load_config();
+    let manager = LicenseManager::from_config(&config);
+    RemoteSettings {
+        mode: format!("{:?}", config.remote.mode).to_lowercase(),
+        tier: format!("{:?}", manager.tier()).to_lowercase(),
+        last_sync_at: config.remote.last_sync_at.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn set_remote_mode(mode: String) -> Result<(), String> {
+    use graphmind_config::config::{Feature, RemoteMode};
+    use graphmind_license::LicenseManager;
+
+    let mut config = load_config();
+    let manager = LicenseManager::from_config(&config);
+
+    let new_mode = match mode.as_str() {
+        "off" => RemoteMode::Off,
+        "embed" => {
+            if !manager.has_feature(&Feature::RemoteEmbeddings) {
+                return Err("Remote embed requires the Embeddings tier or higher.".to_string());
+            }
+            RemoteMode::Embed
+        }
+        "full" => {
+            if !manager.has_feature(&Feature::RemoteMcp) {
+                return Err("Remote full mode requires the Pro or Team tier.".to_string());
+            }
+            RemoteMode::Full
+        }
+        other => return Err(format!("Unknown mode '{}'. Use: off, embed, full", other)),
+    };
+
+    let prev_mode = std::mem::replace(&mut config.remote.mode, new_mode);
+    if matches!(prev_mode, RemoteMode::Full) && !matches!(config.remote.mode, RemoteMode::Full) {
+        config.remote.last_sync_at = None;
+    }
+
+    save_config(&config);
+    Ok(())
+}
+
+#[cfg(test)]
+static SETTINGS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod startup_settings_tests {
     use super::*;
 
     fn with_temp_home(f: impl FnOnce()) {
+        let _lock = super::SETTINGS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".graphmind")).unwrap();
         unsafe { std::env::set_var("HOME", dir.path()); }
         f();
     }
@@ -348,6 +410,161 @@ mod startup_settings_tests {
             let cfg = graphmind_config::load_config();
             assert!(cfg.build_all_on_startup);
             assert!(!cfg.launch_at_login); // unrelated field untouched
+        });
+    }
+}
+
+#[cfg(test)]
+mod remote_settings_tests {
+    use super::*;
+    use graphmind_config::config::RemoteMode;
+
+    fn with_temp_home(f: impl FnOnce()) {
+        let _lock = super::SETTINGS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".graphmind")).unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()); }
+        f();
+    }
+
+    // ── get_remote_settings ────────────────────────────────────────────────
+
+    #[test]
+    fn get_remote_settings_defaults_to_off() {
+        with_temp_home(|| {
+            let s = get_remote_settings();
+            assert_eq!(s.mode, "off", "default remote mode should be off");
+        });
+    }
+
+    #[test]
+    fn get_remote_settings_returns_free_tier_with_no_key() {
+        with_temp_home(|| {
+            let s = get_remote_settings();
+            assert_eq!(s.tier, "free", "no license key → free tier");
+        });
+    }
+
+    #[test]
+    fn get_remote_settings_last_sync_at_none_by_default() {
+        with_temp_home(|| {
+            let s = get_remote_settings();
+            assert!(s.last_sync_at.is_none(), "last_sync_at should be None by default");
+        });
+    }
+
+    #[test]
+    fn get_remote_settings_reflects_saved_last_sync_at() {
+        with_temp_home(|| {
+            // Write Embed mode + last_sync_at directly (no tier gating needed for config write)
+            let mut cfg = graphmind_config::load_config();
+            cfg.remote.mode = RemoteMode::Embed;
+            cfg.remote.last_sync_at = Some("2026-06-14T10:00:00Z".to_string());
+            graphmind_config::save_config(&cfg);
+
+            let s = get_remote_settings();
+            assert_eq!(s.mode, "embed");
+            assert_eq!(s.last_sync_at.as_deref(), Some("2026-06-14T10:00:00Z"));
+        });
+    }
+
+    // ── set_remote_mode ────────────────────────────────────────────────────
+
+    #[test]
+    fn set_remote_mode_off_always_succeeds() {
+        with_temp_home(|| {
+            let result = set_remote_mode("off".to_string());
+            assert!(result.is_ok(), "set_remote_mode off should always succeed: {:?}", result.err());
+            let cfg = graphmind_config::load_config();
+            assert_eq!(cfg.remote.mode, RemoteMode::Off);
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_embed_fails_on_free_tier() {
+        with_temp_home(|| {
+            let result = set_remote_mode("embed".to_string());
+            assert!(result.is_err(), "embed mode should fail for free tier");
+            let msg = result.unwrap_err();
+            assert!(msg.contains("Embeddings") || msg.contains("tier"),
+                "error should mention tier: {msg}");
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_full_fails_on_free_tier() {
+        with_temp_home(|| {
+            let result = set_remote_mode("full".to_string());
+            assert!(result.is_err(), "full mode should fail for free tier");
+            let msg = result.unwrap_err();
+            assert!(msg.contains("Pro") || msg.contains("Team") || msg.contains("tier"),
+                "error should mention Pro/Team: {msg}");
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_unknown_returns_error() {
+        with_temp_home(|| {
+            let result = set_remote_mode("invalid_mode".to_string());
+            assert!(result.is_err(), "unknown mode should return error");
+            let msg = result.unwrap_err();
+            assert!(msg.contains("invalid_mode") || msg.contains("Unknown"),
+                "error should mention mode name: {msg}");
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_off_clears_last_sync_at_when_was_full() {
+        with_temp_home(|| {
+            // Manually set full mode + last_sync_at in config
+            let mut cfg = graphmind_config::load_config();
+            cfg.remote.mode = RemoteMode::Full;
+            cfg.remote.last_sync_at = Some("2026-06-14T10:00:00Z".to_string());
+            graphmind_config::save_config(&cfg);
+
+            // set_remote_mode("off") should clear last_sync_at
+            set_remote_mode("off".to_string()).unwrap();
+
+            let loaded = graphmind_config::load_config();
+            assert_eq!(loaded.remote.mode, RemoteMode::Off);
+            assert!(loaded.remote.last_sync_at.is_none(),
+                "last_sync_at should be cleared when leaving Full mode");
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_off_persists_last_sync_at_when_was_embed() {
+        with_temp_home(|| {
+            let mut cfg = graphmind_config::load_config();
+            cfg.remote.mode = RemoteMode::Embed;
+            cfg.remote.last_sync_at = Some("2026-06-14T10:00:00Z".to_string());
+            graphmind_config::save_config(&cfg);
+
+            // Going from embed → off should NOT clear last_sync_at
+            set_remote_mode("off".to_string()).unwrap();
+
+            let loaded = graphmind_config::load_config();
+            assert_eq!(loaded.remote.mode, RemoteMode::Off);
+            assert_eq!(loaded.remote.last_sync_at.as_deref(), Some("2026-06-14T10:00:00Z"),
+                "last_sync_at should NOT be cleared when leaving Embed");
+        });
+    }
+
+    #[test]
+    fn set_remote_mode_off_idempotent() {
+        with_temp_home(|| {
+            set_remote_mode("off".to_string()).unwrap();
+            let r2 = set_remote_mode("off".to_string());
+            assert!(r2.is_ok(), "second set off should still succeed");
+        });
+    }
+
+    #[test]
+    fn get_remote_settings_mode_matches_after_set_off() {
+        with_temp_home(|| {
+            set_remote_mode("off".to_string()).unwrap();
+            let s = get_remote_settings();
+            assert_eq!(s.mode, "off");
         });
     }
 }

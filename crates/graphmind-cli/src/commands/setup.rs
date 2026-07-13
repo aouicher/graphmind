@@ -1,4 +1,6 @@
 use colored::Colorize;
+use graphmind_api_client::{ApiClient, is_remote_full};
+use graphmind_config::config::load_config;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -347,9 +349,35 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
         .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
     let abs_str = abs_path.to_string_lossy().to_string();
 
-    let graphmind_path = find_graphmind_binary();
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
-    let path_env = format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir);
+    let global_config = load_config();
+    let remote_full = is_remote_full(&global_config);
+
+    // Build the MCP entry — SSE for remote full, stdio otherwise
+    let mcp_entry: Value = if remote_full {
+        match ApiClient::from_config(&global_config) {
+            Ok(client) => {
+                let (sse_url, auth_header) = client.mcp_sse_credentials();
+                json!({
+                    "type": "sse",
+                    "url": sse_url,
+                    "headers": { "Authorization": auth_header }
+                })
+            }
+            Err(e) => {
+                println!("    {} Remote MCP config skipped (no valid license): {e}", "!".yellow());
+                // Fall back to stdio so we don't leave the user with no MCP
+                let graphmind_path = find_graphmind_binary();
+                let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+                let path_env = format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir);
+                json!({ "type": "stdio", "command": graphmind_path, "args": ["mcp"], "env": { "PATH": path_env } })
+            }
+        }
+    } else {
+        let graphmind_path = find_graphmind_binary();
+        let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+        let path_env = format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir);
+        json!({ "type": "stdio", "command": graphmind_path, "args": ["mcp"], "env": { "PATH": path_env } })
+    };
 
     // 1. Claude Code — ~/.claude.json project-scoped entry
     {
@@ -368,7 +396,9 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
             .and_then(|m| m.get("graphmind"))
             .is_some();
 
-        if already {
+        // Always overwrite if remote_full (JWT may have rotated) or not yet set
+        let needs_write = remote_full || !already;
+        if !needs_write {
             println!("    {} Claude Code (~/.claude.json) already configured", "✓".green());
         } else {
             if claude_json_path.exists() {
@@ -394,12 +424,7 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
                 .or_insert_with(|| json!({}));
             mcp_servers.as_object_mut().unwrap().insert(
                 "graphmind".to_string(),
-                json!({
-                    "type": "stdio",
-                    "command": graphmind_path,
-                    "args": ["mcp"],
-                    "env": { "PATH": path_env }
-                }),
+                mcp_entry.clone(),
             );
 
             let formatted = serde_json::to_string_pretty(&config).unwrap();
@@ -427,7 +452,8 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
             .and_then(|m| m.get("graphmind"))
             .is_some();
 
-        if already {
+        let needs_write = remote_full || !already;
+        if !needs_write {
             println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
         } else {
             if vscode_mcp.exists() {
@@ -443,12 +469,7 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
                 .or_insert_with(|| json!({}));
             servers.as_object_mut().unwrap().insert(
                 "graphmind".to_string(),
-                json!({
-                    "type": "stdio",
-                    "command": graphmind_path,
-                    "args": ["mcp"],
-                    "env": { "PATH": path_env }
-                }),
+                mcp_entry.clone(),
             );
 
             fs::create_dir_all(&vscode_dir).ok();
