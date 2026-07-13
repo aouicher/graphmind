@@ -209,8 +209,9 @@ pub(crate) fn handle_fn_impact(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: symbol"),
     };
+    let file_filter = args.get("file").and_then(|v| v.as_str());
     with_graph(args, |gq, _proj| {
-        let callers = gq.callers(symbol);
+        let callers = gq.callers_filtered(symbol, file_filter);
         let files: Vec<&str> = callers
             .iter()
             .map(|c| c.file.as_str())

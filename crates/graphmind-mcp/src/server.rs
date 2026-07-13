@@ -71,10 +71,11 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["file"]
         })),
-        make_tool("gm_fn_impact", "Returns all transitive callers of a function (full blast radius at symbol level). Use before changing a function's signature or behavior. Complements gm_impact (file-level) — this is symbol-level.", json!({
+        make_tool("gm_fn_impact", "Returns all transitive callers of a function (full blast radius at symbol level). Use before changing a function's signature or behavior. Complements gm_impact (file-level) — this is symbol-level. Pass file= when the name is ambiguous (matches multiple symbols across the codebase).", json!({
             "type": "object",
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
+                "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
                 "project": { "type": "string", "description": "Project slug (optional)" }
             },
             "required": ["symbol"]
