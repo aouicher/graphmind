@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api, AppUpdateInfo, ProjectInfo } from "../lib/tauri";
-import { Plus, X, Save, Brain, Download, RefreshCw, Power } from "lucide-react";
+import { Plus, X, Save, Brain, Download, RefreshCw, Power, Trash2 } from "lucide-react";
 
 export function Settings() {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -27,6 +27,11 @@ export function Settings() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateDone, setUpdateDone] = useState<string | null>(null);
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallPurge, setUninstallPurge] = useState(false);
+  const [uninstallConfirm, setUninstallConfirm] = useState(false);
+  const [uninstallDone, setUninstallDone] = useState(false);
+  const [uninstallError, setUninstallError] = useState<string | null>(null);
 
   useEffect(() => {
     api.listProjects().then(setProjects);
@@ -555,6 +560,94 @@ export function Settings() {
         <p className="text-xs text-text-muted">
           Updates the desktop app and CLI. Homebrew CLI installations are updated separately via <code>brew upgrade graphmind</code>.
         </p>
+      </section>
+      {/* Danger Zone */}
+      <h2 className="text-lg font-semibold text-red-400 flex items-center gap-2">
+        <Trash2 className="w-4 h-4" />
+        Danger Zone
+      </h2>
+
+      <section className="space-y-4 border border-red-500/30 rounded-lg p-4">
+        <div>
+          <p className="text-sm text-text-primary">Uninstall all integrations</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            Removes MCP configs, hooks, skill files, shell PATH entry, and CLAUDE.md block.
+            All unrelated content in modified files is preserved.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="purge-check"
+            checked={uninstallPurge}
+            onChange={(e) => setUninstallPurge(e.target.checked)}
+            className="rounded border-border accent-red-500"
+          />
+          <label htmlFor="purge-check" className="text-xs text-text-secondary">
+            Also delete <code className="text-text-primary">~/.graphmind</code> (graphs, memory, config)
+          </label>
+        </div>
+
+        {!uninstallConfirm && !uninstallDone && (
+          <button
+            onClick={() => setUninstallConfirm(true)}
+            disabled={uninstalling}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-red-500/50 text-red-400 rounded-md hover:bg-red-500/10 disabled:opacity-50"
+          >
+            <Trash2 className="w-3 h-3" />
+            Uninstall all
+          </button>
+        )}
+
+        {uninstallConfirm && !uninstallDone && (
+          <div className="space-y-2">
+            <p className="text-xs text-red-400">
+              {uninstallPurge
+                ? "This will remove all integrations and delete ~/.graphmind. Are you sure?"
+                : "This will remove all integrations. Are you sure?"}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  setUninstalling(true);
+                  setUninstallError(null);
+                  try {
+                    await api.uninstallAll(uninstallPurge);
+                    setUninstallDone(true);
+                    setUninstallConfirm(false);
+                  } catch (e) {
+                    setUninstallError(String(e));
+                  } finally {
+                    setUninstalling(false);
+                  }
+                }}
+                disabled={uninstalling}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-500 text-white rounded-md hover:bg-red-600 disabled:opacity-50"
+              >
+                <Trash2 className="w-3 h-3" />
+                {uninstalling ? "Uninstalling..." : "Confirm uninstall"}
+              </button>
+              <button
+                onClick={() => setUninstallConfirm(false)}
+                disabled={uninstalling}
+                className="px-3 py-1.5 text-xs font-medium border border-border rounded-md text-text-secondary hover:text-text-primary disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {uninstallDone && (
+          <p className="text-xs text-green-500">
+            All integrations removed. You can close the app.
+          </p>
+        )}
+
+        {uninstallError && (
+          <p className="text-xs text-red-400">Error: {uninstallError}</p>
+        )}
       </section>
     </div>
   );
