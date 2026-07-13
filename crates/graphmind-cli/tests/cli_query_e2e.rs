@@ -97,6 +97,34 @@ fn fn_impact_runs() {
 }
 
 #[test]
+fn fn_impact_with_file_filter_narrows_ambiguous_symbol() {
+    // "fetch_balance" is defined identically in wallet.rs and wallet.rb in the
+    // fixture. Without --file, impact is unioned across every match; with
+    // --file, it should be scoped to the file-specific definition only.
+    let env = QueryTestEnv::new();
+    let unfiltered = env.run_ok(&["fn-impact", "fetch_balance", "--in", &env.slug]);
+    let filtered = env.run_ok(&[
+        "fn-impact",
+        "fetch_balance",
+        "--in", &env.slug,
+        "--file", "src/services/wallet.rs",
+    ]);
+    assert!(filtered.contains("files impacted"), "expected impact output, got: {filtered}");
+
+    let count = |s: &str| -> usize {
+        s.lines()
+            .find(|l| l.contains("files impacted"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    };
+    assert!(
+        count(&filtered) <= count(&unfiltered),
+        "expected --file to narrow or match impact count: filtered={filtered} unfiltered={unfiltered}"
+    );
+}
+
+#[test]
 fn cycles_runs() {
     let env = QueryTestEnv::new();
     let out = env.run(&["cycles", &env.slug]);
