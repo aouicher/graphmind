@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.205"
+version = "0.2.210"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/aouicher/graphmind"
