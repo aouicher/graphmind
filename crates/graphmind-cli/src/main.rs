@@ -417,6 +417,13 @@ enum UninstallAction {
     HookGit {
         slug: Option<String>,
     },
+    /// Remove all graphmind integrations (reverses setup + init)
+    All {
+        #[arg(long)]
+        purge: bool,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -587,6 +594,9 @@ fn main() {
             }
             UninstallAction::HookGit { slug } => {
                 commands::hooks::uninstall(slug.as_deref());
+            }
+            UninstallAction::All { purge, yes } => {
+                commands::setup::uninstall_all(purge, yes);
             }
         },
         Commands::Memory { action } => match action {

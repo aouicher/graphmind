@@ -667,6 +667,518 @@ fn install_shell_path_windows() {
 }
 
 #[doc(hidden)]
+pub fn uninstall_shell_path() {
+    if cfg!(target_os = "windows") {
+        uninstall_shell_path_windows();
+    } else {
+        uninstall_shell_path_unix();
+    }
+}
+
+fn uninstall_shell_path_unix() {
+    let install_dir = home_dir().join(".graphmind").join("bin");
+    let install_dir_str = install_dir.to_string_lossy().to_string();
+    let export_line = format!("export PATH=\"{}:$PATH\"", install_dir_str);
+
+    let profiles: &[&str] = &[".zshenv", ".zshrc", ".bashrc"];
+    let mut updated = Vec::new();
+
+    for profile in profiles {
+        let path = home_dir().join(profile);
+        if !path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        if !content.contains(&export_line) {
+            continue;
+        }
+
+        // Backup before modifying
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = path.with_extension(format!("{}.{ts}.bak", profile.trim_start_matches('.')));
+        fs::copy(&path, &backup).ok();
+
+        let lines: Vec<&str> = content.lines().collect();
+        let mut new_lines: Vec<&str> = Vec::with_capacity(lines.len());
+        let mut prev_blank = false;
+        for line in lines {
+            if line == export_line {
+                // Drop the graphmind line; collapse an orphaned trailing blank line.
+                continue;
+            }
+            if line.trim().is_empty() {
+                if prev_blank {
+                    continue;
+                }
+                prev_blank = true;
+            } else {
+                prev_blank = false;
+            }
+            new_lines.push(line);
+        }
+        let mut new_content = new_lines.join("\n");
+        if !new_content.is_empty() {
+            new_content.push('\n');
+        }
+
+        if let Err(e) = fs::write(&path, new_content) {
+            println!("    {} failed to update {}: {e}", "✗".red(), profile);
+        } else {
+            updated.push(*profile);
+        }
+    }
+
+    if updated.is_empty() {
+        println!("    {} no graphmind PATH lines found", "✓".green());
+    } else {
+        println!("    {} removed from: {}", "✓".green(), updated.join(", "));
+    }
+}
+
+fn uninstall_shell_path_windows() {
+    let install_dir = home_dir().join(".graphmind").join("bin");
+    let install_dir_str = install_dir.to_string_lossy().to_string();
+
+    // 1. Remove from user PATH via registry
+    let ps_remove_path = format!(
+        r#"$current = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($current -like '*{0}*') {{ $parts = $current.Split(';') | Where-Object {{ $_ -ne '{0}' }}; [Environment]::SetEnvironmentVariable('PATH', ($parts -join ';'), 'User'); Write-Output 'removed' }} else {{ Write-Output 'absent' }}"#,
+        install_dir_str
+    );
+    match std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_remove_path])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if result == "absent" {
+                println!("    {} PATH already clean (user environment)", "✓".green());
+            } else {
+                println!("    {} removed from user PATH (registry)", "✓".green());
+            }
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            println!("    {} failed to update user PATH: {}", "✗".red(), err.trim());
+        }
+        Err(e) => {
+            println!("    {} powershell not available: {e}", "✗".red());
+        }
+    }
+
+    // 2. Remove the matching line from $PROFILE
+    let ps_get_profile = "$PROFILE";
+    if let Ok(out) = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", ps_get_profile])
+        .output()
+    {
+        if out.status.success() {
+            let profile_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let profile_path = std::path::PathBuf::from(&profile_path);
+            let target_line = format!("$env:PATH = '{};' + $env:PATH", install_dir_str);
+            if profile_path.exists() {
+                let content = fs::read_to_string(&profile_path).unwrap_or_default();
+                if content.contains(&target_line) {
+                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                    let backup = profile_path.with_extension(format!("ps1.{ts}.bak"));
+                    fs::copy(&profile_path, &backup).ok();
+
+                    let new_content: String = content
+                        .lines()
+                        .filter(|l| *l != target_line)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if let Err(e) = fs::write(&profile_path, format!("{new_content}\n")) {
+                        println!("    {} failed to update PowerShell profile: {e}", "✗".red());
+                    } else {
+                        println!("    {} removed from PowerShell profile", "✓".green());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[doc(hidden)]
+pub fn uninstall_claude_desktop_mcp() {
+    let Some(config_path) = claude_desktop_config_path() else {
+        return;
+    };
+    if !config_path.exists() {
+        return;
+    }
+
+    let content = fs::read_to_string(&config_path).unwrap_or_default();
+    let mut config: Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let had_entry = config
+        .get("mcpServers")
+        .and_then(|m| m.get("graphmind"))
+        .is_some();
+    if !had_entry {
+        return;
+    }
+
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup = config_path.with_extension(format!("json.{ts}.bak"));
+    fs::copy(&config_path, &backup).ok();
+
+    if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
+        mcp_servers.remove("graphmind");
+    }
+
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+    println!("    {} removed from {}", "✓".green(), config_path.display());
+}
+
+#[doc(hidden)]
+pub fn unregister_mcp_in_claude_code() {
+    let settings_path = home_dir().join(".claude").join("settings.json");
+    if !settings_path.exists() {
+        return;
+    }
+
+    let content = fs::read_to_string(&settings_path).unwrap_or_default();
+    let mut config: Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+    let prefix = format!("{}:", graphmind_bin_dir);
+
+    let had_mcp_entry = config
+        .get("mcpServers")
+        .and_then(|m| m.get("graphmind"))
+        .is_some();
+    let has_path_prefix = config
+        .get("env")
+        .and_then(|e| e.get("PATH"))
+        .and_then(|p| p.as_str())
+        .is_some_and(|p| p.starts_with(&prefix));
+
+    if !had_mcp_entry && !has_path_prefix {
+        return;
+    }
+
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup = settings_path.with_extension(format!("json.{ts}.bak"));
+    fs::copy(&settings_path, &backup).ok();
+
+    if had_mcp_entry {
+        if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
+            mcp_servers.remove("graphmind");
+        }
+    }
+
+    if has_path_prefix {
+        if let Some(env) = config.get_mut("env").and_then(|e| e.as_object_mut()) {
+            if let Some(current) = env.get("PATH").and_then(|p| p.as_str()) {
+                let stripped = current.strip_prefix(&prefix).unwrap_or(current).to_string();
+                env.insert("PATH".to_string(), json!(stripped));
+            }
+        }
+    }
+
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&settings_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write settings: {e}", "✗".red());
+    });
+    println!("    {} unregistered from Claude Code settings", "✓".green());
+}
+
+#[doc(hidden)]
+pub fn uninstall_opencode_mcp() {
+    let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
+    if !config_path.exists() {
+        return;
+    }
+
+    let content = fs::read_to_string(&config_path).unwrap_or_default();
+    // Strip JSONC line comments before parsing (same heuristic as install_opencode_mcp)
+    let stripped: String = content.lines().map(|l| {
+        if let Some(idx) = l.find("//") {
+            let before = &l[..idx];
+            if before.chars().filter(|&c| c == '"').count() % 2 == 0 {
+                return before.trim_end().to_string();
+            }
+        }
+        l.to_string()
+    }).collect::<Vec<_>>().join("\n");
+
+    let mut config: Value = match serde_json::from_str(&stripped) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let had_entry = config
+        .get("mcp")
+        .and_then(|m| m.get("graphmind"))
+        .is_some();
+    if !had_entry {
+        return;
+    }
+
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup = config_path.with_extension(format!("jsonc.{ts}.bak"));
+    fs::copy(&config_path, &backup).ok();
+
+    if let Some(mcp) = config.get_mut("mcp").and_then(|m| m.as_object_mut()) {
+        mcp.remove("graphmind");
+    }
+
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+    println!("    {} removed from {}", "✓".green(), config_path.display());
+}
+
+#[doc(hidden)]
+pub fn uninstall_cursor_global_mcp() {
+    let config_path = home_dir().join(".cursor").join("mcp.json");
+    if !config_path.exists() {
+        return;
+    }
+
+    let content = fs::read_to_string(&config_path).unwrap_or_default();
+    let mut config: Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let had_entry = config
+        .get("mcpServers")
+        .and_then(|m| m.get("graphmind"))
+        .is_some();
+    if !had_entry {
+        return;
+    }
+
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup = config_path.with_extension(format!("json.{ts}.bak"));
+    fs::copy(&config_path, &backup).ok();
+
+    if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
+        mcp_servers.remove("graphmind");
+    }
+
+    let formatted = serde_json::to_string_pretty(&config).unwrap();
+    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+        println!("    {} failed to write config: {e}", "✗".red());
+    });
+    println!("    {} removed from {}", "✓".green(), config_path.display());
+}
+
+/// Reverse `ensure_project_mcp_configs` for a single project — removes only the
+/// graphmind entries from `~/.claude.json` and `<project>/.vscode/mcp.json`,
+/// never deleting the parent entries/files themselves.
+#[doc(hidden)]
+pub fn uninstall_project_mcp_configs(project_path: &str) {
+    let abs_path = std::path::Path::new(project_path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
+    let abs_str = abs_path.to_string_lossy().to_string();
+
+    // 1. Claude Code — ~/.claude.json project-scoped entry
+    {
+        let claude_json_path = home_dir().join(".claude.json");
+        if claude_json_path.exists() {
+            let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
+            if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
+                let has_entry = config
+                    .get("projects")
+                    .and_then(|p| p.get(&abs_str))
+                    .and_then(|p| p.get("mcpServers"))
+                    .and_then(|m| m.get("graphmind"))
+                    .is_some();
+
+                if has_entry {
+                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                    let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
+                    fs::copy(&claude_json_path, &backup).ok();
+
+                    if let Some(mcp_servers) = config
+                        .get_mut("projects")
+                        .and_then(|p| p.get_mut(&abs_str))
+                        .and_then(|p| p.get_mut("mcpServers"))
+                        .and_then(|m| m.as_object_mut())
+                    {
+                        mcp_servers.remove("graphmind");
+                    }
+
+                    let formatted = serde_json::to_string_pretty(&config).unwrap();
+                    fs::write(&claude_json_path, formatted).unwrap_or_else(|e| {
+                        println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
+                    });
+                    println!("    {} removed from ~/.claude.json", "✓".green());
+                }
+            }
+        }
+    }
+
+    // 2. VS Code — <project>/.vscode/mcp.json
+    {
+        let vscode_mcp = abs_path.join(".vscode").join("mcp.json");
+        if vscode_mcp.exists() {
+            let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
+            if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
+                let has_entry = config
+                    .get("servers")
+                    .and_then(|m| m.get("graphmind"))
+                    .is_some();
+
+                if has_entry {
+                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                    let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
+                    fs::copy(&vscode_mcp, &backup).ok();
+
+                    if let Some(servers) = config.get_mut("servers").and_then(|m| m.as_object_mut()) {
+                        servers.remove("graphmind");
+                    }
+
+                    let formatted = serde_json::to_string_pretty(&config).unwrap();
+                    fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
+                        println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
+                    });
+                    println!("    {} removed from .vscode/mcp.json", "✓".green());
+                }
+            }
+        }
+    }
+}
+
+#[doc(hidden)]
+pub fn uninstall_claude_md_block() {
+    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+    if !claude_md.exists() {
+        return;
+    }
+
+    let content = fs::read_to_string(&claude_md).unwrap_or_default();
+    let Some(start) = content.find("<!-- GM:START -->") else {
+        return;
+    };
+
+    // Backup before modifying (timestamped)
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup = claude_md.with_extension(format!("md.{ts}.bak"));
+    fs::write(&backup, &content).ok();
+
+    let end = content.find("<!-- GM:END -->")
+        .map(|i| i + "<!-- GM:END -->".len())
+        .unwrap_or(content.len());
+
+    let mut new_content = format!("{}{}", &content[..start], &content[end..]);
+
+    // Collapse any run of 3+ consecutive newlines into exactly 2.
+    while new_content.contains("\n\n\n") {
+        new_content = new_content.replace("\n\n\n", "\n\n");
+    }
+
+    fs::write(&claude_md, new_content).unwrap_or_else(|e| {
+        println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
+    });
+    println!("    {} instruction block removed", "✓".green());
+}
+
+/// Reverse everything `setup()` and `init()` did, across every registered project.
+/// Indexed graphs/memory/config under `~/.graphmind` are preserved unless `purge` is set.
+pub fn uninstall_all(purge: bool, yes: bool) {
+    use std::io::Write as _;
+
+    println!(
+        "\n{}  graphmind uninstall all\n",
+        "⚡".bold()
+    );
+
+    print_step(1, 9, "Claude Code hooks");
+    super::claude_hook::uninstall_hook();
+
+    print_step(2, 9, "Claude Code skills");
+    super::install_skill::uninstall_skill();
+
+    print_step(3, 9, "Claude Desktop MCP config");
+    uninstall_claude_desktop_mcp();
+
+    print_step(4, 9, "Claude Code MCP server");
+    unregister_mcp_in_claude_code();
+
+    print_step(5, 9, "OpenCode MCP config");
+    uninstall_opencode_mcp();
+
+    print_step(6, 9, "Cursor global MCP config");
+    uninstall_cursor_global_mcp();
+
+    print_step(7, 9, "CLAUDE.md instruction");
+    uninstall_claude_md_block();
+
+    print_step(8, 9, "Shell PATH configuration");
+    uninstall_shell_path();
+
+    print_step(9, 9, "Per-project git hooks + MCP configs");
+    let projects = graphmind_config::Registry::list();
+    for project in &projects {
+        super::hooks::uninstall(Some(&project.slug));
+        uninstall_project_mcp_configs(&project.path);
+    }
+
+    let mut config = graphmind_config::load_config();
+    config.setup_version = 0;
+    graphmind_config::save_config(&config);
+
+    println!("\n{}", "─".repeat(50).dimmed());
+    println!("{} Integrations removed.\n", "✓".green().bold());
+    println!(
+        "  Indexed graphs, memory, and config under {} are {}.",
+        graphmind_config::paths::graphmind_dir().display(),
+        "PRESERVED".green().bold()
+    );
+
+    if purge {
+        if !yes {
+            println!();
+            println!(
+                "{}",
+                "  ⚠ This will PERMANENTLY DELETE all indexed graphs, memory, and decisions for every project."
+                    .red()
+                    .bold()
+            );
+            print!("  Type 'yes' to confirm: ");
+            std::io::stdout().flush().ok();
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).ok();
+            if input.trim() != "yes" {
+                println!("\n  Aborted. Data preserved.\n");
+                return;
+            }
+        }
+        fs::remove_dir_all(graphmind_config::paths::graphmind_dir()).ok();
+        println!("  {} ~/.graphmind data deleted", "✓".green());
+    } else {
+        println!(
+            "  Run {} to also delete that data.",
+            "graphmind uninstall all --purge".cyan().bold()
+        );
+    }
+
+    println!();
+    println!(
+        "  Note: the graphmind binary itself was not removed. Delete it manually: {}",
+        find_graphmind_binary().dimmed()
+    );
+    println!(
+        "  You may still need to manually remove the now-orphaned PATH export from any shell profile this tool didn't touch (e.g. fish, custom profiles)."
+    );
+    println!();
+}
+
+#[doc(hidden)]
 pub fn install_claude_md_block() {
     let claude_md = home_dir().join(".claude").join("CLAUDE.md");
 

@@ -263,11 +263,9 @@ pub async fn cancel_build(
             app.emit("indexing-cancelled", s).ok();
         }
         locked.cancel_flags.clear();
-    } else {
-        if let Some(flag) = locked.cancel_flags.get(&slug) {
-            flag.store(true, Ordering::Relaxed);
-            app.emit("indexing-cancelled", &slug).ok();
-        }
+    } else if let Some(flag) = locked.cancel_flags.get(&slug) {
+        flag.store(true, Ordering::Relaxed);
+        app.emit("indexing-cancelled", &slug).ok();
     }
     Ok(())
 }

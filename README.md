@@ -521,6 +521,7 @@ graphmind install hook-git        # git hooks (post-commit + pre-push)
 graphmind install skill           # Claude Code skill
 graphmind uninstall hook-claude   # remove Claude Code hook
 graphmind uninstall hook-git      # remove git hooks
+graphmind uninstall all [--purge] [--yes]  # remove ALL integrations (reverse of setup+init); --purge also deletes ~/.graphmind data
 graphmind sync [slug]             # inject graph context into CLAUDE.md
 graphmind sync --all              # update CLAUDE.md for all projects
 ```
