@@ -1,4 +1,7 @@
 use graphmind_config::config::{GlobalConfig, RemoteMode};
+
+#[cfg(test)]
+mod tests;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
