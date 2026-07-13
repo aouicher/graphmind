@@ -171,6 +171,42 @@ pub fn get_claude_md_status() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Uninstall all
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn uninstall_skill() -> Result<(), String> {
+    let bin = super::updater::find_graphmind_binary();
+    let output = std::process::Command::new(&bin)
+        .args(["uninstall", "skill"])
+        .output()
+        .map_err(|e| format!("Failed to run graphmind: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Uninstall skill failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn uninstall_all(purge: bool) -> Result<(), String> {
+    let bin = super::updater::find_graphmind_binary();
+    let mut args = vec!["uninstall", "all", "--yes"];
+    if purge {
+        args.push("--purge");
+    }
+    let output = std::process::Command::new(&bin)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("Failed to run graphmind: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Uninstall failed: {}", stderr));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Embedding settings
 // ---------------------------------------------------------------------------
 

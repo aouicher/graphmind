@@ -64,6 +64,8 @@ pub fn run() {
             commands::settings::install_git_hook,
             commands::settings::uninstall_git_hook,
             commands::settings::install_skill,
+            commands::settings::uninstall_skill,
+            commands::settings::uninstall_all,
             commands::settings::get_skill_status,
             commands::settings::get_claude_md_status,
             commands::settings::get_embedding_settings,
