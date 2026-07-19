@@ -200,11 +200,54 @@ pub fn load_config() -> GlobalConfig {
     }
 }
 
+/// Writes `config` atomically (temp file + rename on the same filesystem),
+/// so a concurrent reader always sees either the old or the new complete
+/// file, never a truncated/corrupt one.
 pub fn save_config(config: &GlobalConfig) {
     ensure_dirs();
     let json = serde_json::to_string_pretty(config).unwrap_or_default();
-    if let Err(e) = fs::write(paths::config_path(), json) {
+    let path = paths::config_path();
+    let tmp_path = path.with_extension(format!(
+        "tmp.{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    if let Err(e) = fs::write(&tmp_path, json) {
         eprintln!("Warning: Failed to write config: {e}");
+        return;
+    }
+    if let Err(e) = fs::rename(&tmp_path, &path) {
+        eprintln!("Warning: Failed to write config: {e}");
+    }
+}
+
+/// Runs `f` while holding an exclusive lock on `~/.graphmind/config.lock`,
+/// serializing read-modify-write sequences against `config.json` across
+/// processes (e.g. several `graphmind`/`graphmind mcp` processes each
+/// registering their own worktree at the same time). Without this, two
+/// concurrent writers can each read the same config, apply their own
+/// change, and the second `save_config` silently clobbers the first's.
+///
+/// Best-effort: if the lock file can't be opened, `f` still runs
+/// unlocked rather than failing the whole operation.
+fn with_config_lock<R>(f: impl FnOnce() -> R) -> R {
+    use fs4::FileExt;
+    ensure_dirs();
+    match fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(paths::config_lock_path())
+    {
+        Ok(lock_file) => {
+            let _ = FileExt::lock(&lock_file);
+            let result = f();
+            let _ = lock_file.unlock();
+            result
+        }
+        Err(_) => f(),
     }
 }
 
@@ -224,7 +267,6 @@ pub struct Registry;
 
 impl Registry {
     pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) -> ProjectConfig {
-        let mut config = load_config();
         let abs_path = fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| path.to_string());
@@ -246,8 +288,11 @@ impl Registry {
             branch: None,
         };
 
-        config.projects.insert(slug.clone(), project.clone());
-        save_config(&config);
+        with_config_lock(|| {
+            let mut config = load_config();
+            config.projects.insert(slug.clone(), project.clone());
+            save_config(&config);
+        });
 
         fs::create_dir_all(paths::graph_dir(&slug)).ok();
 
@@ -258,7 +303,6 @@ impl Registry {
     /// as `sibling`), without triggering a build — a query blocking on a
     /// full build would be a bad surprise for an auto-linked worktree.
     pub fn register_worktree(path: &str, repo_id: &str, sibling: &ProjectConfig) -> ProjectConfig {
-        let mut config = load_config();
         let abs_path = fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| path.to_string());
@@ -277,8 +321,11 @@ impl Registry {
             branch: None,
         };
 
-        config.projects.insert(slug.clone(), project.clone());
-        save_config(&config);
+        with_config_lock(|| {
+            let mut config = load_config();
+            config.projects.insert(slug.clone(), project.clone());
+            save_config(&config);
+        });
 
         fs::create_dir_all(paths::graph_dir(&slug)).ok();
 
@@ -334,12 +381,14 @@ impl Registry {
     }
 
     pub fn unregister(slug: &str) -> bool {
-        let mut config = load_config();
-        let removed = config.projects.remove(slug).is_some();
-        if removed {
-            save_config(&config);
-        }
-        removed
+        with_config_lock(|| {
+            let mut config = load_config();
+            let removed = config.projects.remove(slug).is_some();
+            if removed {
+                save_config(&config);
+            }
+            removed
+        })
     }
 
     pub fn get(slug: &str) -> Option<ProjectConfig> {
@@ -366,11 +415,13 @@ impl Registry {
     }
 
     pub fn update_project(slug: &str, f: impl FnOnce(&mut ProjectConfig)) {
-        let mut config = load_config();
-        if let Some(project) = config.projects.get_mut(slug) {
-            f(project);
-            save_config(&config);
-        }
+        with_config_lock(|| {
+            let mut config = load_config();
+            if let Some(project) = config.projects.get_mut(slug) {
+                f(project);
+                save_config(&config);
+            }
+        });
     }
 
     pub fn get_config() -> GlobalConfig {
