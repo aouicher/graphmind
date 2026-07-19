@@ -41,6 +41,10 @@ enum Commands {
         reset: bool,
         #[arg(long)]
         watch: bool,
+        /// Incrementally rebuild only files changed between two git refs
+        /// (used by the post-checkout hook on branch switch)
+        #[arg(long, num_args = 2, value_names = ["OLD_HEAD", "NEW_HEAD"])]
+        changed: Option<Vec<String>>,
     },
     /// Query a symbol
     Query {
@@ -505,8 +509,13 @@ fn main() {
             full,
             reset,
             watch,
+            changed,
         } => {
-            commands::build::build(slug.as_deref(), all, full, reset, watch);
+            if let Some(refs) = changed {
+                commands::build::build_changed_between(slug.as_deref(), &refs[0], &refs[1]);
+            } else {
+                commands::build::build(slug.as_deref(), all, full, reset, watch);
+            }
         }
         Commands::Query { name, slug, file, kind, limit, offset } => {
             commands::query::query_symbol(&name, slug.as_deref(), file.as_deref(), kind.as_deref(), limit, offset);

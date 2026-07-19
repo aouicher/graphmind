@@ -71,6 +71,69 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
     build_single(&slug, full, reset, false);
 }
 
+/// `graphmind build --changed <old-head> <new-head>` — invoked by the
+/// post-checkout hook after a branch switch. Rebuilds only the files that
+/// differ between the two refs, reusing the same incremental machinery the
+/// file-watcher uses (`build_changed_files`).
+pub fn build_changed_between(slug: Option<&str>, old_head: &str, new_head: &str) {
+    let slug = match resolve_project_slug(&[slug]) {
+        Some(s) => s,
+        None => {
+            eprintln!("{} No project specified and none could be resolved", "Error:".red().bold());
+            std::process::exit(1);
+        }
+    };
+
+    let project = match Registry::get(&slug) {
+        Some(p) => p,
+        None => {
+            eprintln!("{} Project \"{}\" not found", "Error:".red().bold(), slug);
+            std::process::exit(1);
+        }
+    };
+
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&project.path)
+        .args(["diff", "--name-only", old_head, new_head])
+        .output();
+
+    let rel_paths: Vec<String> = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        _ => {
+            eprintln!("{} git diff failed between {} and {}", "Error:".red().bold(), old_head, new_head);
+            std::process::exit(1);
+        }
+    };
+
+    if rel_paths.is_empty() {
+        return;
+    }
+
+    let project_path = PathBuf::from(&project.path);
+    let changed_paths: Vec<PathBuf> = rel_paths.iter().map(|p| project_path.join(p)).collect();
+
+    let result = build_changed_files(&slug, &changed_paths);
+    println!(
+        "{} {} file{} | {} symbols | {} edges | {}ms",
+        "OK".green().bold(),
+        result.files_processed,
+        if result.files_processed == 1 { "" } else { "s" },
+        result.symbols_found.to_string().green(),
+        result.edges_created.to_string().green(),
+        result.duration_ms
+    );
+
+    let global_config = load_config();
+    if global_config.embedding.mode != EmbeddingMode::Disabled {
+        run_embedding_for_files(&slug, &rel_paths, &global_config.embedding);
+    }
+}
+
 fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let project = match Registry::get(slug) {
         Some(p) => p,
