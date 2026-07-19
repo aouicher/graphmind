@@ -459,8 +459,10 @@ fn main() {
     let cli = Cli::parse();
     graphmind_config::ensure_dirs();
 
+    let skip_notices = std::env::var("GRAPHMIND_SKIP_NOTICES").is_ok();
+
     // Show notices (setup outdated, announcements) except for setup/mcp/update commands
-    if !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
+    if !skip_notices && !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
         commands::notices::check_setup_version();
         commands::notices::check_announcements();
         commands::notices::check_cli_update();
@@ -471,7 +473,7 @@ fn main() {
     }
 
     // Silent license revalidation every 24h (non-blocking)
-    if !matches!(cli.command, Commands::Auth { .. }) {
+    if !skip_notices && !matches!(cli.command, Commands::Auth { .. }) {
         std::thread::spawn(commands::auth::maybe_revalidate);
     }
 
