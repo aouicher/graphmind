@@ -177,20 +177,27 @@ impl MemoryStore {
             if !file_path.exists() {
                 continue;
             }
-            let entries = self.read_jsonl(file_path);
-            let filtered: Vec<_> = entries.iter().filter(|e| e.id != id).collect();
-            if filtered.len() != entries.len() {
-                let content = if filtered.is_empty() {
-                    String::new()
+            let deleted = self.with_file_lock(file_path, || {
+                let entries = self.read_jsonl(file_path);
+                let filtered: Vec<_> = entries.iter().filter(|e| e.id != id).collect();
+                if filtered.len() != entries.len() {
+                    let content = if filtered.is_empty() {
+                        String::new()
+                    } else {
+                        filtered
+                            .iter()
+                            .map(|e| serde_json::to_string(e).unwrap_or_default())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                            + "\n"
+                    };
+                    self.atomic_write(file_path, &content);
+                    true
                 } else {
-                    filtered
-                        .iter()
-                        .map(|e| serde_json::to_string(e).unwrap_or_default())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        + "\n"
-                };
-                self.atomic_write(file_path, &content);
+                    false
+                }
+            });
+            if deleted {
                 return true;
             }
         }
@@ -209,27 +216,32 @@ impl MemoryStore {
             if !file_path.exists() {
                 continue;
             }
-            let mut entries = self.read_jsonl(file_path);
-            let mut found = false;
-            for entry in &mut entries {
-                if entry.id == id {
-                    entry.recall_count += 1;
-                    found = true;
-                    break;
+            let found = self.with_file_lock(file_path, || {
+                let mut entries = self.read_jsonl(file_path);
+                let mut found = false;
+                for entry in &mut entries {
+                    if entry.id == id {
+                        entry.recall_count += 1;
+                        found = true;
+                        break;
+                    }
                 }
-            }
+                if found {
+                    let content = if entries.is_empty() {
+                        String::new()
+                    } else {
+                        entries
+                            .iter()
+                            .map(|e| serde_json::to_string(e).unwrap_or_default())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                            + "\n"
+                    };
+                    self.atomic_write(file_path, &content);
+                }
+                found
+            });
             if found {
-                let content = if entries.is_empty() {
-                    String::new()
-                } else {
-                    entries
-                        .iter()
-                        .map(|e| serde_json::to_string(e).unwrap_or_default())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        + "\n"
-                };
-                self.atomic_write(file_path, &content);
                 return;
             }
         }
@@ -280,6 +292,41 @@ impl MemoryStore {
             .open(file_path)
             .expect("Failed to open memory file");
         writeln!(file, "{line}").ok();
+    }
+
+    /// Runs `f` while holding an exclusive lock on `<file_path>.lock`,
+    /// serializing read-modify-write sequences against a given JSONL file
+    /// across processes — e.g. `increment_recall` from one MCP server and
+    /// `delete`/`consolidate` from another CLI invocation, both targeting
+    /// the same shared repo_id-keyed memory file. `atomic_append` (plain
+    /// `add`) doesn't need this — an OS-level append is already atomic
+    /// for lines under `PIPE_BUF`, and doesn't read the file first.
+    ///
+    /// Best-effort: if the lock file can't be opened, `f` still runs
+    /// unlocked rather than failing the whole operation.
+    pub fn with_file_lock<R>(&self, file_path: &Path, f: impl FnOnce() -> R) -> R {
+        use fs4::FileExt;
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        let lock_path = file_path.with_extension(match file_path.extension() {
+            Some(ext) => format!("{}.lock", ext.to_string_lossy()),
+            None => "lock".to_string(),
+        });
+        match fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
+            Ok(lock_file) => {
+                let _ = FileExt::lock(&lock_file);
+                let result = f();
+                let _ = lock_file.unlock();
+                result
+            }
+            Err(_) => f(),
+        }
     }
 
     fn atomic_write(&self, file_path: &Path, content: &str) {

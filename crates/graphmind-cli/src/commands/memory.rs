@@ -192,13 +192,6 @@ pub fn merge(target: &str) {
     let store = get_store();
     let target_path = paths::memory_path(target);
 
-    let mut merged: Vec<graphmind_memory::store::MemoryEntry> = if target_path.exists() {
-        store.read_jsonl(&target_path)
-    } else {
-        Vec::new()
-    };
-    let mut seen: std::collections::HashSet<String> = merged.iter().map(|e| e.id.clone()).collect();
-
     let sources: Vec<_> = Registry::list()
         .into_iter()
         .filter(|p| p.repo_id.as_deref() == Some(target) || p.slug == target)
@@ -211,24 +204,35 @@ pub fn merge(target: &str) {
         return;
     }
 
-    let mut merged_count = 0usize;
-    let mut skipped_count = 0usize;
-    let mut merged_slugs = Vec::new();
+    let (merged_count, skipped_count, merged_slugs) = store.with_file_lock(&target_path, || {
+        let mut merged: Vec<graphmind_memory::store::MemoryEntry> = if target_path.exists() {
+            store.read_jsonl(&target_path)
+        } else {
+            Vec::new()
+        };
+        let mut seen: std::collections::HashSet<String> = merged.iter().map(|e| e.id.clone()).collect();
 
-    for (slug, path) in &sources {
-        let entries = store.read_jsonl(path);
-        for entry in entries {
-            if seen.insert(entry.id.clone()) {
-                merged.push(entry);
-                merged_count += 1;
-            } else {
-                skipped_count += 1;
+        let mut merged_count = 0usize;
+        let mut skipped_count = 0usize;
+        let mut merged_slugs = Vec::new();
+
+        for (slug, path) in &sources {
+            let entries = store.read_jsonl(path);
+            for entry in entries {
+                if seen.insert(entry.id.clone()) {
+                    merged.push(entry);
+                    merged_count += 1;
+                } else {
+                    skipped_count += 1;
+                }
             }
+            merged_slugs.push(slug.clone());
         }
-        merged_slugs.push(slug.clone());
-    }
 
-    store.rewrite_file(&target_path, &merged);
+        store.rewrite_file(&target_path, &merged);
+        (merged_count, skipped_count, merged_slugs)
+    });
+
     for (_, path) in &sources {
         std::fs::remove_file(path).ok();
     }
@@ -283,47 +287,52 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
         if !file_path.exists() {
             continue;
         }
-        let mut entries = store.read_jsonl(file_path);
-        let before = entries.len();
+        let (expired, commit_purged, dedup, promoted) = store.with_file_lock(file_path, || {
+            let mut entries = store.read_jsonl(file_path);
+            let before = entries.len();
 
-        // Step A — purge expired entries
-        entries.retain(|e| {
-            if let Some(ref exp) = e.expires_at {
-                if let Ok(exp_dt) = chrono::DateTime::parse_from_rfc3339(exp) {
-                    return exp_dt.with_timezone(&chrono::Utc) > now;
+            // Step A — purge expired entries
+            entries.retain(|e| {
+                if let Some(ref exp) = e.expires_at {
+                    if let Ok(exp_dt) = chrono::DateTime::parse_from_rfc3339(exp) {
+                        return exp_dt.with_timezone(&chrono::Utc) > now;
+                    }
+                }
+                true
+            });
+            let after_a = entries.len();
+
+            // Step B — purge [commit] entries
+            entries.retain(|e| !e.content.starts_with("[commit]"));
+            let after_b = entries.len();
+
+            // Step C — content-based dedup (Jaccard > 0.85)
+            let dedup_ids = find_dedup_ids(&entries);
+            let dedup_count = dedup_ids.len();
+            if !dedup_ids.is_empty() {
+                entries.retain(|e| !dedup_ids.contains(&e.id));
+            }
+
+            // Step D — auto-promote entries with recall_count >= 3
+            let mut promoted_in_file = 0usize;
+            for entry in &mut entries {
+                if entry.recall_count >= 3 && !entry.priority {
+                    entry.priority = true;
+                    entry.updated = now.to_rfc3339();
+                    promoted_in_file += 1;
                 }
             }
-            true
-        });
-        let after_a = entries.len();
-        total_expired += before - after_a;
 
-        // Step B — purge [commit] entries
-        entries.retain(|e| !e.content.starts_with("[commit]"));
-        let after_b = entries.len();
-        total_commit += after_a - after_b;
-
-        // Step C — content-based dedup (Jaccard > 0.85)
-        let dedup_ids = find_dedup_ids(&entries);
-        total_dedup += dedup_ids.len();
-        if !dedup_ids.is_empty() {
-            entries.retain(|e| !dedup_ids.contains(&e.id));
-        }
-
-        // Step D — auto-promote entries with recall_count >= 3
-        let mut promoted_in_file = 0usize;
-        for entry in &mut entries {
-            if entry.recall_count >= 3 && !entry.priority {
-                entry.priority = true;
-                entry.updated = now.to_rfc3339();
-                promoted_in_file += 1;
+            if !dry_run {
+                store.rewrite_file(file_path, &entries);
             }
-        }
-        total_promoted += promoted_in_file;
 
-        if !dry_run {
-            store.rewrite_file(file_path, &entries);
-        }
+            (before - after_a, after_a - after_b, dedup_count, promoted_in_file)
+        });
+        total_expired += expired;
+        total_commit += commit_purged;
+        total_dedup += dedup;
+        total_promoted += promoted;
     }
 
     format!(
