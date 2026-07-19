@@ -221,6 +221,11 @@ enum Commands {
         slug: Option<String>,
         #[arg(long)]
         all: bool,
+        /// Unregister and remove graphs for projects whose path no longer
+        /// exists, or whose worktree was removed from its repo (checked
+        /// via `git worktree list` for projects with a repo_id)
+        #[arg(long)]
+        stale: bool,
     },
     /// Sync CLAUDE.md with graph stats
     Sync {
@@ -669,8 +674,12 @@ fn main() {
                 }
             },
         },
-        Commands::Clean { slug, all } => {
-            commands::clean::clean(slug.as_deref(), all);
+        Commands::Clean { slug, all, stale } => {
+            if stale {
+                commands::clean::clean_stale();
+            } else {
+                commands::clean::clean(slug.as_deref(), all);
+            }
         }
         Commands::Sync { slug, all, dir } => {
             commands::sync::sync(slug.as_deref(), all, dir.as_deref());

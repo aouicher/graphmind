@@ -112,6 +112,43 @@ fn worktrees_get_distinct_graphs() {
 }
 
 #[test]
+fn clean_stale_prunes_a_removed_worktree_but_keeps_live_ones() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok_in(&wt2, &["register", ".", "--slug", "wt2-slug"]);
+
+    // Both alive — nothing should be pruned.
+    let out = env.run_ok(&["clean", "--stale"]);
+    assert!(
+        out.contains("No stale") || !out.contains("Pruned"),
+        "clean --stale should prune nothing while both worktrees are alive, got: {out}"
+    );
+    let list = env.run_ok(&["list"]);
+    assert!(list.contains("main-wt") && list.contains("wt2-slug"));
+
+    // Properly remove the worktree via git, exactly like a user would.
+    git(&repo, &["worktree", "remove", wt2.to_str().unwrap(), "--force"]);
+
+    let out = env.run_ok(&["clean", "--stale"]);
+    assert!(
+        out.contains("wt2-slug"),
+        "clean --stale should report pruning wt2-slug, got: {out}"
+    );
+
+    let list = env.run_ok(&["list"]);
+    assert!(list.contains("main-wt"), "main-wt should survive, got: {list}");
+    assert!(!list.contains("wt2-slug"), "wt2-slug should be pruned, got: {list}");
+
+    let graphs_dir = env.home.path().join(".graphmind").join("graphs");
+    assert!(
+        !graphs_dir.join("wt2-slug").exists(),
+        "wt2-slug's graph dir should be removed by clean --stale"
+    );
+}
+
+#[test]
 fn truly_unrelated_cwd_does_not_silently_borrow_a_project() {
     let env = CliTestEnv::new();
     let fixture = env.fixture_path();
