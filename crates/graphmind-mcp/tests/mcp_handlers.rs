@@ -791,3 +791,67 @@ fn gm_session_analyze_saved_entries_appear_in_memory_list() {
     let text = ctx.text(&list);
     assert!(text.contains(unique), "entry should appear in memory list: {text}");
 }
+
+// ---------------------------------------------------------------------------
+// Group 7: Multi-project resolution — no arbitrary pick without `project`
+// ---------------------------------------------------------------------------
+//
+// graph_helpers::resolve_project used to fall back to
+// Registry::list().into_iter().next() when `project` was omitted — an
+// unordered pick with zero relation to the caller's intent. It now
+// delegates to resolve_project_slug (cwd-aware, no blind fallback). These
+// tests register a SECOND project so any regression back to "pick
+// whichever one HashMap iteration returns first" would be observable
+// (both projects lack a repo_id, and the test's cwd isn't either project's
+// registered path, so resolution must fail explicitly, never guess).
+
+fn register_second_project(ctx: &TestCtx, second_slug: &str) {
+    let config_path = ctx._dir.path().join(".graphmind").join("config.json");
+    let mut config: Value = serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let second_path = ctx._dir.path().join("unrelated-second-project");
+    std::fs::create_dir_all(&second_path).unwrap();
+    config["projects"][second_slug] = json!({
+        "slug": second_slug,
+        "path": second_path.to_str().unwrap(),
+        "last_build": null,
+        "languages": [],
+        "registered": "2024-01-01T00:00:00Z",
+        "auto_watch": false,
+        "exclude": []
+    });
+    std::fs::write(&config_path, config.to_string()).unwrap();
+}
+
+#[test]
+fn gm_status_without_project_errors_when_multiple_registered_and_cwd_unrelated() {
+    let ctx = setup();
+    register_second_project(&ctx, "second-unrelated-project");
+
+    // No `project` arg, and this test's actual cwd (wherever `cargo test`
+    // runs from) is not the registered path of either project. Must fail
+    // explicitly — silently picking one of the two would be exactly the
+    // bug this test guards against.
+    let resp = ctx.dispatch("gm_status", json!({}));
+    assert!(
+        ctx.is_error(&resp),
+        "gm_status with no project and >1 registered, unrelated cwd, must error, got: {}",
+        ctx.text(&resp)
+    );
+}
+
+#[test]
+fn gm_status_with_explicit_project_still_resolves_correctly() {
+    let ctx = setup();
+    register_second_project(&ctx, "second-unrelated-project");
+
+    // Explicit `project` must always win regardless of how many other
+    // projects are registered.
+    let resp = ctx.dispatch("gm_status", json!({ "project": ctx.slug }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(
+        text.contains(&ctx.slug),
+        "status should mention the explicitly requested slug '{}': {text}",
+        ctx.slug
+    );
+}

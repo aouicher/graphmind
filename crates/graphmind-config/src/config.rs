@@ -461,3 +461,56 @@ mod startup_config_tests {
         assert!(!cfg.build_all_on_startup);
     }
 }
+
+#[cfg(test)]
+mod concurrent_registration_tests {
+    use super::*;
+
+    /// Simulates several processes each registering their own worktree at
+    /// roughly the same time (e.g. multiple Claude Code agents, each
+    /// running `graphmind init` in a different git worktree of the same
+    /// repo). Without with_config_lock serializing the read-modify-write
+    /// in Registry::register, a losing thread's save_config would clobber
+    /// a winning thread's — this asserts none are lost.
+    #[test]
+    fn concurrent_register_calls_lose_no_project() {
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+
+        const N: usize = 12;
+        let mut project_dirs = Vec::new();
+        for i in 0..N {
+            let p = dir.path().join(format!("project-{i}"));
+            fs::create_dir_all(&p).unwrap();
+            project_dirs.push(p);
+        }
+
+        let handles: Vec<_> = project_dirs
+            .into_iter()
+            .enumerate()
+            .map(|(i, path)| {
+                std::thread::spawn(move || {
+                    Registry::register(path.to_str().unwrap(), Some(&format!("proj-{i}")), &[]);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let registered = Registry::list();
+        assert_eq!(
+            registered.len(),
+            N,
+            "expected all {N} concurrent registrations to survive, found {}: {:?}",
+            registered.len(),
+            registered.iter().map(|p| &p.slug).collect::<Vec<_>>()
+        );
+        for i in 0..N {
+            assert!(
+                Registry::get(&format!("proj-{i}")).is_some(),
+                "proj-{i} should be registered"
+            );
+        }
+    }
+}
