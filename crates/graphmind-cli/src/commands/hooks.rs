@@ -14,6 +14,17 @@ graphmind build 2>/dev/null &
 
 const PRE_PUSH_HOOK: &str = "#!/bin/sh\n# graphmind: diff-impact\nexport PATH=\"$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH\"\necho \"\"\necho \"  graphmind diff-impact:\"\ngraphmind diff-impact 2>/dev/null\necho \"\"\n";
 
+// git passes $1=previous HEAD, $2=new HEAD, $3=1 for a branch checkout (0
+// for a plain file checkout) — only reindex on an actual branch switch.
+const POST_CHECKOUT_HOOK: &str = r#"#!/bin/sh
+# graphmind: incremental reindex on branch switch
+export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+if [ "$3" = "1" ]; then
+  graphmind build --changed "$1" "$2" 2>/dev/null &
+fi
+"#;
+
 fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
     let hook_path = hooks_dir.join(name);
 
@@ -94,6 +105,9 @@ pub fn install(slug: Option<&str>) {
     if install_hook(&hooks_dir, "pre-push", PRE_PUSH_HOOK) {
         installed += 1;
     }
+    if install_hook(&hooks_dir, "post-checkout", POST_CHECKOUT_HOOK) {
+        installed += 1;
+    }
 
     if installed > 0 {
         println!(
@@ -133,7 +147,7 @@ pub fn uninstall(slug: Option<&str>) {
     };
     let mut removed = 0;
 
-    for name in &["post-commit", "pre-push"] {
+    for name in &["post-commit", "pre-push", "post-checkout"] {
         let hook_path = hooks_dir.join(name);
         if !hook_path.exists() {
             continue;
