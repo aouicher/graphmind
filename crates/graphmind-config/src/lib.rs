@@ -1,5 +1,6 @@
 pub mod breaking;
 pub mod config;
+pub mod git_identity;
 pub mod paths;
 pub mod resolve;
 

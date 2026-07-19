@@ -1904,6 +1904,8 @@ dependencies = [
  "dirs 5.0.1",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
