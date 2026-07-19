@@ -30,11 +30,17 @@ where
     f(&gq, &proj)
 }
 
+/// Resolves the project a tool call should target, mirroring the CLI's
+/// `resolve_project_slug`: an explicit slug always wins; otherwise fall
+/// back to the MCP server process's cwd (exact path match, then repo_id
+/// auto-link for an unregistered worktree of a known repo). Deliberately
+/// does NOT fall back to "the only registered project" or "the first one
+/// in the map" — with several projects registered (e.g. one per worktree
+/// when multiple agents each run their own `graphmind mcp` server), that
+/// would silently answer from the wrong project.
 pub(crate) fn resolve_project(explicit: Option<&str>) -> Option<ProjectConfig> {
-    if let Some(slug) = explicit {
-        return graphmind_config::Registry::get(slug);
-    }
-    graphmind_config::Registry::list().into_iter().next()
+    let slug = graphmind_config::resolve_project_slug(&[explicit])?;
+    graphmind_config::Registry::get(&slug)
 }
 
 pub(crate) fn all_project_slugs() -> Vec<String> {
