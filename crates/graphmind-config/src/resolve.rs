@@ -13,10 +13,9 @@ pub fn resolve_project_slug(candidates: &[Option<&str>]) -> Option<String> {
         }
     }
 
-    let projects = Registry::list();
-    if projects.len() == 1 {
-        return Some(projects[0].slug.clone());
-    }
-
+    // No exact path match. Do NOT fall back to "the only registered
+    // project" — that silently serves an unrelated project's graph when
+    // cwd is e.g. an unregistered git worktree. Callers must get None and
+    // surface an explicit "not registered" error instead.
     None
 }

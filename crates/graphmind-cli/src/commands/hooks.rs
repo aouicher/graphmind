@@ -77,13 +77,14 @@ pub fn install(slug: Option<&str>) {
         }
     };
 
-    let git_dir = Path::new(&project.path).join(".git");
-    if !git_dir.exists() {
-        eprintln!("{} No .git directory in {}", "Error:".red().bold(), project.path);
-        std::process::exit(1);
-    }
-
-    let hooks_dir = git_dir.join("hooks");
+    let project_path = Path::new(&project.path);
+    let hooks_dir = match graphmind_config::git_identity::hooks_dir(project_path) {
+        Some(dir) => dir,
+        None => {
+            eprintln!("{} No .git directory in {}", "Error:".red().bold(), project.path);
+            std::process::exit(1);
+        }
+    };
     fs::create_dir_all(&hooks_dir).ok();
 
     let mut installed = 0;
@@ -123,7 +124,13 @@ pub fn uninstall(slug: Option<&str>) {
         }
     };
 
-    let hooks_dir = Path::new(&project.path).join(".git").join("hooks");
+    let hooks_dir = match graphmind_config::git_identity::hooks_dir(Path::new(&project.path)) {
+        Some(dir) => dir,
+        None => {
+            println!("{}", "No graphmind hooks found.".dimmed());
+            return;
+        }
+    };
     let mut removed = 0;
 
     for name in &["post-commit", "pre-push"] {
