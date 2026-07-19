@@ -341,6 +341,11 @@ enum MemoryAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Merge a legacy per-slug memory file into a repo's shared file
+    Merge {
+        /// The repo_id (or slug) whose shared memory file entries should be merged into
+        target: String,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -626,6 +631,9 @@ fn main() {
             }
             MemoryAction::Consolidate { slug, dry_run } => {
                 commands::memory::consolidate(slug.as_deref(), dry_run);
+            }
+            MemoryAction::Merge { target } => {
+                commands::memory::merge(&target);
             }
         },
         Commands::Cross { action } => match action {
