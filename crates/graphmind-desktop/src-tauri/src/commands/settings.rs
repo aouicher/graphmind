@@ -347,8 +347,15 @@ pub fn set_build_all_on_startup(enabled: bool) -> Result<(), String> {
 #[cfg(test)]
 mod startup_settings_tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Tests in this module mutate the process-wide HOME env var; without
+    // this lock, tests running in parallel (the default) race and can see
+    // each other's tempdir mid-test.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_temp_home(f: impl FnOnce()) {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("HOME", dir.path()); }
         f();
