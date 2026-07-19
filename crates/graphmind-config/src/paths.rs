@@ -12,6 +12,10 @@ pub fn config_path() -> PathBuf {
     graphmind_dir().join("config.json")
 }
 
+pub fn config_lock_path() -> PathBuf {
+    graphmind_dir().join("config.lock")
+}
+
 pub fn memory_dir() -> PathBuf {
     graphmind_dir().join("memory")
 }
