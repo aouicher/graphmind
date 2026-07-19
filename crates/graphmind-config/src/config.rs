@@ -89,6 +89,14 @@ pub struct ProjectConfig {
     pub auto_watch: bool,
     pub languages: Vec<String>,
     pub exclude: Vec<String>,
+    /// Identity shared by every worktree of the same logical git repo.
+    /// `None` for projects not inside a git repo (or registered before
+    /// this field existed) — such projects keep pure path-based behavior.
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    /// Metadata only, refreshed on build — never a storage key.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -223,6 +231,7 @@ impl Registry {
         let slug = slug
             .map(|s| s.to_string())
             .unwrap_or_else(|| slugify(&abs_path));
+        let repo_id = crate::git_identity::repo_id(Path::new(&abs_path));
 
         let now = chrono::Utc::now().to_rfc3339();
         let project = ProjectConfig {
@@ -233,6 +242,8 @@ impl Registry {
             auto_watch: false,
             languages: Vec::new(),
             exclude: exclude.to_vec(),
+            repo_id,
+            branch: None,
         };
 
         config.projects.insert(slug.clone(), project.clone());
@@ -241,6 +252,49 @@ impl Registry {
         fs::create_dir_all(paths::graph_dir(&slug)).ok();
 
         project
+    }
+
+    /// Registers a new worktree of an already-known repo (same `repo_id`
+    /// as `sibling`), without triggering a build — a query blocking on a
+    /// full build would be a bad surprise for an auto-linked worktree.
+    pub fn register_worktree(path: &str, repo_id: &str, sibling: &ProjectConfig) -> ProjectConfig {
+        let mut config = load_config();
+        let abs_path = fs::canonicalize(path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string());
+        let slug = slugify(&abs_path);
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let project = ProjectConfig {
+            path: abs_path,
+            slug: slug.clone(),
+            registered: now,
+            last_build: None,
+            auto_watch: false,
+            languages: Vec::new(),
+            exclude: sibling.exclude.clone(),
+            repo_id: Some(repo_id.to_string()),
+            branch: None,
+        };
+
+        config.projects.insert(slug.clone(), project.clone());
+        save_config(&config);
+
+        fs::create_dir_all(paths::graph_dir(&slug)).ok();
+
+        project
+    }
+
+    /// Finds a registered project sharing `repo_id`, i.e. another worktree
+    /// of the same logical repo. Used to auto-link a fresh, unregistered
+    /// worktree to an already-known repo's shared memory.
+    pub fn find_by_repo_id(repo_id: &str) -> Option<ProjectConfig> {
+        let config = load_config();
+        config
+            .projects
+            .values()
+            .find(|p| p.repo_id.as_deref() == Some(repo_id))
+            .cloned()
     }
 
     pub fn unregister(slug: &str) -> bool {
