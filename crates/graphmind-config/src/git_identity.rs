@@ -79,6 +79,23 @@ pub fn hooks_dir(path: &Path) -> Option<PathBuf> {
     Some(absolute.canonicalize().unwrap_or(absolute))
 }
 
+/// The absolute worktree paths git currently knows about for `path`'s
+/// repo (main checkout + every `git worktree add`), per `git worktree
+/// list --porcelain`. `None` if `path` isn't inside a git repo or git
+/// can't be run — callers should treat that as "can't determine, don't
+/// prune" rather than "no worktrees".
+pub fn list_worktrees(path: &Path) -> Option<Vec<PathBuf>> {
+    let raw = run_git(path, &["worktree", "list", "--porcelain"])?;
+    let mut paths = Vec::new();
+    for line in raw.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            let candidate = PathBuf::from(p);
+            paths.push(candidate.canonicalize().unwrap_or(candidate));
+        }
+    }
+    Some(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
