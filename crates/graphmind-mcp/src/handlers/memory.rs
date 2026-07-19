@@ -6,6 +6,13 @@ use serde_json::Value;
 use crate::formatting::{err_text, text_content};
 use crate::search_helpers::load_embed_engine;
 
+/// Maps a caller-supplied project slug to the key memory should be stored
+/// under — a repo's `repo_id` when it's inside a git repo (shared across
+/// worktrees), else the raw slug. See `Registry::memory_key`.
+fn memory_project(slug: Option<&str>) -> Option<String> {
+    slug.map(graphmind_config::Registry::memory_key)
+}
+
 pub(crate) fn handle_memory_search(args: &Value) -> Value {
     let query = match args.get("query").and_then(|v| v.as_str()) {
         Some(q) => q,
@@ -15,7 +22,8 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(20) as usize;
-    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let project_slug = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project_slug = project_slug.as_deref();
 
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
     let all_entries = store.list(project_slug);
@@ -91,7 +99,7 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
         Some(c) => c,
         None => return err_text("Missing required parameter: content"),
     };
-    let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
+    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
     let tags: Vec<String> = args
         .get("tags")
@@ -162,7 +170,7 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
         Some(f) => f,
         None => return err_text("Missing required parameter: facts (array)"),
     };
-    let project = args.get("project").and_then(|v| v.as_str()).map(String::from);
+    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
@@ -248,7 +256,8 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
 }
 
 pub(crate) fn handle_memory_list(args: &Value) -> Value {
-    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let project_slug = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project_slug = project_slug.as_deref();
     let limit = args
         .get("limit")
         .and_then(|v| v.as_u64())

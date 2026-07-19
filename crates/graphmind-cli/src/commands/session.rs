@@ -68,7 +68,8 @@ pub fn start(slug: Option<&str>) {
     let mem_dir = paths::memory_dir();
     if mem_dir.exists() {
         let store = graphmind_memory::store::MemoryStore::new(&mem_dir);
-        let all = store.list(Some(&slug));
+        let memory_project = graphmind_config::Registry::memory_key(&slug);
+        let all = store.list(Some(&memory_project));
         let recent: Vec<_> = all.into_iter().rev().take(5).collect();
         if !recent.is_empty() {
             println!("\n  Recent memories:");
