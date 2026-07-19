@@ -46,6 +46,19 @@ impl CliTestEnv {
             .expect("failed to run graphmind")
     }
 
+    /// Like `run`, but executes with the given directory as cwd — needed
+    /// for tests that exercise cwd-based resolution (e.g. an unregistered
+    /// worktree), since `resolve_project_slug` reads `current_dir()`.
+    pub fn run_in(&self, dir: &std::path::Path, args: &[&str]) -> Output {
+        Command::new(&self.binary)
+            .args(args)
+            .current_dir(dir)
+            .env("HOME", self.home.path())
+            .env("GRAPHMIND_SKIP_NOTICES", "1")
+            .output()
+            .expect("failed to run graphmind")
+    }
+
     pub fn run_ok(&self, args: &[&str]) -> String {
         let out = self.run(args);
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -54,6 +67,18 @@ impl CliTestEnv {
             out.status.success(),
             "command {:?} failed\nstdout: {stdout}\nstderr: {stderr}",
             args
+        );
+        stdout
+    }
+
+    pub fn run_ok_in(&self, dir: &std::path::Path, args: &[&str]) -> String {
+        let out = self.run_in(dir, args);
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(
+            out.status.success(),
+            "command {:?} in {:?} failed\nstdout: {stdout}\nstderr: {stderr}",
+            args, dir
         );
         stdout
     }
