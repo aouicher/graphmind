@@ -1,10 +1,17 @@
-use graphmind_config::{paths, resolve_project_slug};
+use graphmind_config::{paths, resolve_project_slug, Registry};
 use colored::Colorize;
 use graphmind_memory::search::search as memory_search;
 use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
 
 fn get_store() -> MemoryStore {
     MemoryStore::new(&paths::memory_dir())
+}
+
+/// Resolves `slug` to the project the memory store should key entries
+/// under — a repo's `repo_id` when it's inside a git repo (shared across
+/// all its worktrees), else the raw slug. See `Registry::memory_key`.
+fn resolve_memory_project(slug: Option<&str>) -> Option<String> {
+    resolve_project_slug(&[slug]).map(|s| Registry::memory_key(&s))
 }
 
 fn parse_memory_type(s: &str) -> MemoryType {
@@ -26,7 +33,7 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
     let project = if global {
         None
     } else {
-        match resolve_project_slug(&[slug]) {
+        match resolve_memory_project(slug) {
             Some(s) => Some(s),
             None => {
                 eprintln!(
@@ -64,7 +71,7 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
 
 pub fn search(query: &str, slug: Option<&str>, limit: usize) {
     let store = get_store();
-    let project = resolve_project_slug(&[slug]);
+    let project = resolve_memory_project(slug);
     let entries = store.list(project.as_deref());
     let results = memory_search(&entries, query, limit);
 
@@ -99,7 +106,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: usize) {
 
 pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bool) {
     let store = get_store();
-    let project = resolve_project_slug(&[slug]);
+    let project = resolve_memory_project(slug);
 
     if run_clean {
         let summary = consolidate_steps_abcd(&store, project.as_deref(), false);
@@ -149,7 +156,7 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
 
 pub fn delete(id: &str, slug: Option<&str>) {
     let store = get_store();
-    let project = resolve_project_slug(&[slug]);
+    let project = resolve_memory_project(slug);
     if store.delete(id, project.as_deref()) {
         println!("{} Memory deleted: {}", "OK".green().bold(), id.dimmed());
     } else {
@@ -161,7 +168,7 @@ pub fn delete(id: &str, slug: Option<&str>) {
 /// `graphmind memory clean` — steps A+B+C+D, no external API.
 pub fn clean(slug: Option<&str>) {
     let store = get_store();
-    let project = resolve_project_slug(&[slug]);
+    let project = resolve_memory_project(slug);
     let summary = consolidate_steps_abcd(&store, project.as_deref(), false);
     println!("{} {}", "OK".green().bold(), summary);
 }
@@ -170,10 +177,76 @@ pub fn clean(slug: Option<&str>) {
 /// LLM extraction is handled by the AI agent via the stop hook — no external API needed.
 pub fn consolidate(slug: Option<&str>, dry_run: bool) {
     let store = get_store();
-    let project = resolve_project_slug(&[slug]);
+    let project = resolve_memory_project(slug);
     let summary = consolidate_steps_abcd(&store, project.as_deref(), dry_run);
     println!("{} Consolidate complete:", "OK".green().bold());
     println!("  {}", summary);
+}
+
+/// `graphmind memory merge <target>` — folds every registered project's
+/// legacy per-slug memory file that shares `target`'s repo_id into
+/// `target`'s shared file (deduped by id), then removes the legacy files.
+/// `target` is typically a repo_id, printed by the auto-link notice when a
+/// legacy file couldn't be merged automatically.
+pub fn merge(target: &str) {
+    let store = get_store();
+    let target_path = paths::memory_path(target);
+
+    let mut merged: Vec<graphmind_memory::store::MemoryEntry> = if target_path.exists() {
+        store.read_jsonl(&target_path)
+    } else {
+        Vec::new()
+    };
+    let mut seen: std::collections::HashSet<String> = merged.iter().map(|e| e.id.clone()).collect();
+
+    let sources: Vec<_> = Registry::list()
+        .into_iter()
+        .filter(|p| p.repo_id.as_deref() == Some(target) || p.slug == target)
+        .map(|p| (p.slug.clone(), paths::memory_path(&p.slug)))
+        .filter(|(_, path)| path.exists() && *path != target_path)
+        .collect();
+
+    if sources.is_empty() {
+        println!("{}", "No legacy memory files found to merge.".dimmed());
+        return;
+    }
+
+    let mut merged_count = 0usize;
+    let mut skipped_count = 0usize;
+    let mut merged_slugs = Vec::new();
+
+    for (slug, path) in &sources {
+        let entries = store.read_jsonl(path);
+        for entry in entries {
+            if seen.insert(entry.id.clone()) {
+                merged.push(entry);
+                merged_count += 1;
+            } else {
+                skipped_count += 1;
+            }
+        }
+        merged_slugs.push(slug.clone());
+    }
+
+    store.rewrite_file(&target_path, &merged);
+    for (_, path) in &sources {
+        std::fs::remove_file(path).ok();
+    }
+
+    println!(
+        "{} Merged {} entr{} from {} legacy file(s) ({}) into '{}.jsonl'{}",
+        "OK".green().bold(),
+        merged_count,
+        if merged_count == 1 { "y" } else { "ies" },
+        sources.len(),
+        merged_slugs.join(", "),
+        target,
+        if skipped_count > 0 {
+            format!(", {skipped_count} duplicate(s) skipped")
+        } else {
+            String::new()
+        }
+    );
 }
 
 // ---------------------------------------------------------------------------

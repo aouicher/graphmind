@@ -297,6 +297,42 @@ impl Registry {
             .cloned()
     }
 
+    /// The key memory (and memory-embeddings) should be stored under for
+    /// `slug`: its `repo_id` if the project is inside a git repo, else
+    /// `slug` itself — non-git projects keep exactly today's per-slug
+    /// behavior. Decisions/bugs/conventions are repo-wide knowledge, so
+    /// every worktree of one repo shares a single memory file.
+    ///
+    /// On first call after upgrade, migrates a pre-existing `<slug>.jsonl`
+    /// to `<repo_id>.jsonl` via atomic rename (same filesystem, no copy).
+    /// If a *different* worktree's legacy file already occupies the
+    /// destination, the source is left untouched and a one-line notice is
+    /// printed — silently merging risks duplicate/conflicting entries, so
+    /// merging is left to an explicit `graphmind memory merge` command.
+    pub fn memory_key(slug: &str) -> String {
+        let Some(project) = Self::get(slug) else {
+            return slug.to_string();
+        };
+        let Some(repo_id) = project.repo_id else {
+            return slug.to_string();
+        };
+
+        let legacy_path = paths::memory_path(slug);
+        let repo_path = paths::memory_path(&repo_id);
+        if legacy_path.exists() && legacy_path != repo_path {
+            if repo_path.exists() {
+                eprintln!(
+                    "note: legacy memory file '{}.jsonl' not merged into shared '{}.jsonl' — run `graphmind memory merge {}`",
+                    slug, repo_id, repo_id
+                );
+            } else {
+                fs::rename(&legacy_path, &repo_path).ok();
+            }
+        }
+
+        repo_id
+    }
+
     pub fn unregister(slug: &str) -> bool {
         let mut config = load_config();
         let removed = config.projects.remove(slug).is_some();
