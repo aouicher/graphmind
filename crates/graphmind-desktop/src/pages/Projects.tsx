@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { FolderPlus, RotateCcw, Eye, EyeOff, Trash2, Zap, X } from "lucide-react";
+import { FolderPlus, RotateCw, Eye, EyeOff, Trash2, Zap, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjects } from "../hooks/useProjects";
 import { useTauriEvent } from "../hooks/useTauriEvent";
@@ -20,17 +20,29 @@ export function Projects() {
     setBuildingPhase("embedding");
   }, []));
 
+  // `indexing-complete` / `indexing-cancelled` are emitted once per project, so
+  // they must not clear `buildingAll` — during a batch the first project to
+  // finish would stop the spinner while the others are still building.
+  // `buildAll` owns that flag and clears it when the whole batch resolves.
   useTauriEvent<string>("indexing-complete", useCallback(() => {
     setBuilding(null);
     setBuildingPhase("indexing");
-    setBuildingAll(false);
     refresh();
   }, [refresh]));
 
   useTauriEvent<string>("indexing-cancelled", useCallback(() => {
     setBuilding(null);
     setBuildingPhase("indexing");
+    refresh();
+  }, [refresh]));
+
+  // Safety net: the backend signals the end of a batch explicitly, so the
+  // spinner also clears when the batch was started somewhere else (e.g. the
+  // build-on-startup path in App.tsx) rather than by this page.
+  useTauriEvent<string[]>("build-all-complete", useCallback(() => {
     setBuildingAll(false);
+    setBuilding(null);
+    setBuildingPhase("indexing");
     refresh();
   }, [refresh]));
 
@@ -59,23 +71,27 @@ export function Projects() {
     }
   };
 
-  const handleRebuildAll = async () => {
+  const buildAll = async (full: boolean) => {
     setBuildingAll(true);
     try {
-      await api.buildAllProjects(true);
-    } catch {
+      await api.buildAllProjects(full);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      // The command resolves once every project is done, so this is the
+      // authoritative end of the batch. Relying only on `indexing-complete`
+      // leaves the spinner stuck whenever the last project is cancelled or
+      // the command errors out before emitting it.
       setBuildingAll(false);
+      setBuilding(null);
+      setBuildingPhase("indexing");
+      refresh();
     }
   };
 
-  const handleUpdateAll = async () => {
-    setBuildingAll(true);
-    try {
-      await api.buildAllProjects(false);
-    } catch {
-      setBuildingAll(false);
-    }
-  };
+  const handleRebuildAll = () => buildAll(true);
+
+  const handleUpdateAll = () => buildAll(false);
 
   const handleRemove = async (slug: string) => {
     if (confirm(`Remove project "${slug}"? Graph data will be deleted.`)) {
@@ -116,7 +132,7 @@ export function Projects() {
             Update All
           </Button>
           <Button variant="secondary" size="sm" onClick={handleRebuildAll} disabled={buildingAll || projects.length === 0}>
-            <RotateCcw className={`w-3.5 h-3.5 ${buildingAll ? "animate-spin" : ""}`} />
+            <RotateCw className={`w-3.5 h-3.5 ${buildingAll ? "animate-spin" : ""}`} />
             Rebuild All
           </Button>
           <Button size="sm" onClick={handleAdd}>
@@ -200,7 +216,7 @@ function ProjectCard({
             </Button>
           ) : (
             <Button variant="ghost" size="sm" onClick={onBuild} title="Rebuild index">
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCw className="w-3.5 h-3.5" />
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={onRemove} title="Remove project">
