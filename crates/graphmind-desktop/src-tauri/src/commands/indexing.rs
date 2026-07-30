@@ -239,13 +239,16 @@ pub async fn build_all_projects(full: bool, app: AppHandle, state: State<'_, Mut
     if projects.is_empty() {
         return Err("No projects registered".to_string());
     }
+    // Keep going when a single project fails so one broken repo does not abort
+    // the whole batch, and always emit `build-all-complete` so the UI can leave
+    // its loading state even when a project errors out or gets cancelled.
+    let mut failures: Vec<String> = Vec::new();
     for p in &projects {
-        build_project(p.slug.clone(), full, app.clone(), state.clone()).await?;
-        // Stop iterating if the last project was cancelled
-        if state.lock().unwrap().cancel_flags.is_empty() {
-            // flags removed on completion — check via a global cancel sentinel
+        if let Err(e) = build_project(p.slug.clone(), full, app.clone(), state.clone()).await {
+            failures.push(format!("{}: {e}", p.slug));
         }
     }
+    app.emit("build-all-complete", &failures).ok();
     Ok(())
 }
 
