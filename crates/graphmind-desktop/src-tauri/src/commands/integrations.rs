@@ -248,23 +248,11 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
     let mut json = read_or_create_json(&config_path)?;
     let bin_dir = graphmind_bin_dir();
 
-    // Inject ~/.graphmind/bin into global env.PATH so hooks can resolve graphmind
-    {
-        let env = json
-            .as_object_mut()
-            .ok_or("Invalid config format")?
-            .entry("env")
-            .or_insert_with(|| Value::Object(serde_json::Map::new()));
-        let current_path = env
-            .get("PATH")
-            .and_then(|v| v.as_str())
-            .unwrap_or("/usr/local/bin:/usr/bin:/bin")
-            .to_string();
-        if !current_path.contains(&bin_dir) {
-            let new_path = format!("{}:{}", bin_dir, current_path);
-            env.as_object_mut().unwrap().insert("PATH".to_string(), Value::String(new_path));
-        }
-    }
+    // Repair the global env.PATH written by graphmind <= v0.2.211 and do not
+    // re-add it: that key applies to every Bash tool call in Claude Code, and the
+    // old hardcoded "/usr/local/bin:/usr/bin:/bin" default wiped nvm/asdf/
+    // Homebrew-ARM paths. Hook scripts self-prefix PATH already. See issue #105.
+    repair_claude_settings_path(&mut json, &bin_dir);
 
     let servers = json
         .as_object_mut()
@@ -273,15 +261,13 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
 
     let servers_obj = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+    // No `env` block — `binary_path` is absolute. See issue #105.
     servers_obj.insert(
         "graphmind".to_string(),
         serde_json::json!({
             "command": binary_path,
             "args": ["mcp"],
-            "type": "stdio",
-            "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
-            }
+            "type": "stdio"
         }),
     );
 
@@ -291,7 +277,6 @@ fn install_claude_mcp(binary_path: &str) -> Result<(), String> {
 fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = claude_desktop_config_path();
     let mut json = read_or_create_json(&config_path)?;
-    let bin_dir = graphmind_bin_dir();
 
     let servers = json
         .as_object_mut()
@@ -300,14 +285,12 @@ fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
 
     let servers_obj = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+    // No `env` block — `binary_path` is absolute. See issue #105.
     servers_obj.insert(
         "graphmind".to_string(),
         serde_json::json!({
             "command": binary_path,
-            "args": ["mcp"],
-            "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
-            }
+            "args": ["mcp"]
         }),
     );
 
@@ -317,7 +300,6 @@ fn install_claude_desktop_mcp(binary_path: &str) -> Result<(), String> {
 fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = cursor_config_path();
     let mut json = read_or_create_json(&config_path)?;
-    let bin_dir = graphmind_bin_dir();
 
     let servers = json
         .as_object_mut()
@@ -326,14 +308,12 @@ fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
 
     let servers_obj = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+    // No `env` block — `binary_path` is absolute. See issue #105.
     servers_obj.insert(
         "graphmind".to_string(),
         serde_json::json!({
             "command": binary_path,
-            "args": ["mcp"],
-            "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
-            }
+            "args": ["mcp"]
         }),
     );
 
@@ -342,7 +322,6 @@ fn install_cursor_mcp(binary_path: &str) -> Result<(), String> {
 
 fn install_opencode_mcp(binary_path: &str) -> Result<(), String> {
     let config_path = opencode_config_path();
-    let bin_dir = graphmind_bin_dir();
 
     // Read existing JSONC or start fresh
     let existing = if config_path.exists() {
@@ -371,12 +350,11 @@ fn install_opencode_mcp(binary_path: &str) -> Result<(), String> {
         .ok_or("mcp is not an object")?
         .insert(
             "graphmind".to_string(),
+            // No `environment` block — the command array holds an absolute path.
+            // See issue #105.
             serde_json::json!({
                 "type": "local",
-                "command": [binary_path, "mcp"],
-                "environment": {
-                    "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
-                }
+                "command": [binary_path, "mcp"]
             }),
         );
 
@@ -401,8 +379,89 @@ fn uninstall_opencode_mcp() -> Result<(), String> {
     fs::write(&config_path, out).map_err(|e| e.to_string())
 }
 
+/// Remove the `~/.graphmind/bin` segment that graphmind <= v0.2.211 injected into
+/// the global `env.PATH` of `~/.claude/settings.json` (issue #105).
+///
+/// Outcome of the #105 PATH repair. `Truncated` means a user-specific `env.PATH`
+/// survived and still overrides the shell PATH — the UI should surface that.
+#[derive(Debug, PartialEq)]
+pub enum PathRepair {
+    NotNeeded,
+    KeyRemoved,
+    Truncated { remaining: String },
+}
+
+/// Mirrors `graphmind_cli::commands::setup::repair_claude_settings_path` — keep
+/// the two in sync. Only our exact segment is dropped, order is preserved, and if
+/// every remaining segment is a standard system directory the key is removed so
+/// the inherited shell PATH wins (a truncated value would still shadow the user's
+/// real PATH, which is the bug). Anything possibly user-specific is kept, since we
+/// cannot prove intent and overwriting it is the mistake #105 is about.
+fn repair_claude_settings_path(json: &mut Value, bin_dir: &str) -> PathRepair {
+    let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) else {
+        return PathRepair::NotNeeded;
+    };
+    let Some(current) = env.get("PATH").and_then(|p| p.as_str()) else {
+        return PathRepair::NotNeeded;
+    };
+
+    let segments: Vec<&str> = current.split(':').filter(|s| !s.is_empty()).collect();
+    let kept: Vec<&str> = segments.iter().copied().filter(|s| *s != bin_dir).collect();
+
+    if kept.len() == segments.len() {
+        return PathRepair::NotNeeded; // our segment was not there
+    }
+
+    // Directories a login shell provides anyway; both Homebrew prefixes included.
+    const SYSTEM_DIRS: [&str; 8] = [
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+    ];
+
+    let outcome = if kept.iter().all(|seg| SYSTEM_DIRS.contains(seg)) {
+        env.remove("PATH");
+        PathRepair::KeyRemoved
+    } else {
+        let joined = kept.join(":");
+        env.insert("PATH".to_string(), Value::String(joined.clone()));
+        PathRepair::Truncated { remaining: joined }
+    };
+
+    if env.is_empty() {
+        json.as_object_mut().unwrap().remove("env");
+    }
+    outcome
+}
+
 fn uninstall_claude_mcp() -> Result<(), String> {
-    remove_mcp_entry(&claude_config_path())
+    let config_path = claude_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let mut json: Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    if let Some(servers) = json.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+        servers.remove("graphmind");
+    }
+    if json
+        .get("mcpServers")
+        .and_then(|m| m.as_object())
+        .is_some_and(|m| m.is_empty())
+    {
+        json.as_object_mut().unwrap().remove("mcpServers");
+    }
+
+    // Also undo the legacy global env.PATH pollution (issue #105).
+    repair_claude_settings_path(&mut json, &graphmind_bin_dir());
+
+    write_json(&config_path, &json)
 }
 
 fn uninstall_claude_desktop_mcp() -> Result<(), String> {
@@ -507,19 +566,13 @@ mod tests {
     fn test_install_opencode_mcp_fresh() {
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("opencode.jsonc");
-
-        // Write fresh config directly using the logic
         let binary = "/home/user/.graphmind/bin/graphmind";
-        let bin_dir = "/home/user/.graphmind/bin";
 
         let json = serde_json::json!({
             "mcp": {
                 "graphmind": {
                     "type": "local",
-                    "command": [binary, "mcp"],
-                    "environment": {
-                        "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", bin_dir)
-                    }
+                    "command": [binary, "mcp"]
                 }
             }
         });
@@ -532,10 +585,116 @@ mod tests {
         assert_eq!(v["mcp"]["graphmind"]["type"], "local");
         assert_eq!(v["mcp"]["graphmind"]["command"][0], binary);
         assert_eq!(v["mcp"]["graphmind"]["command"][1], "mcp");
-        assert!(v["mcp"]["graphmind"]["environment"]["PATH"]
-            .as_str()
-            .unwrap()
-            .contains(".graphmind/bin"));
+        // Issue #105: no `environment` block — the command path is absolute.
+        assert!(v["mcp"]["graphmind"]["environment"].is_null());
+    }
+
+    // ── repair_claude_settings_path (issue #105) ─────────────────────────────
+
+    #[test]
+    fn test_repair_strips_our_segment_and_keeps_user_edits() {
+        let bin_dir = "/home/user/.graphmind/bin";
+        let nvm = "/home/user/.nvm/versions/node/v20.11.0/bin";
+        let mut json = serde_json::json!({
+            "env": { "PATH": format!("{bin_dir}:{nvm}:/usr/local/bin:/usr/bin:/bin") }
+        });
+
+        // nvm is user-specific, so the key survives — and the caller is told.
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::Truncated {
+                remaining: format!("{nvm}:/usr/local/bin:/usr/bin:/bin")
+            }
+        );
+
+        let path = json["env"]["PATH"].as_str().unwrap();
+        assert!(!path.split(':').any(|s| s == bin_dir), "got: {path}");
+        assert!(path.starts_with(nvm), "user edit must be preserved: {path}");
+    }
+
+    #[test]
+    fn test_repair_removes_key_when_only_legacy_default_remains() {
+        let bin_dir = "/home/user/.graphmind/bin";
+        let mut json = serde_json::json!({
+            "env": { "PATH": format!("{bin_dir}:/usr/local/bin:/usr/bin:/bin") }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
+
+        // The whole `env` object goes away, so the inherited shell PATH wins.
+        assert!(json.get("env").is_none(), "got: {json}");
+    }
+
+    /// A real-world pre-fix install where the user had hand-added Homebrew-ARM
+    /// and the sbin dirs. Those are all system dirs, so the key must still go —
+    /// keeping it truncated would continue shadowing pyenv/bun/cargo/plugin bins.
+    #[test]
+    fn test_repair_removes_key_when_only_system_dirs_remain() {
+        let bin_dir = "/Users/someone/.graphmind/bin";
+        let mut json = serde_json::json!({
+            "env": {
+                "PATH": format!("{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+                "SOME_OTHER_VAR": "keep-me"
+            }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
+
+        assert!(json["env"]["PATH"].is_null(), "PATH should be gone: {json}");
+        // Unrelated vars in the same object must survive.
+        assert_eq!(json["env"]["SOME_OTHER_VAR"], "keep-me");
+    }
+
+    /// One user-specific segment is enough to keep the key.
+    #[test]
+    fn test_repair_keeps_key_when_a_user_dir_remains() {
+        let bin_dir = "/home/user/.graphmind/bin";
+        let pyenv = "/home/user/.pyenv/shims";
+        let mut json = serde_json::json!({
+            "env": { "PATH": format!("{bin_dir}:{pyenv}:/usr/bin:/bin") }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::Truncated {
+                remaining: format!("{pyenv}:/usr/bin:/bin")
+            }
+        );
+        assert_eq!(json["env"]["PATH"], format!("{pyenv}:/usr/bin:/bin"));
+    }
+
+    #[test]
+    fn test_repair_is_noop_when_segment_absent() {
+        let mut json = serde_json::json!({
+            "env": { "PATH": "/opt/homebrew/bin:/usr/bin" }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, "/home/user/.graphmind/bin"),
+            PathRepair::NotNeeded
+        );
+        assert_eq!(json["env"]["PATH"], "/opt/homebrew/bin:/usr/bin");
+    }
+
+    #[test]
+    fn test_repair_strips_segment_in_middle() {
+        let bin_dir = "/home/user/.graphmind/bin";
+        let mut json = serde_json::json!({
+            "env": { "PATH": format!("/opt/homebrew/bin:{bin_dir}:/usr/bin") }
+        });
+
+        // Both remaining segments are system dirs -> key dropped entirely.
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
+        assert!(json.get("env").is_none(), "got: {json}");
     }
 
     #[test]

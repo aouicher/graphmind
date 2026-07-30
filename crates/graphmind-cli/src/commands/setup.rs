@@ -15,28 +15,31 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 8, "Shell PATH configuration");
+    print_step(1, 9, "Shell PATH configuration");
     install_shell_path();
 
-    print_step(2, 8, "Claude Code hooks");
+    print_step(2, 9, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(3, 8, "Claude Code skills");
+    print_step(3, 9, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(4, 8, "Claude Desktop MCP config");
+    print_step(4, 9, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(5, 8, "Claude Code MCP server");
+    print_step(5, 9, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(6, 8, "OpenCode MCP config");
+    print_step(6, 9, "OpenCode MCP config");
     install_opencode_mcp();
 
-    print_step(7, 8, "Cursor global MCP config");
+    print_step(7, 9, "Cursor global MCP config");
     install_cursor_global_mcp();
 
-    print_step(8, 8, "CLAUDE.md instruction");
+    print_step(8, 9, "Repair legacy env.PATH (issue #105)");
+    repair_project_mcp_env();
+
+    print_step(9, 9, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -128,15 +131,14 @@ pub fn install_claude_desktop_mcp() {
         return;
     }
 
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+    // No `env` block: `graphmind_path` is absolute, so the server needs nothing
+    // from PATH to launch. Setting `env.PATH` here would REPLACE the inherited
+    // environment and break nvm/asdf/mise/Homebrew-on-ARM setups. See issue #105.
     mcp_servers.as_object_mut().unwrap().insert(
         "graphmind".to_string(),
         json!({
             "command": graphmind_path,
-            "args": ["mcp"],
-            "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
-            }
+            "args": ["mcp"]
         }),
     );
 
@@ -163,30 +165,48 @@ pub fn register_mcp_in_claude_code() {
         json!({})
     };
 
-    // Inject ~/.graphmind/bin into the global env.PATH so hooks (Bash tool) can resolve graphmind
-    {
-        let env = config
-            .as_object_mut()
-            .unwrap()
-            .entry("env")
-            .or_insert_with(|| json!({}));
-        let current_path = env
-            .get("PATH")
-            .and_then(|v| v.as_str())
-            .unwrap_or("/usr/local/bin:/usr/bin:/bin")
-            .to_string();
-        if !current_path.contains(&graphmind_bin_dir) {
-            let new_path = format!("{}:{}", graphmind_bin_dir, current_path);
-            env.as_object_mut().unwrap().insert("PATH".to_string(), json!(new_path));
+    // Repair any env.PATH pollution written by graphmind <= v0.2.211.
+    // We deliberately do NOT set a global env.PATH: it applies to every Bash tool
+    // call in Claude Code, and the old code seeded it from a hardcoded
+    // "/usr/local/bin:/usr/bin:/bin" default, wiping nvm/asdf/Homebrew-ARM paths.
+    // The hook scripts already self-prefix PATH (see claude_hook.rs), so hooks
+    // resolve `graphmind` without any settings.json help. See issue #105.
+    match repair_claude_settings_path(&mut config, &graphmind_bin_dir) {
+        PathRepair::NotNeeded => {}
+        PathRepair::KeyRemoved => {
+            println!(
+                "    {} removed legacy env.PATH — Claude Code now inherits your shell PATH",
+                "✓".green()
+            );
+        }
+        PathRepair::Truncated { remaining } => {
+            // We removed our segment but left the key, because it holds entries we
+            // cannot prove are safe to discard. Say so — a surviving env.PATH still
+            // overrides the shell PATH for every Bash tool call.
+            println!(
+                "    {} removed graphmind from env.PATH, but kept your other entries",
+                "✓".green()
+            );
+            println!("      {}", format!("env.PATH = {remaining}").dimmed());
+            println!(
+                "      {} this still overrides your shell PATH for Bash tool calls.",
+                "⚠".yellow()
+            );
+            println!(
+                "      {}",
+                "If you did not add those entries on purpose, delete env.PATH from"
+                    .yellow()
+            );
+            println!(
+                "      {}",
+                "~/.claude/settings.json to inherit your full shell PATH.".yellow()
+            );
         }
     }
 
     let mcp_entry = json!({
         "command": graphmind_path,
-        "args": ["mcp"],
-        "env": {
-            "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
-        }
+        "args": ["mcp"]
     });
 
     let mcp_servers = config
@@ -195,10 +215,14 @@ pub fn register_mcp_in_claude_code() {
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
 
+    // An entry is current only when it points at the right binary AND carries no
+    // `env` block. Pre-#105 entries have `env.PATH` and must be rewritten.
     let already_correct = mcp_servers
         .get("graphmind")
-        .and_then(|e| e.get("env"))
-        .is_some();
+        .is_some_and(|e| {
+            e.get("env").is_none()
+                && e.get("command").and_then(|c| c.as_str()) == Some(graphmind_path.as_str())
+        });
 
     if !already_correct {
         mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
@@ -218,11 +242,171 @@ pub fn register_mcp_in_claude_code() {
     println!("    {} configured", "✓".green());
 }
 
+/// Strip the stale `env.PATH` blocks that graphmind <= v0.2.211 wrote into every
+/// per-project MCP entry of `~/.claude.json` and `<project>/.vscode/mcp.json`
+/// (issue #105).
+///
+/// `setup()` only rewrites the *global* client configs; per-project entries would
+/// otherwise keep their broken `env` until the user happened to re-run `init` in
+/// each project. This sweeps them all in one pass.
+///
+/// Only the `env` key of graphmind's own entry is touched — other servers and any
+/// user-added fields are left untouched.
+#[doc(hidden)]
+pub fn repair_project_mcp_env() {
+    let mut repaired = 0usize;
+
+    // 1. ~/.claude.json — every project-scoped graphmind entry
+    let claude_json_path = home_dir().join(".claude.json");
+    if claude_json_path.exists() {
+        let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
+        if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
+            let mut changed = false;
+            if let Some(projects) = config.get_mut("projects").and_then(|p| p.as_object_mut()) {
+                for (_, project) in projects.iter_mut() {
+                    if let Some(entry) = project
+                        .get_mut("mcpServers")
+                        .and_then(|m| m.get_mut("graphmind"))
+                        .and_then(|e| e.as_object_mut())
+                    {
+                        if entry.remove("env").is_some() {
+                            changed = true;
+                            repaired += 1;
+                        }
+                    }
+                }
+            }
+            if changed {
+                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
+                fs::copy(&claude_json_path, &backup).ok();
+                let formatted = serde_json::to_string_pretty(&config).unwrap();
+                fs::write(&claude_json_path, formatted).ok();
+            }
+        }
+    }
+
+    // 2. <project>/.vscode/mcp.json for every registered project
+    for project in graphmind_config::Registry::list() {
+        let vscode_mcp = std::path::Path::new(&project.path).join(".vscode").join("mcp.json");
+        if !vscode_mcp.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
+        let Ok(mut config) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        let removed = config
+            .get_mut("servers")
+            .and_then(|s| s.get_mut("graphmind"))
+            .and_then(|e| e.as_object_mut())
+            .is_some_and(|e| e.remove("env").is_some());
+        if removed {
+            let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+            let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
+            fs::copy(&vscode_mcp, &backup).ok();
+            let formatted = serde_json::to_string_pretty(&config).unwrap();
+            fs::write(&vscode_mcp, formatted).ok();
+            repaired += 1;
+        }
+    }
+
+    if repaired > 0 {
+        println!(
+            "    {} cleaned stale env.PATH from {repaired} project MCP entr{}",
+            "✓".green(),
+            if repaired == 1 { "y" } else { "ies" }
+        );
+    } else {
+        println!("    {} no stale env.PATH found", "✓".green());
+    }
+}
+
+/// Remove the `~/.graphmind/bin` segment that graphmind <= v0.2.211 injected into
+/// the global `env.PATH` of `~/.claude/settings.json` (issue #105).
+///
+/// That key applies to every Bash tool call in Claude Code, and the old code
+/// seeded it from a hardcoded `/usr/local/bin:/usr/bin:/bin` when absent — so
+/// users on nvm/asdf/mise/Homebrew-ARM silently lost those directories.
+///
+/// The repair is deliberately careful, because a user may have edited the value
+/// by hand since:
+///   - only the exact `~/.graphmind/bin` segment is dropped, wherever it sits;
+///   - if every remaining segment is a standard system directory, `env.PATH` is
+///     removed entirely so Claude Code falls back to the inherited shell PATH.
+///     Such a value carries no information the shell would not already provide,
+///     and keeping it truncated is actively harmful: it still shadows the user's
+///     real PATH (pyenv/bun/cargo/plugin bins), which is the whole bug;
+///   - any segment outside that set may be a deliberate user choice, so the key
+///     is KEPT with our segment removed. We cannot tell a purposeful entry apart
+///     from one the user added to work around this very bug, and overwriting
+///     intent is the mistake #105 is about. The caller warns instead;
+///   - an `env` object left empty is removed too, to avoid dead keys.
+///
+/// Returns what was done, so the caller can tell the user when a truncated
+/// `env.PATH` survived and still shadows their shell PATH.
+#[derive(Debug, PartialEq)]
+enum PathRepair {
+    /// Our segment was not present — config untouched.
+    NotNeeded,
+    /// Only system dirs remained, so `env.PATH` was removed entirely and the
+    /// inherited shell PATH now wins. Fully fixed.
+    KeyRemoved,
+    /// User-specific segments remained, so the key survives minus our segment.
+    /// Still overrides the shell PATH — needs a heads-up.
+    Truncated { remaining: String },
+}
+
+fn repair_claude_settings_path(config: &mut Value, graphmind_bin_dir: &str) -> PathRepair {
+    let Some(env) = config.get_mut("env").and_then(|e| e.as_object_mut()) else {
+        return PathRepair::NotNeeded;
+    };
+    let Some(current) = env.get("PATH").and_then(|p| p.as_str()) else {
+        return PathRepair::NotNeeded;
+    };
+
+    let kept: Vec<&str> = current
+        .split(':')
+        .filter(|seg| !seg.is_empty() && *seg != graphmind_bin_dir)
+        .collect();
+
+    if kept.len() == current.split(':').filter(|s| !s.is_empty()).count() {
+        return PathRepair::NotNeeded; // our segment was not there
+    }
+
+    // Directories a login shell provides anyway. A PATH made only of these adds
+    // nothing but still shadows the real environment, so the key is dropped.
+    // Includes both Homebrew prefixes (ARM and x86).
+    const SYSTEM_DIRS: [&str; 8] = [
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+    ];
+
+    let outcome = if kept.iter().all(|seg| SYSTEM_DIRS.contains(seg)) {
+        env.remove("PATH");
+        PathRepair::KeyRemoved
+    } else {
+        let joined = kept.join(":");
+        env.insert("PATH".to_string(), json!(joined.clone()));
+        PathRepair::Truncated { remaining: joined }
+    };
+
+    if env.is_empty() {
+        config.as_object_mut().unwrap().remove("env");
+    }
+    outcome
+}
+
 #[doc(hidden)]
 pub fn install_opencode_mcp() {
     let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
     let graphmind_path = find_graphmind_binary();
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
 
     let mut config: Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path).unwrap_or_default();
@@ -255,19 +439,21 @@ pub fn install_opencode_mcp() {
         fs::copy(&config_path, &backup).ok();
     }
 
-    if mcp.get("graphmind").is_some() {
+    // Re-write when a stale pre-#105 entry carries an `environment` block.
+    if mcp
+        .get("graphmind")
+        .is_some_and(|e| e.get("environment").is_none())
+    {
         println!("    {} already configured", "✓".green());
         return;
     }
 
+    // No `environment` block — the command array holds an absolute path. See issue #105.
     mcp.as_object_mut().unwrap().insert(
         "graphmind".to_string(),
         json!({
             "type": "local",
-            "command": [graphmind_path, "mcp"],
-            "environment": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
-            }
+            "command": [graphmind_path, "mcp"]
         }),
     );
 
@@ -290,7 +476,6 @@ pub fn install_opencode_mcp() {
 pub fn install_cursor_global_mcp() {
     let config_path = home_dir().join(".cursor").join("mcp.json");
     let graphmind_path = find_graphmind_binary();
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
 
     let mut config: Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path).unwrap_or_default();
@@ -299,7 +484,12 @@ pub fn install_cursor_global_mcp() {
         json!({})
     };
 
-    if config.get("mcpServers").and_then(|m| m.get("graphmind")).is_some() {
+    // Re-write when a stale pre-#105 entry carries an `env` block.
+    if config
+        .get("mcpServers")
+        .and_then(|m| m.get("graphmind"))
+        .is_some_and(|e| e.get("env").is_none())
+    {
         println!("    {} already configured", "✓".green());
         return;
     }
@@ -316,14 +506,12 @@ pub fn install_cursor_global_mcp() {
         .unwrap()
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
+    // No `env` block — `graphmind_path` is absolute. See issue #105.
     mcp_servers.as_object_mut().unwrap().insert(
         "graphmind".to_string(),
         json!({
             "command": graphmind_path,
-            "args": ["mcp"],
-            "env": {
-                "PATH": format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir)
-            }
+            "args": ["mcp"]
         }),
     );
 
@@ -348,8 +536,6 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
     let abs_str = abs_path.to_string_lossy().to_string();
 
     let graphmind_path = find_graphmind_binary();
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
-    let path_env = format!("{}:/usr/local/bin:/usr/bin:/bin", graphmind_bin_dir);
 
     // 1. Claude Code — ~/.claude.json project-scoped entry
     {
@@ -361,12 +547,13 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
             json!({})
         };
 
+        // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
         let already = config
             .get("projects")
             .and_then(|p| p.get(&abs_str))
             .and_then(|p| p.get("mcpServers"))
             .and_then(|m| m.get("graphmind"))
-            .is_some();
+            .is_some_and(|e| e.get("env").is_none());
 
         if already {
             println!("    {} Claude Code (~/.claude.json) already configured", "✓".green());
@@ -392,13 +579,13 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
                 .unwrap()
                 .entry("mcpServers")
                 .or_insert_with(|| json!({}));
+            // No `env` block — `graphmind_path` is absolute. See issue #105.
             mcp_servers.as_object_mut().unwrap().insert(
                 "graphmind".to_string(),
                 json!({
                     "type": "stdio",
                     "command": graphmind_path,
-                    "args": ["mcp"],
-                    "env": { "PATH": path_env }
+                    "args": ["mcp"]
                 }),
             );
 
@@ -422,10 +609,11 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
             json!({})
         };
 
+        // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
         let already = config
             .get("servers")
             .and_then(|m| m.get("graphmind"))
-            .is_some();
+            .is_some_and(|e| e.get("env").is_none());
 
         if already {
             println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
@@ -441,13 +629,13 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
                 .unwrap()
                 .entry("servers")
                 .or_insert_with(|| json!({}));
+            // No `env` block — `graphmind_path` is absolute. See issue #105.
             servers.as_object_mut().unwrap().insert(
                 "graphmind".to_string(),
                 json!({
                     "type": "stdio",
                     "command": graphmind_path,
-                    "args": ["mcp"],
-                    "env": { "PATH": path_env }
+                    "args": ["mcp"]
                 }),
             );
 
@@ -850,19 +1038,20 @@ pub fn unregister_mcp_in_claude_code() {
     };
 
     let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
-    let prefix = format!("{}:", graphmind_bin_dir);
 
     let had_mcp_entry = config
         .get("mcpServers")
         .and_then(|m| m.get("graphmind"))
         .is_some();
-    let has_path_prefix = config
+    // Segment-aware: catches our directory wherever it sits, even if the user
+    // reordered the value by hand (a plain strip_prefix would miss that).
+    let has_path_segment = config
         .get("env")
         .and_then(|e| e.get("PATH"))
         .and_then(|p| p.as_str())
-        .is_some_and(|p| p.starts_with(&prefix));
+        .is_some_and(|p| p.split(':').any(|seg| seg == graphmind_bin_dir));
 
-    if !had_mcp_entry && !has_path_prefix {
+    if !had_mcp_entry && !has_path_segment {
         return;
     }
 
@@ -874,16 +1063,18 @@ pub fn unregister_mcp_in_claude_code() {
         if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
             mcp_servers.remove("graphmind");
         }
-    }
-
-    if has_path_prefix {
-        if let Some(env) = config.get_mut("env").and_then(|e| e.as_object_mut()) {
-            if let Some(current) = env.get("PATH").and_then(|p| p.as_str()) {
-                let stripped = current.strip_prefix(&prefix).unwrap_or(current).to_string();
-                env.insert("PATH".to_string(), json!(stripped));
-            }
+        // Drop an emptied mcpServers object rather than leaving a dead key.
+        if config
+            .get("mcpServers")
+            .and_then(|m| m.as_object())
+            .is_some_and(|m| m.is_empty())
+        {
+            config.as_object_mut().unwrap().remove("mcpServers");
         }
     }
+
+    // Reuse the #105 repair so uninstall and setup converge on identical results.
+    repair_claude_settings_path(&mut config, &graphmind_bin_dir);
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
     fs::write(&settings_path, formatted).unwrap_or_else(|e| {
