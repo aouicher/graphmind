@@ -382,38 +382,61 @@ fn uninstall_opencode_mcp() -> Result<(), String> {
 /// Remove the `~/.graphmind/bin` segment that graphmind <= v0.2.211 injected into
 /// the global `env.PATH` of `~/.claude/settings.json` (issue #105).
 ///
-/// Mirrors `graphmind_cli::commands::setup::repair_claude_settings_path`. Kept
-/// conservative because the user may have edited the value since: only our exact
-/// segment is dropped, order is preserved, and if just the old hardcoded default
-/// remains the key is removed so the inherited shell PATH wins.
-///
-/// Returns true when the config was modified.
-fn repair_claude_settings_path(json: &mut Value, bin_dir: &str) -> bool {
+/// Outcome of the #105 PATH repair. `Truncated` means a user-specific `env.PATH`
+/// survived and still overrides the shell PATH — the UI should surface that.
+#[derive(Debug, PartialEq)]
+pub enum PathRepair {
+    NotNeeded,
+    KeyRemoved,
+    Truncated { remaining: String },
+}
+
+/// Mirrors `graphmind_cli::commands::setup::repair_claude_settings_path` — keep
+/// the two in sync. Only our exact segment is dropped, order is preserved, and if
+/// every remaining segment is a standard system directory the key is removed so
+/// the inherited shell PATH wins (a truncated value would still shadow the user's
+/// real PATH, which is the bug). Anything possibly user-specific is kept, since we
+/// cannot prove intent and overwriting it is the mistake #105 is about.
+fn repair_claude_settings_path(json: &mut Value, bin_dir: &str) -> PathRepair {
     let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) else {
-        return false;
+        return PathRepair::NotNeeded;
     };
     let Some(current) = env.get("PATH").and_then(|p| p.as_str()) else {
-        return false;
+        return PathRepair::NotNeeded;
     };
 
     let segments: Vec<&str> = current.split(':').filter(|s| !s.is_empty()).collect();
     let kept: Vec<&str> = segments.iter().copied().filter(|s| *s != bin_dir).collect();
 
     if kept.len() == segments.len() {
-        return false; // our segment was not there
+        return PathRepair::NotNeeded; // our segment was not there
     }
 
-    const OLD_DEFAULT: [&str; 3] = ["/usr/local/bin", "/usr/bin", "/bin"];
-    if kept == OLD_DEFAULT {
+    // Directories a login shell provides anyway; both Homebrew prefixes included.
+    const SYSTEM_DIRS: [&str; 8] = [
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+    ];
+
+    let outcome = if kept.iter().all(|seg| SYSTEM_DIRS.contains(seg)) {
         env.remove("PATH");
+        PathRepair::KeyRemoved
     } else {
-        env.insert("PATH".to_string(), Value::String(kept.join(":")));
-    }
+        let joined = kept.join(":");
+        env.insert("PATH".to_string(), Value::String(joined.clone()));
+        PathRepair::Truncated { remaining: joined }
+    };
 
     if env.is_empty() {
         json.as_object_mut().unwrap().remove("env");
     }
-    true
+    outcome
 }
 
 fn uninstall_claude_mcp() -> Result<(), String> {
@@ -576,7 +599,13 @@ mod tests {
             "env": { "PATH": format!("{bin_dir}:{nvm}:/usr/local/bin:/usr/bin:/bin") }
         });
 
-        assert!(repair_claude_settings_path(&mut json, bin_dir));
+        // nvm is user-specific, so the key survives — and the caller is told.
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::Truncated {
+                remaining: format!("{nvm}:/usr/local/bin:/usr/bin:/bin")
+            }
+        );
 
         let path = json["env"]["PATH"].as_str().unwrap();
         assert!(!path.split(':').any(|s| s == bin_dir), "got: {path}");
@@ -590,10 +619,54 @@ mod tests {
             "env": { "PATH": format!("{bin_dir}:/usr/local/bin:/usr/bin:/bin") }
         });
 
-        assert!(repair_claude_settings_path(&mut json, bin_dir));
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
 
         // The whole `env` object goes away, so the inherited shell PATH wins.
         assert!(json.get("env").is_none(), "got: {json}");
+    }
+
+    /// A real-world pre-fix install where the user had hand-added Homebrew-ARM
+    /// and the sbin dirs. Those are all system dirs, so the key must still go —
+    /// keeping it truncated would continue shadowing pyenv/bun/cargo/plugin bins.
+    #[test]
+    fn test_repair_removes_key_when_only_system_dirs_remain() {
+        let bin_dir = "/Users/someone/.graphmind/bin";
+        let mut json = serde_json::json!({
+            "env": {
+                "PATH": format!("{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+                "SOME_OTHER_VAR": "keep-me"
+            }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
+
+        assert!(json["env"]["PATH"].is_null(), "PATH should be gone: {json}");
+        // Unrelated vars in the same object must survive.
+        assert_eq!(json["env"]["SOME_OTHER_VAR"], "keep-me");
+    }
+
+    /// One user-specific segment is enough to keep the key.
+    #[test]
+    fn test_repair_keeps_key_when_a_user_dir_remains() {
+        let bin_dir = "/home/user/.graphmind/bin";
+        let pyenv = "/home/user/.pyenv/shims";
+        let mut json = serde_json::json!({
+            "env": { "PATH": format!("{bin_dir}:{pyenv}:/usr/bin:/bin") }
+        });
+
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::Truncated {
+                remaining: format!("{pyenv}:/usr/bin:/bin")
+            }
+        );
+        assert_eq!(json["env"]["PATH"], format!("{pyenv}:/usr/bin:/bin"));
     }
 
     #[test]
@@ -602,7 +675,10 @@ mod tests {
             "env": { "PATH": "/opt/homebrew/bin:/usr/bin" }
         });
 
-        assert!(!repair_claude_settings_path(&mut json, "/home/user/.graphmind/bin"));
+        assert_eq!(
+            repair_claude_settings_path(&mut json, "/home/user/.graphmind/bin"),
+            PathRepair::NotNeeded
+        );
         assert_eq!(json["env"]["PATH"], "/opt/homebrew/bin:/usr/bin");
     }
 
@@ -613,8 +689,12 @@ mod tests {
             "env": { "PATH": format!("/opt/homebrew/bin:{bin_dir}:/usr/bin") }
         });
 
-        assert!(repair_claude_settings_path(&mut json, bin_dir));
-        assert_eq!(json["env"]["PATH"], "/opt/homebrew/bin:/usr/bin");
+        // Both remaining segments are system dirs -> key dropped entirely.
+        assert_eq!(
+            repair_claude_settings_path(&mut json, bin_dir),
+            PathRepair::KeyRemoved
+        );
+        assert!(json.get("env").is_none(), "got: {json}");
     }
 
     #[test]

@@ -171,7 +171,38 @@ pub fn register_mcp_in_claude_code() {
     // "/usr/local/bin:/usr/bin:/bin" default, wiping nvm/asdf/Homebrew-ARM paths.
     // The hook scripts already self-prefix PATH (see claude_hook.rs), so hooks
     // resolve `graphmind` without any settings.json help. See issue #105.
-    repair_claude_settings_path(&mut config, &graphmind_bin_dir);
+    match repair_claude_settings_path(&mut config, &graphmind_bin_dir) {
+        PathRepair::NotNeeded => {}
+        PathRepair::KeyRemoved => {
+            println!(
+                "    {} removed legacy env.PATH — Claude Code now inherits your shell PATH",
+                "✓".green()
+            );
+        }
+        PathRepair::Truncated { remaining } => {
+            // We removed our segment but left the key, because it holds entries we
+            // cannot prove are safe to discard. Say so — a surviving env.PATH still
+            // overrides the shell PATH for every Bash tool call.
+            println!(
+                "    {} removed graphmind from env.PATH, but kept your other entries",
+                "✓".green()
+            );
+            println!("      {}", format!("env.PATH = {remaining}").dimmed());
+            println!(
+                "      {} this still overrides your shell PATH for Bash tool calls.",
+                "⚠".yellow()
+            );
+            println!(
+                "      {}",
+                "If you did not add those entries on purpose, delete env.PATH from"
+                    .yellow()
+            );
+            println!(
+                "      {}",
+                "~/.claude/settings.json to inherit your full shell PATH.".yellow()
+            );
+        }
+    }
 
     let mcp_entry = json!({
         "command": graphmind_path,
@@ -298,23 +329,40 @@ pub fn repair_project_mcp_env() {
 /// seeded it from a hardcoded `/usr/local/bin:/usr/bin:/bin` when absent — so
 /// users on nvm/asdf/mise/Homebrew-ARM silently lost those directories.
 ///
-/// The repair is deliberately conservative, because a user may have edited the
-/// value by hand since:
+/// The repair is deliberately careful, because a user may have edited the value
+/// by hand since:
 ///   - only the exact `~/.graphmind/bin` segment is dropped, wherever it sits;
-///   - every other segment the user added is preserved, in order;
-///   - if what remains is exactly the old hardcoded default, `env.PATH` is
-///     removed entirely so Claude Code falls back to the inherited shell PATH
-///     (the correct behaviour, and what nvm users need);
-///   - anything else the user curated is left in place, minus our segment;
+///   - if every remaining segment is a standard system directory, `env.PATH` is
+///     removed entirely so Claude Code falls back to the inherited shell PATH.
+///     Such a value carries no information the shell would not already provide,
+///     and keeping it truncated is actively harmful: it still shadows the user's
+///     real PATH (pyenv/bun/cargo/plugin bins), which is the whole bug;
+///   - any segment outside that set may be a deliberate user choice, so the key
+///     is KEPT with our segment removed. We cannot tell a purposeful entry apart
+///     from one the user added to work around this very bug, and overwriting
+///     intent is the mistake #105 is about. The caller warns instead;
 ///   - an `env` object left empty is removed too, to avoid dead keys.
 ///
-/// Returns true when the config was modified.
-fn repair_claude_settings_path(config: &mut Value, graphmind_bin_dir: &str) -> bool {
+/// Returns what was done, so the caller can tell the user when a truncated
+/// `env.PATH` survived and still shadows their shell PATH.
+#[derive(Debug, PartialEq)]
+enum PathRepair {
+    /// Our segment was not present — config untouched.
+    NotNeeded,
+    /// Only system dirs remained, so `env.PATH` was removed entirely and the
+    /// inherited shell PATH now wins. Fully fixed.
+    KeyRemoved,
+    /// User-specific segments remained, so the key survives minus our segment.
+    /// Still overrides the shell PATH — needs a heads-up.
+    Truncated { remaining: String },
+}
+
+fn repair_claude_settings_path(config: &mut Value, graphmind_bin_dir: &str) -> PathRepair {
     let Some(env) = config.get_mut("env").and_then(|e| e.as_object_mut()) else {
-        return false;
+        return PathRepair::NotNeeded;
     };
     let Some(current) = env.get("PATH").and_then(|p| p.as_str()) else {
-        return false;
+        return PathRepair::NotNeeded;
     };
 
     let kept: Vec<&str> = current
@@ -323,22 +371,36 @@ fn repair_claude_settings_path(config: &mut Value, graphmind_bin_dir: &str) -> b
         .collect();
 
     if kept.len() == current.split(':').filter(|s| !s.is_empty()).count() {
-        return false; // our segment was not there — nothing to repair
+        return PathRepair::NotNeeded; // our segment was not there
     }
 
-    // If only the old hardcoded default remains, drop the key so the inherited
-    // shell PATH wins. Anything else is user-curated and worth keeping.
-    const OLD_DEFAULT: [&str; 3] = ["/usr/local/bin", "/usr/bin", "/bin"];
-    if kept == OLD_DEFAULT {
+    // Directories a login shell provides anyway. A PATH made only of these adds
+    // nothing but still shadows the real environment, so the key is dropped.
+    // Includes both Homebrew prefixes (ARM and x86).
+    const SYSTEM_DIRS: [&str; 8] = [
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+    ];
+
+    let outcome = if kept.iter().all(|seg| SYSTEM_DIRS.contains(seg)) {
         env.remove("PATH");
+        PathRepair::KeyRemoved
     } else {
-        env.insert("PATH".to_string(), json!(kept.join(":")));
-    }
+        let joined = kept.join(":");
+        env.insert("PATH".to_string(), json!(joined.clone()));
+        PathRepair::Truncated { remaining: joined }
+    };
 
     if env.is_empty() {
         config.as_object_mut().unwrap().remove("env");
     }
-    true
+    outcome
 }
 
 #[doc(hidden)]
