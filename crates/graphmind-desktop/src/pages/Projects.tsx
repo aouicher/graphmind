@@ -15,6 +15,15 @@ export function Projects() {
   const [buildingPhase, setBuildingPhase] = useState<"indexing" | "embedding">("indexing");
   const [buildingAll, setBuildingAll] = useState(false);
 
+  // Tracks which project is currently building so its card shows a progress bar.
+  // Required for batch builds ("Rebuild All" / build-on-startup): those never go
+  // through `handleBuild`, so without this listener no card would show progress
+  // during the indexing phase.
+  useTauriEvent<string>("indexing-started", useCallback((slug) => {
+    setBuilding(slug);
+    setBuildingPhase("indexing");
+  }, []));
+
   useTauriEvent<string>("embedding-started", useCallback((slug) => {
     setBuilding(slug);
     setBuildingPhase("embedding");
