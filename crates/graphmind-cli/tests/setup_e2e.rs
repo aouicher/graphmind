@@ -78,13 +78,19 @@ fn setup_claude_desktop_mcp_written() {
             "mcpServers.graphmind should be an object"
         );
 
-        let path_val = json["mcpServers"]["graphmind"]["env"]["PATH"]
-            .as_str()
-            .unwrap_or("");
-        let bin_dir = home.join(".graphmind").join("bin");
+        // Issue #105: no env block at all — `command` is absolute, and setting
+        // env.PATH would replace the inherited environment (breaking nvm/asdf).
         assert!(
-            path_val.contains(bin_dir.to_str().unwrap()),
-            "env.PATH should contain .graphmind/bin, got: {path_val}"
+            json["mcpServers"]["graphmind"]["env"].is_null(),
+            "entry must carry no env block, got: {}",
+            json["mcpServers"]["graphmind"]
+        );
+        assert!(
+            json["mcpServers"]["graphmind"]["command"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with('/'),
+            "command must be an absolute path"
         );
     });
 }
@@ -138,20 +144,117 @@ fn setup_claude_code_mcp_written() {
             "mcpServers.graphmind should exist"
         );
 
-        let mcp_path = json["mcpServers"]["graphmind"]["env"]["PATH"]
-            .as_str()
-            .unwrap_or("");
-        let bin_dir = home.join(".graphmind").join("bin");
-        let bin_str = bin_dir.to_str().unwrap();
+        // Issue #105: neither the MCP entry nor the global settings may pin PATH.
         assert!(
-            mcp_path.contains(bin_str),
-            "mcpServers.graphmind.env.PATH should contain .graphmind/bin, got: {mcp_path}"
+            json["mcpServers"]["graphmind"]["env"].is_null(),
+            "MCP entry must carry no env block, got: {}",
+            json["mcpServers"]["graphmind"]
         );
 
+        let bin_dir = home.join(".graphmind").join("bin");
+        let bin_str = bin_dir.to_str().unwrap();
         let global_path = json["env"]["PATH"].as_str().unwrap_or("");
         assert!(
-            global_path.contains(bin_str),
-            "top-level env.PATH should contain .graphmind/bin, got: {global_path}"
+            !global_path.contains(bin_str),
+            "top-level env.PATH must not be injected (breaks nvm/asdf), got: {global_path}"
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 4b. Issue #105 — a legacy env.PATH is repaired in place
+// ---------------------------------------------------------------------------
+
+#[test]
+fn setup_repairs_legacy_env_path() {
+    with_home(|home| {
+        let claude_dir = home.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let bin_dir = home.join(".graphmind").join("bin");
+        let bin_str = bin_dir.to_str().unwrap().to_string();
+
+        // Simulate a pre-#105 install where the user later added their own nvm
+        // path by hand — that edit must survive the repair.
+        let nvm = "/Users/test/.nvm/versions/node/v20.11.0/bin";
+        let settings = claude_dir.join("settings.json");
+        fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "env": { "PATH": format!("{bin_str}:{nvm}:/usr/local/bin:/usr/bin:/bin") },
+                "mcpServers": {
+                    "graphmind": {
+                        "command": "/stale/path/graphmind",
+                        "args": ["mcp"],
+                        "env": { "PATH": format!("{bin_str}:/usr/local/bin:/usr/bin:/bin") }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        register_mcp_in_claude_code();
+
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).expect("valid JSON");
+
+        // Our segment is gone, the user's nvm entry is preserved and still ordered.
+        let global_path = json["env"]["PATH"].as_str().unwrap_or("");
+        assert!(
+            !global_path.contains(&bin_str),
+            "graphmind segment should be stripped, got: {global_path}"
+        );
+        assert!(
+            global_path.contains(nvm),
+            "user-added nvm path must be preserved, got: {global_path}"
+        );
+
+        // The stale MCP entry is rewritten: no env, and command re-pointed.
+        assert!(
+            json["mcpServers"]["graphmind"]["env"].is_null(),
+            "stale env block should be dropped, got: {}",
+            json["mcpServers"]["graphmind"]
+        );
+        assert_ne!(
+            json["mcpServers"]["graphmind"]["command"].as_str(),
+            Some("/stale/path/graphmind"),
+            "stale command should be re-pointed at the real binary"
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 4c. Issue #105 — repair drops env.PATH entirely when only the old default remains
+// ---------------------------------------------------------------------------
+
+#[test]
+fn setup_removes_env_path_when_only_legacy_default_remains() {
+    with_home(|home| {
+        let claude_dir = home.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let bin_str = home.join(".graphmind").join("bin").to_str().unwrap().to_string();
+
+        let settings = claude_dir.join("settings.json");
+        fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "env": { "PATH": format!("{bin_str}:/usr/local/bin:/usr/bin:/bin") }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        register_mcp_in_claude_code();
+
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).expect("valid JSON");
+
+        // Nothing the user curated remained, so the key is dropped and Claude Code
+        // falls back to the inherited shell PATH — what nvm users need.
+        assert!(
+            json["env"]["PATH"].is_null(),
+            "env.PATH should be removed entirely, got: {}",
+            json["env"]
         );
     });
 }
@@ -214,13 +317,11 @@ fn setup_opencode_mcp_written() {
             "command should be an array"
         );
 
-        let env_path = json["mcp"]["graphmind"]["environment"]["PATH"]
-            .as_str()
-            .unwrap_or("");
-        let bin_dir = home.join(".graphmind").join("bin");
+        // Issue #105: no environment block — the command array is absolute.
         assert!(
-            env_path.contains(bin_dir.to_str().unwrap()),
-            "environment.PATH should contain .graphmind/bin, got: {env_path}"
+            json["mcp"]["graphmind"]["environment"].is_null(),
+            "entry must carry no environment block, got: {}",
+            json["mcp"]["graphmind"]
         );
     });
 }
@@ -382,13 +483,11 @@ fn setup_cursor_global_mcp_written() {
             json["mcpServers"]["graphmind"].is_object(),
             "mcpServers.graphmind should exist"
         );
-        let path_val = json["mcpServers"]["graphmind"]["env"]["PATH"]
-            .as_str()
-            .unwrap_or("");
-        let bin_dir = home.join(".graphmind").join("bin");
+        // Issue #105: no env block — `command` is absolute.
         assert!(
-            path_val.contains(bin_dir.to_str().unwrap()),
-            "env.PATH should contain .graphmind/bin, got: {path_val}"
+            json["mcpServers"]["graphmind"]["env"].is_null(),
+            "entry must carry no env block, got: {}",
+            json["mcpServers"]["graphmind"]
         );
     });
 }
@@ -441,13 +540,11 @@ fn ensure_project_mcp_configs_written() {
             json["projects"][abs_str]["mcpServers"]["graphmind"]["type"].as_str(),
             Some("stdio"),
         );
-        let bin_dir = home.join(".graphmind").join("bin");
-        let path_val = json["projects"][abs_str]["mcpServers"]["graphmind"]["env"]["PATH"]
-            .as_str()
-            .unwrap_or("");
+        // Issue #105: no env block — `command` is absolute.
         assert!(
-            path_val.contains(bin_dir.to_str().unwrap()),
-            "env.PATH should contain .graphmind/bin"
+            json["projects"][abs_str]["mcpServers"]["graphmind"]["env"].is_null(),
+            "project entry must carry no env block, got: {}",
+            json["projects"][abs_str]["mcpServers"]["graphmind"]
         );
 
         // 2. <project>/.vscode/mcp.json

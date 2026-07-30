@@ -175,6 +175,50 @@ fn unregister_mcp_in_claude_code_leaves_unrelated_path_untouched() {
     });
 }
 
+/// Issue #105: a legacy install where the user later reordered PATH by hand.
+/// The old `strip_prefix` implementation only matched our segment at position 0,
+/// so it silently left the pollution behind. Removal must be segment-aware.
+#[test]
+fn unregister_mcp_in_claude_code_strips_segment_not_at_start() {
+    with_home(|home| {
+        let claude_dir = home.join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let bin_dir = home.join(".graphmind").join("bin").to_string_lossy().to_string();
+
+        let nvm = "/Users/test/.nvm/versions/node/v20.11.0/bin";
+        let settings_path = claude_dir.join("settings.json");
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&json!({
+                // graphmind's segment sits in the MIDDLE — user put nvm first.
+                "env": { "PATH": format!("{nvm}:{bin_dir}:/usr/local/bin:/usr/bin:/bin") },
+                "mcpServers": { "graphmind": { "command": "x", "args": ["mcp"] } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        unregister_mcp_in_claude_code();
+
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        let path_val = json["env"]["PATH"].as_str().unwrap_or("");
+
+        assert!(
+            !path_val.split(':').any(|seg| seg == bin_dir),
+            "graphmind segment must be removed wherever it sits, got: {path_val}"
+        );
+        assert!(
+            path_val.starts_with(nvm),
+            "user's nvm path must survive in place, got: {path_val}"
+        );
+        assert!(
+            json["mcpServers"]["graphmind"].is_null(),
+            "graphmind MCP entry should be removed, got: {json}"
+        );
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 3. Claude Desktop MCP config — removes only graphmind entry
 // ---------------------------------------------------------------------------

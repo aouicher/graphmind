@@ -42,7 +42,11 @@ pub struct LicenseConfig {
 
 /// Bump this when hooks, skills, or MCP config format changes.
 /// Users with a lower stored version get a "run graphmind setup" warning.
-pub const SETUP_VERSION: u32 = 2;
+///
+/// v3 — issue #105: MCP entries no longer carry an `env.PATH` block, and the
+/// global `env.PATH` in ~/.claude/settings.json is removed. Bumping this makes
+/// `auto_setup_if_outdated()` run the repair for already-installed users.
+pub const SETUP_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {
