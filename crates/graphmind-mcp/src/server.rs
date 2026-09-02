@@ -318,7 +318,20 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     // Refresh update cache in background so MCP-only users get update notices
     std::thread::spawn(refresh_update_cache);
 
-    let service = GraphmindServer.serve(stdio()).await?;
+    let (stdin, mut stdout) = stdio();
+    let mut stdin = tokio::io::BufReader::new(stdin);
+
+    // Some clients probe with a vendor-specific request before `initialize`
+    // (Copilot CLI sends `server/discover`). rmcp's handshake accepts only
+    // `ping` before `initialize` and aborts on anything else, so answer those
+    // probes with -32601 here and hand rmcp a stream that starts at the first
+    // message it can handle. See handshake.rs and issue #109.
+    let carry = crate::handshake::answer_preinit_probes(&mut stdin, &mut stdout).await;
+
+    // Replay the message that ended the probe phase, then the live stdin.
+    let input = crate::handshake::prepend(carry, stdin);
+
+    let service = GraphmindServer.serve((input, stdout)).await?;
     service.waiting().await?;
     Ok(())
 }
