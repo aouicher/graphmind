@@ -46,12 +46,23 @@ fn get_current_binary_path() -> PathBuf {
 }
 
 fn download_and_replace(version: &str) -> Result<(), String> {
-    let asset = if cfg!(target_arch = "aarch64") {
-        "graphmind-cli-macos-arm64"
+    // Match on OS first: `target_arch` alone sent Windows and Linux arm64
+    // hosts to the macOS binary (issue #109).
+    let asset = if cfg!(target_os = "windows") {
+        "graphmind-cli-windows-x64.exe"
     } else if cfg!(target_os = "linux") {
         "graphmind-cli-linux-x64"
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "graphmind-cli-macos-arm64"
+        } else {
+            "graphmind-cli-macos-x64"
+        }
     } else {
-        "graphmind-cli-macos-x64"
+        return Err(format!(
+            "No prebuilt binary for this platform ({}). Build from source: cargo install --git https://github.com/{GITHUB_REPO}",
+            std::env::consts::OS
+        ));
     };
 
     let url = format!(
@@ -60,7 +71,14 @@ fn download_and_replace(version: &str) -> Result<(), String> {
 
     println!("  {} v{version} ({asset})...", "Downloading".blue());
 
-    let tmp_path = std::env::temp_dir().join("graphmind-update-bin");
+    // Windows will not execute a file without the .exe extension, which the
+    // post-download verification step below relies on.
+    let tmp_name = if cfg!(target_os = "windows") {
+        "graphmind-update-bin.exe"
+    } else {
+        "graphmind-update-bin"
+    };
+    let tmp_path = std::env::temp_dir().join(tmp_name);
 
     let status = Command::new("curl")
         .args(["-fsSL", "-o"])
@@ -104,14 +122,26 @@ fn download_and_replace(version: &str) -> Result<(), String> {
     println!("  {} Binary verified", "✓".green());
 
     let bin_path = get_current_binary_path();
-    let backup = bin_path.with_extension("old");
+    // Append rather than replace the extension: `with_extension` would turn
+    // `graphmind.exe` into `graphmind.old`, losing the `.exe` on rollback.
+    let mut backup = bin_path.clone().into_os_string();
+    backup.push(".old");
+    let backup = PathBuf::from(backup);
+    // Windows refuses to rename onto an existing path, and leaves this behind
+    // because the running image stays locked until the process exits.
+    fs::remove_file(&backup).ok();
     fs::rename(&bin_path, &backup).map_err(|e| format!("Failed to backup current binary: {e}"))?;
 
-    if let Err(e) = fs::rename(&tmp_path, &bin_path) {
+    // temp_dir and the install dir may sit on different volumes, where rename
+    // fails with EXDEV; fall back to a copy in that case.
+    let installed = fs::rename(&tmp_path, &bin_path)
+        .or_else(|_| fs::copy(&tmp_path, &bin_path).map(|_| ()));
+    if let Err(e) = installed {
         // Restore backup on failure
         fs::rename(&backup, &bin_path).ok();
         return Err(format!("Failed to install new binary: {e}"));
     }
+    fs::remove_file(&tmp_path).ok();
 
     // Sign on macOS to prevent Gatekeeper kill
     #[cfg(target_os = "macos")]

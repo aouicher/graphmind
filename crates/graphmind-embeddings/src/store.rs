@@ -147,7 +147,11 @@ pub fn float32_to_bytes(arr: &[f32]) -> Vec<u8> {
 }
 
 pub fn bytes_to_float32(buf: &[u8]) -> Vec<f32> {
-    buf.chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+    // as_chunks (over chunks_exact) gives fixed-size arrays, so from_le_bytes
+    // needs no per-element indexing. Trailing bytes are dropped, as before.
+    buf.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect()
 }
