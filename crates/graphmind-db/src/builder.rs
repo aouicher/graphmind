@@ -3,7 +3,7 @@ use crate::markdown::parse_markdown;
 use crate::schema::init_database;
 use graphmind_core::{parse_single, ParsedFile};
 use rusqlite::{params, Connection};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -159,6 +159,23 @@ impl GraphBuilder {
         Self { db, cache }
     }
 
+    /// Ids of the symbols currently stored for `file`, grouped by (name, kind) in source order.
+    fn existing_symbol_ids(&self, file: &str) -> HashMap<(String, String), VecDeque<i64>> {
+        let mut map: HashMap<(String, String), VecDeque<i64>> = HashMap::new();
+        let rows = self
+            .db
+            .prepare("SELECT id, name, kind FROM symbols WHERE file = ?1 ORDER BY line_start, id")
+            .and_then(|mut stmt| {
+                stmt.query_map(params![file], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+            })
+            .unwrap_or_default();
+        for (id, name, kind) in rows {
+            map.entry((name, kind)).or_default().push_back(id);
+        }
+        map
+    }
+
     pub fn build(&mut self, project_path: &str, options: &BuildOptions) -> BuildResult {
         let start = std::time::Instant::now();
         let mut files = self.collect_files(project_path, &options.exclude);
@@ -272,15 +289,16 @@ impl GraphBuilder {
                 continue;
             }
 
+            // Only this file's outgoing edges are rebuilt (pass 2 re-resolves its calls and
+            // imports). Edges from other files into this one are kept: its symbols keep their ids
+            // below, and edges to symbols that no longer exist go with them (ON DELETE CASCADE).
             if let Err(e) = self.db.execute(
-                "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
+                "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1)",
                 params![rel_path],
             ) {
                 eprintln!("warn: failed to clean edges for {}: {}", rel_path, e);
             }
-            if let Err(e) = self.db.execute("DELETE FROM symbols WHERE file = ?1", params![rel_path]) {
-                eprintln!("warn: failed to clean symbols for {}: {}", rel_path, e);
-            }
+            let mut existing_ids = self.existing_symbol_ids(&rel_path);
 
             let parsed = if file.language == "markdown" {
                 let md = parse_markdown(file.full_path.to_str().unwrap_or(""), &content);
@@ -341,14 +359,33 @@ impl GraphBuilder {
                     graphmind_core::SymbolKind::Type => "Type",
                 };
 
-                if let Err(e) = self.db.execute(
-                    "INSERT INTO symbols (name, kind, file, line_start, line_end, signature, doc, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![sym.name, kind_str, rel_path, sym.line_start, sym.line_end, sym.signature, sym.doc, body],
-                ) {
+                // Same name and kind as a symbol already in this file (in source order): update
+                // it in place, so edges from unchanged files that point at it stay valid.
+                let reuse = existing_ids
+                    .get_mut(&(sym.name.clone(), kind_str.to_string()))
+                    .and_then(|ids| ids.pop_front());
+                let written = match reuse {
+                    Some(id) => self.db.execute(
+                        "UPDATE symbols SET line_start = ?2, line_end = ?3, signature = ?4, doc = ?5, content = ?6 WHERE id = ?1",
+                        params![id, sym.line_start, sym.line_end, sym.signature, sym.doc, body],
+                    ),
+                    None => self.db.execute(
+                        "INSERT INTO symbols (name, kind, file, line_start, line_end, signature, doc, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![sym.name, kind_str, rel_path, sym.line_start, sym.line_end, sym.signature, sym.doc, body],
+                    ),
+                };
+                if let Err(e) = written {
                     eprintln!("warn: failed to insert symbol {} in {}: {}", sym.name, rel_path, e);
                     continue;
                 }
                 total_symbols += 1;
+            }
+
+            // Symbols removed from the file (their incoming edges cascade away).
+            for id in existing_ids.into_values().flatten() {
+                if let Err(e) = self.db.execute("DELETE FROM symbols WHERE id = ?1", params![id]) {
+                    eprintln!("warn: failed to delete removed symbol in {}: {}", rel_path, e);
+                }
             }
 
             if !parsed.call_sites.is_empty() {
