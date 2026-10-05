@@ -134,6 +134,27 @@ pub fn build_changed_between(slug: Option<&str>, old_head: &str, new_head: &str)
     }
 }
 
+/// Exclusive per-project build lock, held until the returned file is dropped. Git hooks start
+/// builds in the background (commit, merge, rebase, checkout can fire in quick succession);
+/// two builds writing the same graph at once could insert duplicate symbols. A second build
+/// waits for the first, then has little left to do.
+fn lock_build(slug: &str) -> Option<std::fs::File> {
+    use fs4::FileExt;
+    let dir = paths::graph_dir(slug);
+    std::fs::create_dir_all(&dir).ok();
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(dir.join("build.lock"))
+        .ok()?;
+    if FileExt::try_lock(&file).is_err() {
+        eprintln!("Waiting for another build of {slug} to finish...");
+        FileExt::lock(&file).ok()?;
+    }
+    Some(file)
+}
+
 fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let project = match Registry::get(slug) {
         Some(p) => p,
@@ -142,6 +163,8 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
             return;
         }
     };
+
+    let _build_lock = lock_build(slug);
 
     println!(
         "{} Building {} at {}",
@@ -464,6 +487,8 @@ fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
         Some(p) => p,
         None => return BuildResult::default(),
     };
+
+    let _build_lock = lock_build(slug);
 
     let project_path = PathBuf::from(&project.path);
     let rel_paths: Vec<String> = changed_paths

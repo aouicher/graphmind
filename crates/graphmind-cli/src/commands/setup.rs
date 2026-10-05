@@ -73,7 +73,7 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
     ensure_project_mcp_configs(project_path);
 
-    print_step(3, 4, "Git hooks (post-commit + pre-push)");
+    print_step(3, 4, "Git hooks (commit, merge, rebase, checkout, push)");
     super::hooks::install(None);
 
     if !skip_build {
