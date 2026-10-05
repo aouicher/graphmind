@@ -85,8 +85,12 @@ pub fn seed_graph(dst: &str, src: &str) -> bool {
 fn snapshot(src: &Path, dst: &Path) -> bool {
     let tmp = dst.with_extension("db.seed");
     fs::remove_file(&tmp).ok();
+    // VACUUM INTO writes the copy in rollback (DELETE) journal mode: put it back in WAL
+    // before it goes live, so its readers and builds don't block each other.
     let copied = rusqlite::Connection::open(src)
         .and_then(|conn| conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()]))
+        .and_then(|_| rusqlite::Connection::open(&tmp))
+        .and_then(|copy| copy.query_row("PRAGMA journal_mode = WAL", [], |row| row.get::<_, String>(0)))
         .is_ok();
     if copied && fs::rename(&tmp, dst).is_ok() {
         return true;
@@ -146,5 +150,28 @@ pub fn spawn_background_build(project: &ProjectConfig) {
     // short-lived CLI exits first and the build carries on without it.
     if let Ok(mut child) = cmd.spawn() {
         std::thread::spawn(move || child.wait());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snapshot;
+
+    /// `VACUUM INTO` writes the copy in rollback mode; a seeded graph must go live in WAL.
+    #[test]
+    fn snapshot_is_in_wal_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src.db");
+        let dst = dir.path().join("dst.db");
+        let db = rusqlite::Connection::open(&src).unwrap();
+        db.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE t (x); INSERT INTO t VALUES (1);").unwrap();
+        drop(db);
+
+        assert!(snapshot(&src, &dst));
+        let copy = rusqlite::Connection::open(&dst).unwrap();
+        let mode: String = copy.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode, "wal");
+        let x: i64 = copy.query_row("SELECT x FROM t", [], |r| r.get(0)).unwrap();
+        assert_eq!(x, 1);
     }
 }

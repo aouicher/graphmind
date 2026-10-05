@@ -115,6 +115,13 @@ pub struct BuildOptions {
     pub only_files: Option<Vec<String>>,
 }
 
+impl BuildOptions {
+    /// True once the caller asked the build to stop.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed))
+    }
+}
+
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
@@ -258,7 +265,7 @@ impl GraphBuilder {
         let log_interval = (files.len() / 10).max(1);
 
         for (idx, file) in files.iter().enumerate() {
-            if options.cancel.as_ref().map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
+            if options.is_cancelled() {
                 eprintln!("Build cancelled.");
                 break;
             }
