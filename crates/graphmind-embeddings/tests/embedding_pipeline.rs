@@ -711,3 +711,33 @@ fn cosine_sim(a: &[f32], b: &[f32]) -> f64 {
     }
     dot / (na.sqrt() * nb.sqrt())
 }
+
+#[test]
+fn semantic_search_excluding_skips_files_before_ranking() {
+    use graphmind_embeddings::search::semantic_search_excluding;
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("exclude.db");
+    let store = EmbeddingStore::open(&db_path).unwrap();
+    let engine = MockEngine::new(64);
+    let rows: Vec<NewEmbeddingRow> = vec![
+        ("Deploy", "section", "README.md", "deploy"),
+        ("deploy", "function", "src/deploy.ts", "function deploy() {}"),
+    ]
+    .into_iter()
+    .map(|(name, kind, file, text)| NewEmbeddingRow {
+        symbol_name: name.to_string(),
+        symbol_kind: kind.to_string(),
+        file: file.to_string(),
+        text: text.to_string(),
+        embedding: float32_to_bytes(&engine.embed(text).unwrap()),
+    })
+    .collect();
+    store.insert_batch(&rows).unwrap();
+
+    let exclude = std::collections::HashSet::from(["README.md".to_string()]);
+    // limit 1: the excluded best match must not take the only place.
+    let results =
+        semantic_search_excluding(&db_path, "deploy", &|text| Some(deterministic_vector(text, 64)), 1, None, &exclude);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].file, "src/deploy.ts");
+}

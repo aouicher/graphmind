@@ -75,6 +75,19 @@ pub fn list() {
     }
 }
 
+/// `graphmind which` — slug of the registered project that contains the current directory.
+/// No fallback to "the only registered project": hooks use this to decide whether to run.
+pub fn which() {
+    // resolve_path, not resolve_project_slug: outside any git repo the latter falls back to the
+    // single registered project, which would make hooks run in unrelated directories. Unlike
+    // Registry::find_by_path, it also registers a new worktree of a registered repo.
+    let cwd = std::env::current_dir().ok();
+    match cwd.and_then(|d| graphmind_config::resolve_path(&d.to_string_lossy())) {
+        Some(slug) => println!("{slug}"),
+        None => std::process::exit(1),
+    }
+}
+
 pub fn status(slug: Option<&str>) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,

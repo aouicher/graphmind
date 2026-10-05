@@ -65,7 +65,7 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
     );
 }
 
-pub fn search(query: &str, slug: Option<&str>, limit: usize) {
+pub fn search(query: &str, slug: Option<&str>, limit: usize, max_chars: Option<usize>) {
     let store = get_store();
     let project = resolve_memory_project(slug);
     let entries = store.list(project.as_deref());
@@ -83,24 +83,26 @@ pub fn search(query: &str, slug: Option<&str>, limit: usize) {
     );
 
     for e in &results {
-        let type_str = serde_json::to_string(&e.entry_type)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .to_string();
+        let tags = if e.tags.is_empty() {
+            String::new()
+        } else if max_chars.is_some() {
+            // One line per entry: tags go on it, after the cut text.
+            format!(" {}", format!("(tags: {})", e.tags.join(", ")).dimmed())
+        } else {
+            format!("\n    tags: {}", e.tags.join(", ").dimmed())
+        };
         println!(
-            "  {} [{}] {}",
+            "  {} [{}] {}{}",
             e.id.get(..8).unwrap_or(&e.id).dimmed(),
-            type_str.yellow(),
-            e.content
+            e.entry_type.to_string().yellow(),
+            display_content(&e.content, max_chars),
+            tags
         );
-        if !e.tags.is_empty() {
-            println!("    tags: {}", e.tags.join(", ").dimmed());
-        }
         store.increment_recall(&e.id, project.as_deref());
     }
 }
 
-pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bool) {
+pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bool, max_chars: Option<usize>) {
     let store = get_store();
     let project = resolve_memory_project(slug);
 
@@ -135,17 +137,13 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
     );
 
     for e in shown {
-        let type_str = serde_json::to_string(&e.entry_type)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .to_string();
         let prio_marker = if e.priority { "\u{2605} " } else { "" };
         println!(
             "  {}{} [{}] {}",
             prio_marker,
             e.id.get(..8).unwrap_or(&e.id).dimmed(),
-            type_str.yellow(),
-            e.content
+            e.entry_type.to_string().yellow(),
+            display_content(&e.content, max_chars)
         );
     }
 }
@@ -178,6 +176,42 @@ pub fn update(
         Err(MemoryError::NothingToChange) => {
             eprintln!("{} Nothing to change: pass --content, --tags, --type or --priority/--no-priority", "Error:".red().bold());
             std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("{} {}: {}", "Error:".red().bold(), e, id);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Entry text for listings. With `max_chars`, whitespace (including newlines) is collapsed so
+/// each entry stays on one line, and the text is cut at `max_chars` characters with a pointer
+/// to the full entry. Hooks use this to stay under Claude Code's hook output limit.
+fn display_content(content: &str, max_chars: Option<usize>) -> String {
+    let Some(max) = max_chars else {
+        return content.to_string();
+    };
+    let one_line = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() <= max {
+        return one_line;
+    }
+    let cut: String = one_line.chars().take(max).collect();
+    format!("{}… (cut; `graphmind memory show <id>`)", cut.trim_end())
+}
+
+/// `graphmind memory show <id>` — one entry in full. Accepts the 8-character id prefix that
+/// listings print.
+pub fn show(id: &str, slug: Option<&str>) {
+    let store = get_store();
+    let project = resolve_memory_project(slug);
+    match store.get(id, project.as_deref()) {
+        Ok(e) => {
+            let prio = if e.priority { " \u{2605}priority" } else { "" };
+            println!("{} [{}{}]", e.id.dimmed(), e.entry_type.to_string().yellow(), prio);
+            println!("{}", e.content);
+            if !e.tags.is_empty() {
+                println!("tags: {}", e.tags.join(", ").dimmed());
+            }
         }
         Err(e) => {
             eprintln!("{} {}: {}", "Error:".red().bold(), e, id);
@@ -227,7 +261,8 @@ pub fn clean(slug: Option<&str>) {
 }
 
 /// `graphmind memory consolidate` — expire, purge noise, dedup, auto-promote.
-/// LLM extraction is handled by the AI agent via the stop hook — no external API needed.
+/// LLM extraction is left to the agent (`gm_session_analyze`, which the prompt hook suggests
+/// every 10 prompts) — no external API needed.
 pub fn consolidate(slug: Option<&str>, dry_run: bool) {
     let store = get_store();
     let project = resolve_memory_project(slug);
@@ -371,4 +406,21 @@ fn content_jaccard(a: &str, b: &str) -> f64 {
         return 0.0;
     }
     intersection as f64 / union_count as f64
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::display_content;
+
+    #[test]
+    fn unlimited_keeps_text_as_is() {
+        assert_eq!(display_content("a\nb", None), "a\nb");
+    }
+
+    #[test]
+    fn limited_is_one_line_and_cut_on_char_boundary() {
+        assert_eq!(display_content("a\n  b", Some(10)), "a b");
+        let out = display_content("é".repeat(20).as_str(), Some(5));
+        assert!(out.starts_with("ééééé…"), "{out}");
+    }
 }

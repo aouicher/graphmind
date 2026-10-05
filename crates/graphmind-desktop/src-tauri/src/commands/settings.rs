@@ -55,9 +55,10 @@ fn hooks_dir() -> PathBuf {
 
 #[tauri::command]
 pub fn get_hook_status() -> bool {
-    // All 5 hooks must be present
+    // All current hooks must be present. Same file names as `HOOKS` in the CLI's
+    // claude_hook.rs (the desktop app can't link the CLI crate).
     let dir = hooks_dir();
-    ["graphmind-search.sh", "graphmind-session.sh", "graphmind-prompt.sh", "graphmind-post.sh", "graphmind-stop.sh"]
+    ["graphmind-search.sh", "graphmind-session.sh", "graphmind-prompt.sh"]
         .iter()
         .all(|f| dir.join(f).exists())
 }

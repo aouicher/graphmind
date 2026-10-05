@@ -60,7 +60,7 @@ pub fn setup() {
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
     println!("  {} PATH configured in shell profiles", "✓".green());
-    println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
+    println!("  {} 3 hooks registered (PreToolUse, SessionStart, UserPromptSubmit)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
     println!("  {} MCP server configured (Claude Desktop + Claude Code + Cursor + OpenCode)", "✓".green());
     println!("  {} CLAUDE.md instruction block updated", "✓".green());

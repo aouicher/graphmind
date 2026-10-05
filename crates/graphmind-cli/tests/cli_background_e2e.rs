@@ -60,10 +60,10 @@ fn no_network_checks_without_a_terminal() {
     assert!(out.stderr.is_empty(), "notices printed: {}", String::from_utf8_lossy(&out.stderr));
 }
 
-/// Hooks still get daily memory upkeep: inline (done when the command exits, stamp written) and
-/// quiet (nothing on the stdout the hook captures).
+/// Without a terminal no memory clean runs: hooks get their daily upkeep from the SessionStart
+/// hook, and nothing reaches the stdout a hook captures.
 #[test]
-fn daily_memory_clean_runs_quietly_without_a_terminal() {
+fn no_memory_clean_without_a_terminal() {
     let env = CliTestEnv::new();
     current_setup(&env);
     let (path, _) = offline_curl(&env);
@@ -71,7 +71,7 @@ fn daily_memory_clean_runs_quietly_without_a_terminal() {
     let out = run_without_terminal(&env, &path);
 
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(env.home.path().join(".graphmind/memory-clean.stamp").exists(), "memory clean didn't finish");
+    assert!(!env.home.path().join(".graphmind/memory-clean.stamp").exists(), "memory clean ran without a terminal");
     assert!(!stdout.contains("OK"), "clean summary on stdout: {stdout}");
 }
 

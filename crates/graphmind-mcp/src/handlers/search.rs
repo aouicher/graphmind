@@ -35,6 +35,8 @@ pub(crate) fn handle_search(args: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("compact");
     let project_slug = args.get("project").and_then(|v| v.as_str());
+    let code_only = args.get("code_only").and_then(|v| v.as_bool()).unwrap_or(false);
+    let exclude_languages: &[&str] = if code_only { graphmind_db::builder::DOC_LANGUAGES } else { &[] };
 
     let slugs = if let Some(slug) = project_slug {
         vec![slug.to_string()]
@@ -59,7 +61,7 @@ pub(crate) fn handle_search(args: &Value) -> Value {
         };
         let gq = GraphQueries::new(&conn);
         let fts_results: Vec<_> = gq
-            .search_symbols_filtered(query, limit * 3, kind_filter)
+            .search_symbols_filtered(query, limit * 3, kind_filter, exclude_languages)
             .into_iter()
             .take(limit as usize)
             .collect();
@@ -68,12 +70,13 @@ pub(crate) fn handle_search(args: &Value) -> Value {
         let merged = if let Some(ref engine) = embed_engine {
             let emb_db_path = graphmind_config::paths::embedding_db_path(slug);
             if emb_db_path.exists() {
-                let semantic_results = graphmind_embeddings::search::semantic_search(
+                let semantic_results = graphmind_embeddings::search::semantic_search_excluding(
                     &emb_db_path,
                     raw_query,
                     &|text| engine.embed_query(text).ok(),
                     limit as usize,
                     kind_filter,
+                    &gq.files_in_languages(exclude_languages),
                 );
                 fuse_fts_and_semantic(&fts_results, &semantic_results, limit as usize, |file, name| {
                     gq.symbols_in_file(file).into_iter().find(|s| s.name == name)

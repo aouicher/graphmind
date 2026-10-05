@@ -111,6 +111,14 @@ impl std::fmt::Display for MemoryError {
     }
 }
 
+/// The serialized name (`decision`, `pattern`, ...), as listings print it: the same table
+/// `FromStr` parses (`NAMES` is in declaration order).
+impl std::fmt::Display for MemoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::NAMES[self.clone() as usize])
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemorySource {

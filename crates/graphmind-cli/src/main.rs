@@ -31,6 +31,9 @@ enum Commands {
     Status {
         slug: Option<String>,
     },
+    /// Print the slug of the registered project containing the current directory (exit 1 if none).
+    /// Fast: reads config only, no notices, no database. Used by the Claude Code hooks.
+    Which,
     /// Build the code graph
     Build {
         slug: Option<String>,
@@ -136,6 +139,9 @@ enum Commands {
         /// Show source content in results
         #[arg(long)]
         include_content: bool,
+        /// Only source-code symbols: skip hits in markdown, yaml, toml and html files
+        #[arg(long)]
+        code_only: bool,
     },
     /// Show file outline (hierarchical symbol tree)
     Outline {
@@ -319,6 +325,9 @@ enum MemoryAction {
         slug: Option<String>,
         #[arg(long, default_value = "10")]
         limit: usize,
+        /// Print each entry on one line, tags included, its text cut to N characters (full text: `memory show <id>`)
+        #[arg(long)]
+        max_chars: Option<usize>,
     },
     /// List memories
     List {
@@ -331,6 +340,15 @@ enum MemoryAction {
         /// Run clean (expire, dedup, auto-promote) before listing
         #[arg(long)]
         clean: bool,
+        /// Print each entry on one line, cut to N characters (full text: `memory show <id>`)
+        #[arg(long)]
+        max_chars: Option<usize>,
+    },
+    /// Show one memory entry in full (id or id prefix)
+    Show {
+        id: String,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
     },
     /// Edit a memory entry in place (keeps its id and created date; a type change can reset the expiry, a demotion the recall count)
     Update {
@@ -493,9 +511,8 @@ enum Background {
     /// Interactive (stderr is a terminal): auto-setup, notices, update and announcement checks,
     /// memory upkeep, license revalidation.
     All,
-    /// Hooks, git hooks, scripts: auto-setup only (and, for now, the daily memory clean). Hooks
-    /// are how an upgrade reaches people who never run graphmind in a terminal; notices and
-    /// network checks would only cost them time.
+    /// Hooks, git hooks, scripts: auto-setup only. Hooks are how an upgrade reaches people who
+    /// never run graphmind in a terminal; notices and network checks would only cost them time.
     AutoSetupOnly,
     /// `GRAPHMIND_SKIP_NOTICES` (tests, graphmind's own child processes), and commands that
     /// manage setup themselves or must stay fast and silent.
@@ -503,7 +520,7 @@ enum Background {
 }
 
 fn background(command: &Commands, skip_notices: bool, interactive: bool) -> Background {
-    if skip_notices || matches!(command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
+    if skip_notices || matches!(command, Commands::Setup | Commands::Mcp | Commands::Update { .. } | Commands::Which) {
         return Background::Off;
     }
     if interactive {
@@ -543,12 +560,7 @@ fn main() {
                 std::thread::spawn(commands::auth::maybe_revalidate);
             }
         }
-        Background::AutoSetupOnly => {
-            commands::notices::auto_setup_if_outdated();
-            // Daily memory upkeep for people who only use graphmind through hooks, until the
-            // SessionStart hook does it.
-            commands::notices::memory_auto_clean();
-        }
+        Background::AutoSetupOnly => commands::notices::auto_setup_if_outdated(),
         Background::Off => {}
     }
 
@@ -568,6 +580,9 @@ fn main() {
         }
         Commands::Status { slug } => {
             commands::register::status(slug.as_deref());
+        }
+        Commands::Which => {
+            commands::register::which();
         }
         Commands::Build {
             slug,
@@ -620,8 +635,8 @@ fn main() {
         Commands::Cycles { slug } => {
             commands::query::cycles(slug.as_deref());
         }
-        Commands::Search { query, slug, limit, kind, offset, include_content } => {
-            commands::search::search(&query, slug.as_deref(), limit, kind.as_deref(), offset, include_content);
+        Commands::Search { query, slug, limit, kind, offset, include_content, code_only } => {
+            commands::search::search(&query, slug.as_deref(), limit, kind.as_deref(), offset, include_content, code_only);
         }
         Commands::Outline { file, slug } => {
             commands::query::outline(&file, slug.as_deref());
@@ -692,11 +707,14 @@ fn main() {
             } => {
                 commands::memory::add(&content, slug.as_deref(), global, &tags, &r#type, priority);
             }
-            MemoryAction::Search { query, slug, limit } => {
-                commands::memory::search(&query, slug.as_deref(), limit);
+            MemoryAction::Search { query, slug, limit, max_chars } => {
+                commands::memory::search(&query, slug.as_deref(), limit, max_chars);
             }
-            MemoryAction::List { slug, limit, priority, clean } => {
-                commands::memory::list(slug.as_deref(), limit, priority, clean);
+            MemoryAction::List { slug, limit, priority, clean, max_chars } => {
+                commands::memory::list(slug.as_deref(), limit, priority, clean, max_chars);
+            }
+            MemoryAction::Show { id, slug } => {
+                commands::memory::show(&id, slug.as_deref());
             }
             MemoryAction::Update { id, content, tags, r#type, priority, no_priority, slug } => {
                 let priority = if priority { Some(true) } else if no_priority { Some(false) } else { None };
@@ -824,7 +842,7 @@ mod tests {
         // Hooks and scripts: no terminal, no env var needed.
         assert_eq!(background(&status, false, false), Background::AutoSetupOnly);
         assert_eq!(background(&status, true, true), Background::Off);
-        for command in [Commands::Setup, Commands::Mcp, Commands::Update { check: false }] {
+        for command in [Commands::Setup, Commands::Mcp, Commands::Update { check: false }, Commands::Which] {
             assert_eq!(background(&command, false, true), Background::Off);
             assert_eq!(background(&command, false, false), Background::Off);
         }

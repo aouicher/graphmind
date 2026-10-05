@@ -93,7 +93,7 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
     let mut lines = vec![format!(">> {} memory results for \"{}\":\n", results.len(), query)];
     for r in &results {
         let preview: String = r.content.lines().next().unwrap_or("").chars().take(100).collect();
-        let r_type = format!("{:?}", r.entry_type).to_lowercase();
+        let r_type = r.entry_type.to_string();
         lines.push(format!("  [{r_type}] {preview}"));
         // Increment recall count so high-signal entries get auto-promoted
         store.increment_recall(&r.id, project_slug);
@@ -283,7 +283,7 @@ pub(crate) fn handle_memory_list(args: &Value) -> Value {
     let mut lines = vec![format!(">> {} memory entries:\n", truncated.len())];
     for e in &truncated {
         let preview: String = e.content.lines().next().unwrap_or("").chars().take(80).collect();
-        let e_type = format!("{:?}", e.entry_type).to_lowercase();
+        let e_type = e.entry_type.to_string();
         lines.push(format!("  [{e_type}] {preview} (id: {})", e.id));
     }
     text_content(&lines.join("\n"))

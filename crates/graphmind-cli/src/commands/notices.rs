@@ -140,27 +140,32 @@ fn now_secs() -> u64 {
 pub fn auto_setup_if_outdated() {
     // An unreadable config.json would read as setup_version 0: not a user who is out of date.
     let Ok(config) = graphmind_config::read_config() else { return };
-    if config.setup_version >= graphmind_config::SETUP_VERSION {
+    // Installed Claude Code hook scripts that differ from this binary's also need a setup, so a
+    // hook change doesn't depend on a SETUP_VERSION bump.
+    if config.setup_version >= graphmind_config::SETUP_VERSION && !super::claude_hook::installed_hooks_outdated() {
         return;
     }
 
-    // "<unix ts> <setup version>": throttles retries of this version's setup only. A stamp
-    // left by an older version (plain timestamp) must not delay the new one by a day.
+    // "<unix ts> <setup version> <hooks fingerprint>": throttles retries of this version's setup
+    // only. A stamp left by an older version (plain timestamp, or no fingerprint) must not delay
+    // the new one by a day.
     const ONE_DAY: u64 = 86_400;
     let expected = graphmind_config::SETUP_VERSION;
+    let hooks = super::claude_hook::hooks_fingerprint();
     let stamp = graphmind_config::paths::graphmind_dir().join("auto-setup.stamp");
     let now = now_secs();
     if let Ok(raw) = fs::read_to_string(&stamp) {
         let mut parts = raw.split_whitespace();
         let ts = parts.next().and_then(|t| t.parse::<u64>().ok());
         let version = parts.next().and_then(|v| v.parse::<u32>().ok());
-        if let (Some(ts), Some(version)) = (ts, version) {
-            if version == expected && now.saturating_sub(ts) < ONE_DAY {
+        let fingerprint = parts.next().and_then(|f| f.parse::<u64>().ok());
+        if let (Some(ts), Some(version), Some(fingerprint)) = (ts, version, fingerprint) {
+            if version == expected && fingerprint == hooks && now.saturating_sub(ts) < ONE_DAY {
                 return;
             }
         }
     }
-    if fs::write(&stamp, format!("{now} {expected}")).is_err() {
+    if fs::write(&stamp, format!("{now} {expected} {hooks}")).is_err() {
         return;
     }
 

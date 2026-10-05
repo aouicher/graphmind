@@ -18,10 +18,7 @@ impl EntryText {
             tokens: if with_tokens { tokens(&content) } else { Vec::new() },
             content,
             tags: entry.tags.iter().map(|t| t.to_lowercase()).collect(),
-            entry_type: serde_json::to_string(&entry.entry_type)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_lowercase(),
+            entry_type: entry.entry_type.to_string(),
         }
     }
 }

@@ -120,6 +120,7 @@ jobs:
             --test cli_config_safety_e2e \
             --test cli_exclude_patterns_e2e \
             --test cli_background_e2e \
+            --test cli_claude_hooks_e2e \
             -- --test-threads=1 &
           PID2=$!
 

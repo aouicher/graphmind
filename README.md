@@ -229,14 +229,15 @@ graphmind install hook-claude
 ```
 
 Registers hooks in `~/.claude/settings.json` for:
-- **PreToolUse** — rewrites grep/find/rg to `graphmind search`, provides graph results for Grep/Glob/LS tools
-- **SessionStart** — loads project context (stats, structure) at session start
-- **UserPromptSubmit** — pre-fetches relevant graph context based on the user's prompt
-- **PostToolUse** — enriches results with graph-aware suggestions
+- **PreToolUse** — once per session, reminds Claude to use graphmind when it reaches for grep/rg/find or an Explore agent
+- **SessionStart** — loads project context (stats, structure, priority memories) and runs memory upkeep once a day
+- **UserPromptSubmit** — pre-fetches relevant memories and code symbols for the user's prompt; priority memories already shown this session are not repeated
+
+Hook output stays under Claude Code's 10,000-character hook limit (longer output is replaced by a short preview), and hooks skip prompts that no person typed (task notifications, messages from other sessions). Re-running `graphmind install hook-claude` or `graphmind setup` removes hooks from older versions.
 
 Built-in intelligence:
 - **Exhaustive search bypass** — detects "find all occurrences", `grep -c`, pipes to `wc`/`sort` and lets them through
-- **Cache deduplication** — identical searches within 5 minutes are skipped (0 tokens cost)
+- **Cache deduplication** — identical searches within 3 minutes are skipped (0 tokens cost)
 - **Pattern extraction** — extracts meaningful search terms from grep, find, fd, rg commands and Agent prompts
 
 #### Claude Code skill

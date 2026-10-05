@@ -473,6 +473,14 @@ fn priority_false_on_a_normal_entry_keeps_its_recall_count() {
 }
 
 #[test]
+fn memory_type_display_round_trips_through_parse() {
+    use graphmind_memory::store::MemoryType;
+    for name in MemoryType::NAMES {
+        assert_eq!(name.parse::<MemoryType>().unwrap().to_string(), name);
+    }
+}
+
+#[test]
 fn memory_type_parse_rejects_unknown_names() {
     use graphmind_memory::store::MemoryType;
     for name in MemoryType::NAMES {

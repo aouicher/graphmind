@@ -162,3 +162,16 @@ fn unknown_memory_type_is_rejected() {
     let list = env.run_ok(&["memory", "list"]);
     assert!(!list.contains("a typo'd type"), "nothing saved: {list}");
 }
+
+/// `--max-chars` cuts the text to one line but keeps the tags, which search terms often match.
+#[test]
+fn memory_search_max_chars_keeps_tags() {
+    let env = CliTestEnv::new();
+    let long = "y".repeat(200);
+    env.run_ok(&["memory", "add", &format!("deploy notes {long}"), "--global", "--tags", "terraform", "staging"]);
+
+    let out = env.run_ok(&["memory", "search", "deploy", "--max-chars", "40"]);
+    let line = out.lines().find(|l| l.contains("deploy notes")).unwrap_or_else(|| panic!("entry missing: {out}"));
+    assert!(line.contains("(cut;"), "text cut: {line}");
+    assert!(line.contains("terraform, staging"), "tags on the entry's line: {out}");
+}

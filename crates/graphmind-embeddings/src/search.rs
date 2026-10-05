@@ -1,6 +1,6 @@
 use crate::engine::EmbeddingEngine;
 use crate::store::{EmbeddingStore, NewEmbeddingRow, bytes_to_float32, float32_to_bytes};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -114,6 +114,19 @@ pub fn semantic_search(
     limit: usize,
     kind_filter: Option<&str>,
 ) -> Vec<SearchResult> {
+    semantic_search_excluding(db_path, query, embed_fn, limit, kind_filter, &HashSet::new())
+}
+
+/// Like `semantic_search`, leaving out symbols in `exclude_files` before ranking, so excluded
+/// hits don't take places in the top `limit`.
+pub fn semantic_search_excluding(
+    db_path: &Path,
+    query: &str,
+    embed_fn: &dyn Fn(&str) -> Option<Vec<f32>>,
+    limit: usize,
+    kind_filter: Option<&str>,
+    exclude_files: &HashSet<String>,
+) -> Vec<SearchResult> {
     let store = match EmbeddingStore::open(db_path) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -126,7 +139,7 @@ pub fn semantic_search(
 
     let decoded: Vec<(String, String, String, String, Vec<f32>)> = all
         .into_iter()
-        .filter(|r| kind_filter.is_none_or(|k| r.symbol_kind == k))
+        .filter(|r| kind_filter.is_none_or(|k| r.symbol_kind == k) && !exclude_files.contains(&r.file))
         .map(|r| {
             let emb = bytes_to_float32(&r.embedding);
             (r.symbol_name, r.symbol_kind, r.file, r.text, emb)

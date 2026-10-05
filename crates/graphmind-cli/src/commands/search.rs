@@ -1,13 +1,14 @@
 use graphmind_config::{paths, resolve_project_slug, Registry};
 use graphmind_config::config::EmbeddingMode;
 use graphmind_embeddings::factory::create_engine;
-use graphmind_embeddings::search::semantic_search;
+use graphmind_embeddings::search::semantic_search_excluding;
 use colored::Colorize;
+use graphmind_db::builder::DOC_LANGUAGES;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use std::collections::{BTreeMap, HashMap};
 
-pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, offset: usize, include_content: bool) {
+pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, offset: usize, include_content: bool, code_only: bool) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,
         None => {
@@ -36,6 +37,9 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
     });
 
     let q = GraphQueries::new(&db);
+    // --code-only: leave out docs and data files, by the language the graph stores for them.
+    let exclude_languages: &[&str] = if code_only { DOC_LANGUAGES } else { &[] };
+    let doc_files = q.files_in_languages(exclude_languages);
 
     // FTS search
     let fts_query = graphmind_db::queries::fts_prefix_query(query);
@@ -45,7 +49,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
     let fts_results = if fts_query.is_empty() {
         Vec::new()
     } else {
-        let raw = q.search_symbols(&fts_query, wanted as i64 * 5);
+        let raw = q.search_symbols_filtered(&fts_query, wanted as i64 * 5, None, exclude_languages);
         if let Some(k) = kind {
             raw.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(wanted).collect()
         } else {
@@ -59,12 +63,13 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
         let emb_db_path = paths::embedding_db_path(&slug);
         if emb_db_path.exists() {
             if let Ok(engine) = create_engine(&config.embedding) {
-                semantic_search(
+                semantic_search_excluding(
                     &emb_db_path,
                     query,
                     &|text| engine.embed_query(text).ok(),
                     wanted,
                     kind,
+                    &doc_files,
                 )
             } else {
                 Vec::new()
@@ -119,7 +124,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
         if let Some(e) = existing {
             e.score += neighbor.score;
             e.from_graph = true;
-        } else {
+        } else if !doc_files.contains(&neighbor.file) {
             results.push(neighbor);
         }
     }

@@ -180,27 +180,41 @@ impl<'a> GraphQueries<'a> {
     }
 
     pub fn search_symbols(&self, query: &str, limit: i64) -> Vec<SymbolRow> {
-        self.search_symbols_filtered(query, limit, None)
+        self.search_symbols_filtered(query, limit, None, &[])
     }
 
-    pub fn search_symbols_filtered(&self, query: &str, limit: i64, kind: Option<&str>) -> Vec<SymbolRow> {
-        let sql = if kind.is_some() {
+    /// FTS search, optionally limited to one symbol kind and leaving out files in
+    /// `exclude_languages` (as stored in `files.language`, e.g. `builder::DOC_LANGUAGES`).
+    pub fn search_symbols_filtered(
+        &self,
+        query: &str,
+        limit: i64,
+        kind: Option<&str>,
+        exclude_languages: &[&str],
+    ) -> Vec<SymbolRow> {
+        let mut sql = String::from(
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
              FROM symbols_fts f
              JOIN symbols s ON s.id = f.rowid
-             WHERE symbols_fts MATCH ?1 AND s.kind = ?3
-             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0), s.id
-             LIMIT ?2"
-        } else {
-            "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
-             FROM symbols_fts f
-             JOIN symbols s ON s.id = f.rowid
-             WHERE symbols_fts MATCH ?1
-             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0), s.id
-             LIMIT ?2"
-        };
-        let mut stmt = self.db.prepare(sql).unwrap();
-        let map_row = |row: &rusqlite::Row| {
+             WHERE symbols_fts MATCH ?1",
+        );
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&query, &limit];
+        if let Some(k) = &kind {
+            args.push(k);
+            sql.push_str(&format!(" AND s.kind = ?{}", args.len()));
+        }
+        if !exclude_languages.is_empty() {
+            let first = args.len() + 1;
+            args.extend(exclude_languages.iter().map(|l| l as &dyn rusqlite::ToSql));
+            let placeholders: Vec<String> = (first..=args.len()).map(|i| format!("?{i}")).collect();
+            sql.push_str(&format!(
+                " AND s.file NOT IN (SELECT path FROM files WHERE language IN ({}))",
+                placeholders.join(", ")
+            ));
+        }
+        sql.push_str(" ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0), s.id LIMIT ?2");
+        let mut stmt = self.db.prepare(&sql).unwrap();
+        stmt.query_map(args.as_slice(), |row| {
             Ok(SymbolRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -212,15 +226,24 @@ impl<'a> GraphQueries<'a> {
                 doc: row.get(7)?,
                 content: row.get(8)?,
             })
-        };
-        if let Some(k) = kind {
-            stmt.query_map(params![query, limit, k], map_row)
-        } else {
-            stmt.query_map(params![query, limit], map_row)
-        }
+        })
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+    }
+
+    /// Paths of the indexed files whose language is one of `languages`.
+    pub fn files_in_languages(&self, languages: &[&str]) -> HashSet<String> {
+        if languages.is_empty() {
+            return HashSet::new();
+        }
+        let placeholders: Vec<String> = (1..=languages.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!("SELECT path FROM files WHERE language IN ({})", placeholders.join(", "));
+        let mut stmt = self.db.prepare(&sql).unwrap();
+        stmt.query_map(rusqlite::params_from_iter(languages), |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
     }
 
     pub fn callers(&self, symbol_name: &str) -> Vec<SymbolWithEdge> {
@@ -903,5 +926,31 @@ mod fts_query_tests {
         assert_eq!(fts_prefix_query("a; user-service"), r#""user-service"*"#);
         assert_eq!(fts_prefix_query(r#"say "hi""#), r#""say"* OR """hi"""*"#);
         assert_eq!(fts_prefix_query(""), "");
+    }
+}
+
+#[cfg(test)]
+mod language_filter_tests {
+    use super::*;
+    use crate::builder::DOC_LANGUAGES;
+
+    #[test]
+    fn search_leaves_out_excluded_languages() {
+        let db = crate::schema::init_database(":memory:").unwrap();
+        db.execute_batch(
+            "INSERT INTO files (path, language) VALUES ('README.md', 'markdown'), ('src/deploy.ts', 'typescript');
+             INSERT INTO symbols (name, kind, file, line_start, line_end) VALUES
+               ('Deploy pipeline', 'Section', 'README.md', 1, 3),
+               ('deployPipeline', 'Function', 'src/deploy.ts', 1, 5);",
+        )
+        .unwrap();
+        let q = GraphQueries::new(&db);
+        let files = |rows: Vec<SymbolRow>| rows.into_iter().map(|r| r.file).collect::<Vec<_>>();
+
+        assert_eq!(files(q.search_symbols_filtered("deploy*", 10, None, &[])).len(), 2);
+        assert_eq!(files(q.search_symbols_filtered("deploy*", 10, None, DOC_LANGUAGES)), ["src/deploy.ts"]);
+        assert_eq!(files(q.search_symbols_filtered("deploy*", 10, Some("Section"), DOC_LANGUAGES)), Vec::<String>::new());
+        assert_eq!(q.files_in_languages(DOC_LANGUAGES), HashSet::from(["README.md".to_string()]));
+        assert!(q.files_in_languages(&[]).is_empty());
     }
 }

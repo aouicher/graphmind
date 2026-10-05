@@ -203,6 +203,7 @@ fn tool_defs() -> Vec<Tool> {
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: function, class, method, interface, type" },
                 "include_content": { "type": "boolean", "description": "Include full source code in results (default false)" },
+                "code_only": { "type": "boolean", "description": "Only source-code symbols: skip markdown, yaml, toml and html files (default false)" },
                 "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["query"]

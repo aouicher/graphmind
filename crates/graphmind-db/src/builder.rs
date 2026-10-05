@@ -60,6 +60,10 @@ const LANGUAGE_MAP: &[(&str, &str)] = &[
     (".psm1", "powershell"),
 ];
 
+/// Languages of docs and data files. The builder indexes their headings and keys as symbols;
+/// code-only searches leave them out.
+pub const DOC_LANGUAGES: &[&str] = &["markdown", "yaml", "toml", "html"];
+
 const DEFAULT_EXCLUDE: &[&str] = &[
     "node_modules",
     "dist",
