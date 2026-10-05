@@ -2,15 +2,17 @@ use graphmind_config::{paths, Registry, resolve_project_slug};
 use graphmind_config::config::{EmbeddingMode, load_config};
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};
-use graphmind_db::queries::GraphQueries;
+use graphmind_db::queries::{GraphQueries, SymbolRow};
 use graphmind_db::schema::init_database;
 use graphmind_embeddings::factory::create_engine;
-use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
+use graphmind_embeddings::engine::EmbeddingEngine;
+use graphmind_embeddings::store::EmbeddingStore;
+use graphmind_embeddings::sync::{self, EmbedInput, symbol_text};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -258,6 +260,8 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     // Embedding step
     let global_config = load_config();
     if global_config.embedding.mode != EmbeddingMode::Disabled {
+        // Failures are reported above and retried on the next build; the graph itself is fine,
+        // so they don't fail the build (it runs from git hooks).
         run_embedding_step(slug, &queries, &global_config.embedding, None);
     }
 
@@ -297,17 +301,23 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     }
 }
 
-fn run_embedding_step(
+/// Outcome of an embedding step, for the exit code of `graphmind embed`.
+#[derive(Default)]
+struct EmbedOutcome {
+    failed: usize,
+}
+
+/// Open the engine and store, and re-index if the model changed. `None` (after a warning) when
+/// embeddings can't run at all.
+fn open_embedding(
     slug: &str,
-    queries: &GraphQueries,
     config: &graphmind_config::config::EmbeddingConfig,
-    cancel: Option<Arc<AtomicBool>>,
-) {
+) -> Option<(Box<dyn EmbeddingEngine>, EmbeddingStore, String)> {
     let engine = match create_engine(config) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{} Embeddings: {}", "Warning:".yellow().bold(), e);
-            return;
+            return None;
         }
     };
 
@@ -316,7 +326,7 @@ fn run_embedding_step(
         Ok(s) => s,
         Err(e) => {
             eprintln!("{} Embedding store: {}", "Warning:".yellow().bold(), e);
-            return;
+            return None;
         }
     };
 
@@ -334,99 +344,96 @@ fn run_embedding_step(
         }
     }
     store.set_meta("model", &current_model).ok();
+    Some((engine, store, current_model))
+}
 
-    let indexed_files = store.files_indexed();
-    let all_symbols = queries.all_symbols();
-
-    // Find files that need embedding (new or re-processed by graph build)
-    let files_in_graph: std::collections::HashSet<String> =
-        all_symbols.iter().map(|s| s.file.clone()).collect();
-
-    // Remove embeddings for files no longer in graph
-    for old_file in &indexed_files {
-        if !files_in_graph.contains(old_file) {
-            store.delete_by_file(old_file).ok();
-        }
-    }
-
-    // Collect symbols from files not yet indexed
-    let new_symbols: Vec<_> = all_symbols
+fn embed_inputs(symbols: &[SymbolRow]) -> Vec<EmbedInput> {
+    symbols
         .iter()
-        .filter(|s| !indexed_files.contains(&s.file))
         .filter(|s| s.content.is_some() || s.signature.is_some())
-        .collect();
+        .map(|s| EmbedInput {
+            symbol_name: s.name.clone(),
+            symbol_kind: s.kind.clone(),
+            file: s.file.clone(),
+            text: symbol_text(&s.kind, &s.name, &s.file, s.signature.as_deref(), s.content.as_deref()),
+        })
+        .collect()
+}
 
-    if new_symbols.is_empty() {
-        return;
+/// Bring the store in line with `wanted` (only rows of `scope` files, if given): drop stale
+/// rows, embed new or edited symbols, and report what could not be embedded.
+fn sync_embeddings(
+    engine: &dyn EmbeddingEngine,
+    store: &EmbeddingStore,
+    model: &str,
+    wanted: Vec<EmbedInput>,
+    scope: Option<&[String]>,
+    config: &graphmind_config::config::EmbeddingConfig,
+    cancel: Option<Arc<AtomicBool>>,
+) -> EmbedOutcome {
+    let plan = sync::plan(store, wanted, scope);
+    if let Err(e) = store.delete_ids(&plan.stale_ids) {
+        eprintln!("{} Embedding cleanup: {}", "Warning:".yellow().bold(), e);
+    }
+    if plan.to_embed.is_empty() {
+        return EmbedOutcome::default();
     }
 
+    let files: std::collections::HashSet<_> = plan.to_embed.iter().map(|i| &i.file).collect();
     println!(
-        "{} Embedding {} symbols across {} new files...",
+        "{} Embedding {} symbols across {} files...",
         ">>".cyan().bold(),
-        new_symbols.len(),
-        new_symbols.iter().map(|s| &s.file).collect::<std::collections::HashSet<_>>().len()
+        plan.to_embed.len(),
+        files.len()
     );
 
-    // Build texts for embedding
-    let texts: Vec<String> = new_symbols
-        .iter()
-        .map(|s| {
-            let mut t = format!("{} {} ({})", s.kind, s.name, s.file);
-            if let Some(sig) = &s.signature {
-                t.push_str(&format!("\n{sig}"));
-            }
-            if let Some(content) = &s.content {
-                let truncated: String = content.chars().take(512).collect();
-                t.push_str(&format!("\n{truncated}"));
-            }
-            t
-        })
-        .collect();
+    let summary = sync::embed_and_store(
+        engine,
+        store,
+        &plan.to_embed,
+        config.effective_batch_size(),
+        cancel.as_deref(),
+        |s| {
+            println!(
+                "{} Embedded {}/{} symbols ({})",
+                "OK".green().bold(),
+                s.embedded,
+                s.requested,
+                model.dimmed()
+            );
+        },
+    );
 
-    const CHUNK_SIZE: usize = 256;
-    for (chunk_idx, chunk) in new_symbols.chunks(CHUNK_SIZE).enumerate() {
-        if cancel.as_ref().map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
-            eprintln!("Embedding cancelled.");
-            return;
-        }
-        let chunk_texts: Vec<String> = chunk
-            .iter()
-            .map(|s| {
-                let idx = chunk_idx * CHUNK_SIZE + chunk.iter().position(|x| x.id == s.id).unwrap();
-                texts[idx].clone()
-            })
-            .collect();
-        let text_refs: Vec<&str> = chunk_texts.iter().map(|t| t.as_str()).collect();
-        match engine.embed_batch(&text_refs) {
-            Ok(embeddings) => {
-                let rows: Vec<NewEmbeddingRow> = chunk
-                    .iter()
-                    .zip(embeddings.iter())
-                    .map(|(sym, emb)| NewEmbeddingRow {
-                        symbol_name: sym.name.clone(),
-                        symbol_kind: sym.kind.clone(),
-                        file: sym.file.clone(),
-                        text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].clone(),
-                        embedding: float32_to_bytes(emb),
-                    })
-                    .collect();
-                if let Err(e) = store.insert_batch(&rows) {
-                    eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
-                } else {
-                    println!(
-                        "{} Embedded {}/{} symbols ({})",
-                        "OK".green().bold(),
-                        rows.len(),
-                        new_symbols.len(),
-                        current_model.dimmed()
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e);
-            }
-        }
+    if summary.cancelled {
+        eprintln!("Embedding cancelled.");
     }
+    if summary.failed > 0 {
+        eprintln!(
+            "{} {} of {} symbols were not embedded: {}",
+            "Warning:".yellow().bold(),
+            summary.failed,
+            summary.requested,
+            summary.first_error.as_deref().unwrap_or("unknown error")
+        );
+        eprintln!(
+            "  They are retried on the next build. For a slow local model server, raise \
+             embedding.request_timeout_secs or lower embedding.batch_size in ~/.graphmind/config.json."
+        );
+    }
+    EmbedOutcome { failed: summary.failed }
+}
+
+fn run_embedding_step(
+    slug: &str,
+    queries: &GraphQueries,
+    config: &graphmind_config::config::EmbeddingConfig,
+    cancel: Option<Arc<AtomicBool>>,
+) -> EmbedOutcome {
+    let Some((engine, store, model)) = open_embedding(slug, config) else {
+        return EmbedOutcome { failed: 1 };
+    };
+    let wanted = embed_inputs(&queries.all_symbols());
+    sync_embeddings(engine.as_ref(), &store, &model, wanted, None, config, cancel)
 }
 
 pub fn embed_only(slug: Option<&str>, all: bool) {
@@ -443,15 +450,19 @@ pub fn embed_only(slug: Option<&str>, all: bool) {
             std::process::exit(1);
         }
         let mut count = 0;
+        let mut failed = 0;
         for p in &projects {
             let db_path = paths::graph_db_path(&p.slug);
             if db_path.exists() {
-                embed_single(&p.slug, &global_config.embedding);
+                failed += embed_single(&p.slug, &global_config.embedding).failed;
                 count += 1;
             }
         }
         if count == 0 {
             println!("{} No projects with a graph found. Run 'graphmind build' first.", "!".yellow());
+        }
+        if failed > 0 {
+            std::process::exit(1);
         }
         return;
     }
@@ -470,10 +481,12 @@ pub fn embed_only(slug: Option<&str>, all: bool) {
         std::process::exit(1);
     }
 
-    embed_single(&slug, &global_config.embedding);
+    if embed_single(&slug, &global_config.embedding).failed > 0 {
+        std::process::exit(1);
+    }
 }
 
-fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConfig) {
+fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConfig) -> EmbedOutcome {
     let db_path = paths::graph_db_path(slug);
     let db_path_str = db_path.to_string_lossy().to_string();
     let db = graphmind_db::schema::init_database(&db_path_str).unwrap_or_else(|e| {
@@ -481,7 +494,7 @@ fn embed_single(slug: &str, emb_config: &graphmind_config::config::EmbeddingConf
         std::process::exit(1);
     });
     let queries = GraphQueries::new(&db);
-    run_embedding_step(slug, &queries, emb_config, None);
+    run_embedding_step(slug, &queries, emb_config, None)
 }
 
 fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
@@ -564,21 +577,8 @@ fn run_embedding_for_files(
         return;
     }
 
-    let engine = match create_engine(config) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("{} Embeddings: {}", "Warning:".yellow().bold(), e);
-            return;
-        }
-    };
-
-    let emb_db_path = paths::embedding_db_path(slug);
-    let store = match EmbeddingStore::open(&emb_db_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{} Embedding store: {}", "Warning:".yellow().bold(), e);
-            return;
-        }
+    let Some((engine, store, model)) = open_embedding(slug, config) else {
+        return;
     };
 
     let graph_db_path = paths::graph_db_path(slug);
@@ -591,60 +591,12 @@ fn run_embedding_for_files(
     };
     let queries = GraphQueries::new(&db);
 
-    // Delete old embeddings and collect new symbols for changed files
-    let mut symbols = Vec::new();
-    for file in changed_rel_paths {
-        store.delete_by_file(file).ok();
-        let file_symbols = queries.symbols_in_file(file);
-        symbols.extend(file_symbols);
-    }
-
-    let symbols: Vec<_> = symbols.iter()
-        .filter(|s| s.content.is_some() || s.signature.is_some())
+    let symbols: Vec<_> = changed_rel_paths
+        .iter()
+        .flat_map(|file| queries.symbols_in_file(file))
         .collect();
-
-    if symbols.is_empty() {
-        return;
-    }
-
-    let texts: Vec<String> = symbols.iter().map(|s| {
-        let mut t = format!("{} {} ({})", s.kind, s.name, s.file);
-        if let Some(sig) = &s.signature { t.push_str(&format!("\n{sig}")); }
-        if let Some(content) = &s.content {
-            let truncated: String = content.chars().take(512).collect();
-            t.push_str(&format!("\n{truncated}"));
-        }
-        t
-    }).collect();
-
-    const CHUNK_SIZE: usize = 256;
-    let mut total_embedded = 0usize;
-    for (i, chunk) in symbols.chunks(CHUNK_SIZE).enumerate() {
-        let chunk_texts: Vec<&str> = texts[i * CHUNK_SIZE..][..chunk.len()].iter().map(|t| t.as_str()).collect();
-        match engine.embed_batch(&chunk_texts) {
-            Ok(embeddings) => {
-                let rows: Vec<NewEmbeddingRow> = chunk.iter().zip(embeddings.iter()).map(|(sym, emb)| {
-                    NewEmbeddingRow {
-                        symbol_name: sym.name.clone(),
-                        symbol_kind: sym.kind.clone(),
-                        file: sym.file.clone(),
-                        text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].to_string(),
-                        embedding: float32_to_bytes(emb),
-                    }
-                }).collect();
-                if let Err(e) = store.insert_batch(&rows) {
-                    eprintln!("{} Embedding insert: {}", "Warning:".yellow().bold(), e);
-                } else {
-                    total_embedded += rows.len();
-                }
-            }
-            Err(e) => eprintln!("{} Embedding batch: {}", "Warning:".yellow().bold(), e),
-        }
-    }
-
-    if total_embedded > 0 {
-        println!("{} Embeddings updated ({} symbols)", ">>".cyan().bold(), total_embedded);
-    }
+    let wanted = embed_inputs(&symbols);
+    sync_embeddings(engine.as_ref(), &store, &model, wanted, Some(changed_rel_paths), config, None);
 }
 
 fn watch_project(slug: &str) {

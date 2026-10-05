@@ -5,6 +5,7 @@ pub struct OpenAiEngine {
     model: String,
     base_url: String,
     dims: usize,
+    timeout: std::time::Duration,
 }
 
 impl OpenAiEngine {
@@ -23,11 +24,21 @@ impl OpenAiEngine {
                 .trim_end_matches('/')
                 .to_string(),
             dims,
+            timeout: std::time::Duration::from_secs(30),
         }
     }
 
+    /// Overrides the per-request timeout (default 30 s).
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     fn call_api(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(self.timeout)
+            .build()
+            .map_err(|e| EmbedError::ApiError(e.to_string()))?;
         let body = serde_json::json!({
             "input": texts,
             "model": self.model,

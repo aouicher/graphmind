@@ -139,6 +139,13 @@ pub struct EmbeddingConfig {
     pub openai_base_url: Option<String>,
     #[serde(default)]
     pub api_keys: ApiKeys,
+    /// Per-request timeout for embedding APIs, in seconds. Default: 30, or 300 when
+    /// `openai_base_url` points at this machine (a local model server such as Ollama).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_secs: Option<u64>,
+    /// Symbols sent per embedding request during builds. Default: 256.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<usize>,
 }
 
 impl Default for EmbeddingConfig {
@@ -148,7 +155,16 @@ impl Default for EmbeddingConfig {
             model: None,
             openai_base_url: None,
             api_keys: ApiKeys::default(),
+            request_timeout_secs: None,
+            batch_size: None,
         }
+    }
+}
+
+impl EmbeddingConfig {
+    /// Symbols per embedding request during builds (at least 1).
+    pub fn effective_batch_size(&self) -> usize {
+        self.batch_size.unwrap_or(256).max(1)
     }
 }
 

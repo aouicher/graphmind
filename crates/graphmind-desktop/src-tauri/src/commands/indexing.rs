@@ -4,7 +4,8 @@ use graphmind_db::builder::{BuildOptions, GraphBuilder};
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use graphmind_embeddings::factory::create_engine;
-use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
+use graphmind_embeddings::store::EmbeddingStore;
+use graphmind_embeddings::sync::{self, EmbedInput, symbol_text};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -331,69 +332,36 @@ fn run_embedding_step(
     }
     store.set_meta("model", &current_model).ok();
 
-    let indexed_files = store.files_indexed();
-    let all_symbols = queries.all_symbols();
-
-    let files_in_graph: std::collections::HashSet<String> =
-        all_symbols.iter().map(|s| s.file.clone()).collect();
-
-    for old_file in &indexed_files {
-        if !files_in_graph.contains(old_file) {
-            store.delete_by_file(old_file).ok();
-        }
-    }
-
-    let new_symbols: Vec<_> = all_symbols
+    let wanted: Vec<EmbedInput> = queries
+        .all_symbols()
         .iter()
-        .filter(|s| !indexed_files.contains(&s.file))
         .filter(|s| s.content.is_some() || s.signature.is_some())
-        .collect();
-
-    if new_symbols.is_empty() {
-        return;
-    }
-
-    let texts: Vec<String> = new_symbols
-        .iter()
-        .map(|s| {
-            let mut t = format!("{} {} ({})", s.kind, s.name, s.file);
-            if let Some(sig) = &s.signature {
-                t.push_str(&format!("\n{sig}"));
-            }
-            if let Some(content) = &s.content {
-                let truncated: String = content.chars().take(512).collect();
-                t.push_str(&format!("\n{truncated}"));
-            }
-            t
+        .map(|s| EmbedInput {
+            symbol_name: s.name.clone(),
+            symbol_kind: s.kind.clone(),
+            file: s.file.clone(),
+            text: symbol_text(&s.kind, &s.name, &s.file, s.signature.as_deref(), s.content.as_deref()),
         })
         .collect();
-
-    const CHUNK_SIZE: usize = 256;
-    for (chunk_idx, chunk) in new_symbols.chunks(CHUNK_SIZE).enumerate() {
-        if cancel.as_ref().map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
-            eprintln!("Embedding cancelled.");
-            return;
-        }
-        let chunk_texts: Vec<&str> = chunk
-            .iter()
-            .map(|s| {
-                let idx = chunk_idx * CHUNK_SIZE + chunk.iter().position(|x| x.id == s.id).unwrap();
-                texts[idx].as_str()
-            })
-            .collect();
-        if let Ok(embeddings) = engine.embed_batch(&chunk_texts) {
-            let rows: Vec<NewEmbeddingRow> = chunk
-                .iter()
-                .zip(embeddings.iter())
-                .map(|(sym, emb)| NewEmbeddingRow {
-                    symbol_name: sym.name.clone(),
-                    symbol_kind: sym.kind.clone(),
-                    file: sym.file.clone(),
-                    text: chunk_texts[chunk.iter().position(|x| x.id == sym.id).unwrap()].to_string(),
-                    embedding: float32_to_bytes(emb),
-                })
-                .collect();
-            store.insert_batch(&rows).ok();
-        }
+    let plan = sync::plan(&store, wanted, None);
+    store.delete_ids(&plan.stale_ids).ok();
+    let summary = sync::embed_and_store(
+        engine.as_ref(),
+        &store,
+        &plan.to_embed,
+        config.effective_batch_size(),
+        cancel.as_deref(),
+        |_| {},
+    );
+    if summary.cancelled {
+        eprintln!("Embedding cancelled.");
+    }
+    if summary.failed > 0 {
+        eprintln!(
+            "Warning: {} of {} symbols were not embedded: {}",
+            summary.failed,
+            summary.requested,
+            summary.first_error.as_deref().unwrap_or("unknown error")
+        );
     }
 }

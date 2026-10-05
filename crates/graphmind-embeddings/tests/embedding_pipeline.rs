@@ -464,6 +464,7 @@ fn factory_disabled_returns_noop() {
         model: None,
         openai_base_url: None,
         api_keys: ApiKeys::default(),
+        ..Default::default()
     };
     let engine = create_engine(&config).unwrap();
     assert!(!engine.is_available());
@@ -480,6 +481,7 @@ fn factory_openai_without_key_errors() {
         model: None,
         openai_base_url: None,
         api_keys: ApiKeys { openai: None, voyage: None },
+        ..Default::default()
     };
     let result = create_engine(&config);
     assert!(result.is_err());
@@ -495,6 +497,7 @@ fn factory_voyage_without_key_errors() {
         model: None,
         openai_base_url: None,
         api_keys: ApiKeys { openai: None, voyage: None },
+        ..Default::default()
     };
     let result = create_engine(&config);
     assert!(result.is_err());
@@ -516,6 +519,7 @@ fn voyage_api_real_embedding() {
         model: Some("voyage-code-3".to_string()),
         openai_base_url: None,
         api_keys: ApiKeys { openai: None, voyage: Some(key) },
+        ..Default::default()
     };
 
     let engine = create_engine(&config).unwrap();
@@ -545,6 +549,7 @@ fn voyage_api_batch_embedding() {
         model: Some("voyage-code-3".to_string()),
         openai_base_url: None,
         api_keys: ApiKeys { openai: None, voyage: Some(key) },
+        ..Default::default()
     };
 
     let engine = create_engine(&config).unwrap();
@@ -583,6 +588,7 @@ fn voyage_full_pipeline_search() {
         model: Some("voyage-code-3".to_string()),
         openai_base_url: None,
         api_keys: ApiKeys { openai: None, voyage: Some(key.clone()) },
+        ..Default::default()
     };
 
     let engine = create_engine(&config).unwrap();
@@ -624,6 +630,7 @@ fn voyage_full_pipeline_search() {
                 model: Some("voyage-code-3".to_string()),
                 openai_base_url: None,
                 api_keys: ApiKeys { openai: None, voyage: Some(embed_key.clone()) },
+                ..Default::default()
             };
             let eng = create_engine(&cfg).ok()?;
             eng.embed(text).ok()
