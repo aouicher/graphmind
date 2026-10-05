@@ -1888,6 +1888,7 @@ dependencies = [
  "clap",
  "colored",
  "dirs 5.0.1",
+ "fs4",
  "graphmind-config",
  "graphmind-core",
  "graphmind-db",

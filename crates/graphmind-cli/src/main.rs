@@ -415,7 +415,7 @@ enum SessionAction {
 enum InstallAction {
     /// Install Claude Code search hook (redirects grep/find to graphmind)
     HookClaude,
-    /// Install git hooks (post-commit + pre-push)
+    /// Install git hooks (rebuild after commit/merge/rebase/checkout, diff-impact before push)
     HookGit {
         slug: Option<String>,
     },

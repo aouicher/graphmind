@@ -63,6 +63,13 @@ pub fn repo_id(path: &Path) -> Option<String> {
 
 /// The hooks directory for `path`'s repo, correctly resolved for worktrees
 /// (shared with the main checkout) and `core.hooksPath` overrides.
+/// Root of the work tree containing `path`, canonicalized.
+pub fn toplevel(path: &Path) -> Option<PathBuf> {
+    let raw = run_git(path, &["rev-parse", "--show-toplevel"])?;
+    let p = PathBuf::from(raw);
+    Some(p.canonicalize().unwrap_or(p))
+}
+
 pub fn hooks_dir(path: &Path) -> Option<PathBuf> {
     let raw = run_git(path, &["rev-parse", "--git-path", "hooks"])?;
     let candidate = PathBuf::from(raw);
