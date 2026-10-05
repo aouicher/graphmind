@@ -122,6 +122,45 @@ impl EmbeddingStore {
         rows.filter_map(|r| r.ok()).collect()
     }
 
+    /// `(id, file, symbol_name, symbol_kind, text)` for every row, or only rows of `files`.
+    /// Used to find symbols that are missing or out of date without loading the vectors.
+    pub fn index_rows(&self, files: Option<&[String]>) -> Vec<(i64, String, String, String, String)> {
+        let map = |row: &rusqlite::Row| -> rusqlite::Result<(i64, String, String, String, String)> {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+        };
+        let sql = "SELECT id, file, symbol_name, symbol_kind, text FROM embeddings";
+        match files {
+            None => {
+                let Ok(mut stmt) = self.conn.prepare(sql) else { return Vec::new() };
+                stmt.query_map([], map).map(|r| r.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+            }
+            Some(files) => {
+                let Ok(mut stmt) = self.conn.prepare(&format!("{sql} WHERE file = ?1")) else { return Vec::new() };
+                files
+                    .iter()
+                    .flat_map(|f| {
+                        stmt.query_map(params![f], map)
+                            .map(|r| r.filter_map(|r| r.ok()).collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    pub fn delete_ids(&self, ids: &[i64]) -> rusqlite::Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        {
+            let mut stmt = tx.prepare("DELETE FROM embeddings WHERE id = ?1")?;
+            for id in ids {
+                n += stmt.execute(params![id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     pub fn all(&self) -> rusqlite::Result<Vec<EmbeddingRow>> {
         let mut stmt = self.conn.prepare("SELECT id, symbol_name, symbol_kind, file, text, embedding FROM embeddings")?;
         let rows = stmt.query_map([], |row| {
