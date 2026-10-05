@@ -576,41 +576,56 @@ impl GraphBuilder {
         &self.db
     }
 
+    /// Source files under `project_path`, skipping:
+    /// - anything git ignores: `.gitignore` files at any depth inside the project (not above
+    ///   it), `.git/info/exclude` and the global gitignore, with full gitignore semantics
+    ///   (`**`, anchoring, `!` negation), and `.ignore` files;
+    /// - the project and global `exclude` patterns, which use the same gitignore syntax;
+    /// - dotfiles and dot-directories.
     fn collect_files(&self, project_path: &str, exclude: &[String]) -> Vec<SourceFile> {
+        let root = PathBuf::from(project_path);
+        let excludes = build_exclude_matcher(&root, exclude);
+        let filter_root = root.clone();
+
+        let walker = ignore::WalkBuilder::new(&root)
+            .hidden(true)
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            // Only ignore files inside the project. Parent directories' files would let a
+            // `~/.gitignore` with `*` (dotfiles setups) empty every project under $HOME, and
+            // graphmind never read them before.
+            .parents(false)
+            // Honour .gitignore even when the project isn't (yet) a git repository, as before.
+            .require_git(false)
+            .follow_links(false)
+            .sort_by_file_name(|a, b| a.cmp(b))
+            .filter_entry(move |entry| {
+                let rel = entry.path().strip_prefix(&filter_root).unwrap_or(entry.path());
+                if rel.as_os_str().is_empty() {
+                    return true;
+                }
+                let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
+                !excludes.matched(rel, is_dir).is_ignore()
+            })
+            .build();
+
         let mut files = Vec::new();
-        let gitignore_patterns = parse_gitignore(project_path);
-        let all_excludes: HashSet<String> = exclude.iter().cloned()
-            .chain(gitignore_patterns)
-            .collect();
-
-        let mut dir_excludes = Vec::new();
-        let mut path_excludes = Vec::new();
-        let mut file_patterns = Vec::new();
-
-        for e in &all_excludes {
-            let clean = e
-                .trim_start_matches("**/")
-                .trim_end_matches("/**")
-                .trim_end_matches("/*")
-                .trim_end_matches('/');
-            if clean.starts_with("*.") || clean.starts_with('.') {
-                file_patterns.push(clean.to_string());
-            } else if clean.contains('/') {
-                path_excludes.push(clean.to_string());
-            } else {
-                dir_excludes.push(clean.to_string());
+        for entry in walker.flatten() {
+            if entry.file_type().is_none_or(|t| t.is_dir()) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let ext = Path::new(&name).extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
+            if let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) {
+                files.push(SourceFile {
+                    full_path: entry.into_path(),
+                    language: language.to_string(),
+                });
             }
         }
-
-        walk_dir(
-            Path::new(project_path),
-            Path::new(project_path),
-            &dir_excludes,
-            &path_excludes,
-            &file_patterns,
-            &mut files,
-        );
-
         files
     }
 
@@ -638,67 +653,24 @@ impl GraphBuilder {
     }
 }
 
-fn walk_dir(
-    dir: &Path,
-    root_dir: &Path,
-    dir_excludes: &[String],
-    path_excludes: &[String],
-    file_patterns: &[String],
-    files: &mut Vec<SourceFile>,
-) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        if dir_excludes.contains(&name) || name.starts_with('.') {
+/// Project and global exclude patterns as one gitignore-style matcher rooted at the project.
+/// A plain name (`node_modules`, `secrets.yaml`) matches at any depth, a pattern with a slash
+/// is relative to the project root, and `*`, `**` and `!` work as in `.gitignore`.
+fn build_exclude_matcher(root: &Path, exclude: &[String]) -> ignore::gitignore::Gitignore {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    for pattern in exclude {
+        let pattern = pattern.trim();
+        if pattern.is_empty() {
             continue;
         }
-
-        let full_path = entry.path();
-        let rel_path = full_path.strip_prefix(root_dir).unwrap_or(&full_path);
-        let rel_str = rel_path.to_string_lossy().to_string();
-
-        if let Ok(ft) = entry.file_type() {
-            if ft.is_dir() {
-                if path_excludes.iter().any(|p| rel_str == *p || rel_str.starts_with(&format!("{p}/"))) {
-                    continue;
-                }
-                walk_dir(&full_path, root_dir, dir_excludes, path_excludes, file_patterns, files);
-            } else {
-                if file_patterns.iter().any(|p| name.ends_with(p.trim_start_matches('*'))) {
-                    continue;
-                }
-                if path_excludes.contains(&rel_str) {
-                    continue;
-                }
-                let ext = Path::new(&name).extension()
-                    .map(|e| format!(".{}", e.to_string_lossy()))
-                    .unwrap_or_default();
-                if let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) {
-                    files.push(SourceFile {
-                        full_path,
-                        language: language.to_string(),
-                    });
-                }
-            }
+        if let Err(e) = builder.add_line(None, pattern) {
+            eprintln!("warn: ignoring invalid exclude pattern {pattern:?}: {e}");
         }
     }
-}
-
-fn parse_gitignore(project_path: &str) -> Vec<String> {
-    let gitignore_path = Path::new(project_path).join(".gitignore");
-    match fs::read_to_string(gitignore_path) {
-        Ok(content) => content
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('!'))
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+    builder.build().unwrap_or_else(|e| {
+        eprintln!("warn: exclude patterns not applied: {e}");
+        ignore::gitignore::Gitignore::empty()
+    })
 }
 
 fn pathdiff(full_path: &str, base: &str) -> String {

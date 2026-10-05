@@ -117,6 +117,7 @@ jobs:
             --test cli_incremental_edges_e2e \
             --test cli_embedding_resilience_e2e \
             --test cli_search_e2e \
+            --test cli_exclude_patterns_e2e \
             -- --test-threads=1 &
           PID2=$!
 

@@ -2,6 +2,15 @@ use graphmind_config::{load_config, save_config, Registry, resolve_project_slug}
 use colored::Colorize;
 
 pub fn add(patterns: &[String], in_slug: Option<&str>, global: bool) {
+    for p in patterns {
+        if p.contains(',') || p.contains(' ') {
+            eprintln!(
+                "{} {:?} is one pattern (gitignore syntax), not a list: pass patterns as separate arguments",
+                "Warning:".yellow().bold(),
+                p
+            );
+        }
+    }
     if global {
         let mut config = load_config();
         for p in patterns {

@@ -3,6 +3,20 @@
 User-facing changes per release. Each entry becomes the release notes on GitHub.
 Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmind/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- **Ignored files stay out of the graph.** Exclude patterns and `.gitignore` files now follow gitignore rules (`**`, `*`, root-anchored entries like `/build`, `!` negation, nested `.gitignore` files). Before, wildcard and root-anchored entries silently matched nothing, so ignored files (generated code, credentials, private scripts) were indexed and, with a remote embedding provider, sent to it. Thanks @KennethWKZ.
+
+### Changed
+
+- `.ignore` files in the project are honoured, like `.gitignore`.
+- The global gitignore (`core.excludesFile`) applies.
+- Files that are ignored but tracked anyway (`git add -f`) are no longer indexed.
+- Exclude patterns are gitignore patterns: `.min.js` now means a file named `.min.js`, not every name ending in it; use `*.min.js`.
+- Ignore files above the project folder are not read (as before), so a `~/.gitignore` doesn't affect projects under `$HOME`.
+
 ## [0.3.2] - 2026-10-10
 
 ### Fixed
