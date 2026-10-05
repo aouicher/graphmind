@@ -246,3 +246,116 @@ fn cross_link_infer_requires_two_projects() {
     );
     assert!(result2.is_empty(), "infer with 1 project should return no links");
 }
+
+// ── write safety ─────────────────────────────────────────────────────────────
+
+#[test]
+fn rewrites_keep_lines_this_version_cannot_parse() {
+    let (store, _dir) = make_store();
+    let kept = store.add("keep me", AddOptions::default());
+    store.add("delete me", AddOptions::default());
+    let path = store.global_path();
+    let future = r#"{"id":"future-1","type":"insight","content":"written by a newer graphmind"}"#;
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    writeln!(f, "{future}").unwrap();
+
+    store.increment_recall(&kept.id, None);
+    let doomed = store.list(None).into_iter().find(|e| e.content == "delete me").unwrap();
+    assert!(store.delete(&doomed.id, None));
+    store.update_file(&path, |_| ((), true)).unwrap();
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains(future), "unparsed line lost:\n{raw}");
+    assert!(raw.contains("keep me") && !raw.contains("delete me"));
+}
+
+#[test]
+fn add_waits_for_a_rewrite_in_progress() {
+    let (store, dir) = make_store();
+    store.add("first", AddOptions::default());
+    let memory_dir = dir.path().join(".graphmind").join("memory");
+    let path = store.global_path();
+
+    let rewriter = {
+        let memory_dir = memory_dir.clone();
+        let path = path.clone();
+        std::thread::spawn(move || {
+            let store = MemoryStore::new(&memory_dir);
+            store.update_file(&path, |_| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                ((), true)
+            });
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    MemoryStore::new(&memory_dir).add("second", AddOptions::default());
+    rewriter.join().unwrap();
+
+    let contents: Vec<String> = store.list(None).into_iter().map(|e| e.content).collect();
+    assert!(contents.contains(&"second".to_string()), "append lost to a concurrent rewrite: {contents:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_write_leaves_the_file_intact() {
+    use std::os::unix::fs::PermissionsExt;
+    let (store, _dir) = make_store();
+    let entry = store.add("original", AddOptions::default());
+    let path = store.global_path();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    // The temp file can't be created in a read-only directory — unless we run as root, which
+    // ignores directory permissions; then there is nothing to test.
+    let mem_dir = path.parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = mem_dir.join("write-probe");
+    if std::fs::File::create(&probe).is_ok() {
+        std::fs::remove_file(&probe).ok();
+        std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    store.increment_recall(&entry.id, None);
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// A file that can't be read (here: invalid UTF-8) reads as no entries; rewriting it from that
+/// would empty it. It is left as it is.
+#[test]
+fn unreadable_file_is_not_rewritten() {
+    let (store, _dir) = make_store();
+    let path = store.global_path();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let bytes = b"{\"id\":\"x\",\"content\":\"caf\xe9\"}\n".to_vec();
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(store.list(None).is_empty(), "precondition: reads as no entries");
+
+    let ran = std::cell::Cell::new(false);
+    assert!(store.update_file(&path, |_| { ran.set(true); ((), true) }).is_none(), "None: file unchanged");
+    assert!(!ran.get(), "the edit doesn't run on a file that can't be read");
+
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+/// A failed write reports the file as unchanged (None), so callers don't claim success.
+#[cfg(unix)]
+#[test]
+fn update_file_reports_a_failed_write() {
+    use std::os::unix::fs::PermissionsExt;
+    let (store, _dir) = make_store();
+    store.add("original", AddOptions::default());
+    let path = store.global_path();
+    let mem_dir = path.parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = mem_dir.join("write-probe");
+    if std::fs::File::create(&probe).is_ok() {
+        std::fs::remove_file(&probe).ok(); // root: directory permissions don't apply
+        std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let result = store.update_file(&path, |entries| { entries.clear(); ((), true) });
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_none());
+    assert_eq!(store.list(None).len(), 1);
+}

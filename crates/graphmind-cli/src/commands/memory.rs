@@ -216,8 +216,7 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
         if !file_path.exists() {
             continue;
         }
-        let (expired, commit_purged, dedup, promoted) = store.with_file_lock(file_path, || {
-            let mut entries = store.read_jsonl(file_path);
+        let counts = store.update_file(file_path, |entries| {
             let before = entries.len();
 
             // Step A — purge expired entries
@@ -236,7 +235,7 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
             let after_b = entries.len();
 
             // Step C — content-based dedup (Jaccard > 0.85)
-            let dedup_ids = find_dedup_ids(&entries);
+            let dedup_ids = find_dedup_ids(entries);
             let dedup_count = dedup_ids.len();
             if !dedup_ids.is_empty() {
                 entries.retain(|e| !dedup_ids.contains(&e.id));
@@ -244,7 +243,7 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
 
             // Step D — auto-promote entries with recall_count >= 3
             let mut promoted_in_file = 0usize;
-            for entry in &mut entries {
+            for entry in entries.iter_mut() {
                 if entry.recall_count >= 3 && !entry.priority {
                     entry.priority = true;
                     entry.updated = now.to_rfc3339();
@@ -252,12 +251,12 @@ fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: b
                 }
             }
 
-            if !dry_run {
-                store.rewrite_file(file_path, &entries);
-            }
-
-            (before - after_a, after_a - after_b, dedup_count, promoted_in_file)
+            let counts = (before - after_a, after_a - after_b, dedup_count, promoted_in_file);
+            let changed = !dry_run && counts != (0, 0, 0, 0);
+            (counts, changed)
         });
+        // None: the file couldn't be read or written, and was left as it is.
+        let Some((expired, commit_purged, dedup, promoted)) = counts else { continue };
         total_expired += expired;
         total_commit += commit_purged;
         total_dedup += dedup;

@@ -137,7 +137,10 @@ impl MemoryStore {
             self.global_path()
         };
 
-        self.atomic_append(&file_path, &serde_json::to_string(&entry).unwrap_or_default());
+        // Under the lock: an append between another process's read and its rename (recall
+        // count, delete, consolidate) would otherwise be overwritten by that rewrite.
+        let line = serde_json::to_string(&entry).unwrap_or_default();
+        self.with_file_lock(&file_path, || self.atomic_append(&file_path, &line));
         entry
     }
 
@@ -167,99 +170,84 @@ impl MemoryStore {
             .collect()
     }
 
-    pub fn delete(&self, id: &str, project: Option<&str>) -> bool {
+    /// The memory files `project` reads: the global file, then the project's.
+    fn files(&self, project: Option<&str>) -> Vec<PathBuf> {
         let mut paths = vec![self.global_path()];
         if let Some(proj) = project {
             paths.push(self.project_path(proj));
         }
+        paths
+    }
 
-        for file_path in &paths {
-            if !file_path.exists() {
-                continue;
-            }
-            let deleted = self.with_file_lock(file_path, || {
-                let entries = self.read_jsonl(file_path);
-                let filtered: Vec<_> = entries.iter().filter(|e| e.id != id).collect();
-                if filtered.len() != entries.len() {
-                    let content = if filtered.is_empty() {
-                        String::new()
-                    } else {
-                        filtered
-                            .iter()
-                            .map(|e| serde_json::to_string(e).unwrap_or_default())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                            + "\n"
-                    };
-                    self.atomic_write(file_path, &content);
-                    true
-                } else {
-                    false
-                }
-            });
-            if deleted {
-                return true;
-            }
-        }
-        false
+    pub fn delete(&self, id: &str, project: Option<&str>) -> bool {
+        self.files(project).iter().filter(|p| p.exists()).any(|path| {
+            self.update_file(path, |entries| {
+                let before = entries.len();
+                entries.retain(|e| e.id != id);
+                let deleted = entries.len() != before;
+                (deleted, deleted)
+            })
+            .unwrap_or(false)
+        })
     }
 
     /// Increment the recall_count for the entry with the given id.
-    /// Rewrites the JSONL file with the updated count.
     pub fn increment_recall(&self, id: &str, project: Option<&str>) {
-        let mut paths = vec![self.global_path()];
-        if let Some(proj) = project {
-            paths.push(self.project_path(proj));
-        }
-
-        for file_path in &paths {
-            if !file_path.exists() {
-                continue;
-            }
-            let found = self.with_file_lock(file_path, || {
-                let mut entries = self.read_jsonl(file_path);
-                let mut found = false;
-                for entry in &mut entries {
-                    if entry.id == id {
-                        entry.recall_count += 1;
-                        found = true;
-                        break;
-                    }
+        for path in self.files(project).iter().filter(|p| p.exists()) {
+            let found = self.update_file(path, |entries| match entries.iter_mut().find(|e| e.id == id) {
+                Some(entry) => {
+                    entry.recall_count += 1;
+                    (true, true)
                 }
-                if found {
-                    let content = if entries.is_empty() {
-                        String::new()
-                    } else {
-                        entries
-                            .iter()
-                            .map(|e| serde_json::to_string(e).unwrap_or_default())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                            + "\n"
-                    };
-                    self.atomic_write(file_path, &content);
-                }
-                found
+                None => (false, false),
             });
-            if found {
+            if found == Some(true) {
                 return;
             }
         }
     }
 
-    /// Rewrite a JSONL file with the given entries (used by consolidate).
-    pub fn rewrite_file(&self, file_path: &Path, entries: &[MemoryEntry]) {
-        let content = if entries.is_empty() {
-            String::new()
-        } else {
-            entries
-                .iter()
-                .map(|e| serde_json::to_string(e).unwrap_or_default())
-                .collect::<Vec<_>>()
-                .join("\n")
-                + "\n"
-        };
-        self.atomic_write(file_path, &content);
+    /// Read-modify-write of one memory file under its lock. `f` gets the parsed entries and
+    /// returns (result, changed); the file is rewritten only when it changed, with the lines this
+    /// version can't parse kept after the entries. `None` means the file is unchanged because it
+    /// exists but can't be read (then `f` doesn't run: its entries would read as none, and a
+    /// rewrite would empty it) or because the write failed.
+    pub fn update_file<R>(&self, path: &Path, f: impl FnOnce(&mut Vec<MemoryEntry>) -> (R, bool)) -> Option<R> {
+        self.with_file_lock(path, || {
+            let raw = match fs::read_to_string(path) {
+                Ok(raw) => raw,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(e) => {
+                    eprintln!("Warning: memory file {} not updated: it can't be read ({e})", path.display());
+                    return None;
+                }
+            };
+            let mut entries = Vec::new();
+            let mut unparsed = Vec::new();
+            for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+                match serde_json::from_str::<MemoryEntry>(line) {
+                    Ok(entry) => entries.push(entry),
+                    Err(_) => unparsed.push(line),
+                }
+            }
+            let (result, changed) = f(&mut entries);
+            if changed {
+                let mut content = String::new();
+                for entry in &entries {
+                    content.push_str(&serde_json::to_string(entry).unwrap_or_default());
+                    content.push('\n');
+                }
+                for line in unparsed {
+                    content.push_str(line);
+                    content.push('\n');
+                }
+                if let Err(e) = self.atomic_write(path, &content) {
+                    eprintln!("Warning: memory file {} not updated: {e}", path.display());
+                    return None;
+                }
+            }
+            Some(result)
+        })
     }
 
     pub fn global_path(&self) -> PathBuf {
@@ -270,7 +258,7 @@ impl MemoryStore {
         self.memory_dir.join(format!("{slug}.jsonl"))
     }
 
-    pub fn read_jsonl(&self, file_path: &Path) -> Vec<MemoryEntry> {
+    fn read_jsonl(&self, file_path: &Path) -> Vec<MemoryEntry> {
         let content = match fs::read_to_string(file_path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
@@ -298,13 +286,13 @@ impl MemoryStore {
     /// serializing read-modify-write sequences against a given JSONL file
     /// across processes — e.g. `increment_recall` from one MCP server and
     /// `delete`/`consolidate` from another CLI invocation, both targeting
-    /// the same shared repo_id-keyed memory file. `atomic_append` (plain
-    /// `add`) doesn't need this — an OS-level append is already atomic
-    /// for lines under `PIPE_BUF`, and doesn't read the file first.
+    /// the same shared repo_id-keyed memory file. `add` takes it too: an
+    /// append is atomic on its own, but one that lands between another
+    /// process's read and its rename is lost with that rewrite.
     ///
     /// Best-effort: if the lock file can't be opened, `f` still runs
     /// unlocked rather than failing the whole operation.
-    pub fn with_file_lock<R>(&self, file_path: &Path, f: impl FnOnce() -> R) -> R {
+    fn with_file_lock<R>(&self, file_path: &Path, f: impl FnOnce() -> R) -> R {
         use fs4::FileExt;
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).ok();
@@ -329,15 +317,26 @@ impl MemoryStore {
         }
     }
 
-    fn atomic_write(&self, file_path: &Path, content: &str) {
+    /// Replace the file with `content`: written and synced to a temp file first, renamed over the
+    /// original only if that succeeded, so a full disk or I/O error leaves the old file intact.
+    fn atomic_write(&self, file_path: &Path, content: &str) -> std::io::Result<()> {
         let tmp_path = file_path.with_extension(format!(
-            "tmp.{}",
+            "tmp.{}.{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis()
+                .as_nanos()
         ));
-        fs::write(&tmp_path, content).ok();
-        fs::rename(&tmp_path, file_path).ok();
+        let result = fs::File::create(&tmp_path)
+            .and_then(|mut f| {
+                f.write_all(content.as_bytes())?;
+                f.sync_all()
+            })
+            .and_then(|_| fs::rename(&tmp_path, file_path));
+        if result.is_err() {
+            fs::remove_file(&tmp_path).ok();
+        }
+        result
     }
 }
