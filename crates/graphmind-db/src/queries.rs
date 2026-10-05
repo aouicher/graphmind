@@ -189,14 +189,14 @@ impl<'a> GraphQueries<'a> {
              FROM symbols_fts f
              JOIN symbols s ON s.id = f.rowid
              WHERE symbols_fts MATCH ?1 AND s.kind = ?3
-             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
+             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0), s.id
              LIMIT ?2"
         } else {
             "SELECT s.id, s.name, s.kind, s.file, s.line_start, s.line_end, s.signature, s.doc, s.content
              FROM symbols_fts f
              JOIN symbols s ON s.id = f.rowid
              WHERE symbols_fts MATCH ?1
-             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0)
+             ORDER BY bm25(symbols_fts, 10.0, 5.0, 3.0, 1.0), s.id
              LIMIT ?2"
         };
         let mut stmt = self.db.prepare(sql).unwrap();
@@ -877,5 +877,31 @@ impl<'a> GraphQueries<'a> {
             Err(_) => return Vec::new(),
         };
         rows.filter_map(|r| r.ok()).collect()
+    }
+}
+
+/// Turn free text into an FTS5 prefix query: every word becomes a quoted prefix term, joined
+/// with OR. Quoting keeps punctuation and keywords literal, so `user-service`, `X.php`,
+/// `App\Models` and the word `AND` search for themselves instead of raising an FTS5 syntax
+/// error (which made the search silently return nothing). `;` separates sub-queries.
+pub fn fts_prefix_query(raw: &str) -> String {
+    raw.split(';')
+        .flat_map(|part| part.split_whitespace())
+        .filter(|w| w.chars().count() > 1)
+        .map(|w| format!("\"{}\"*", w.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+#[cfg(test)]
+mod fts_query_tests {
+    use super::fts_prefix_query;
+
+    #[test]
+    fn quotes_each_term() {
+        assert_eq!(fts_prefix_query("wallet balance"), r#""wallet"* OR "balance"*"#);
+        assert_eq!(fts_prefix_query("a; user-service"), r#""user-service"*"#);
+        assert_eq!(fts_prefix_query(r#"say "hi""#), r#""say"* OR """hi"""*"#);
+        assert_eq!(fts_prefix_query(""), "");
     }
 }
