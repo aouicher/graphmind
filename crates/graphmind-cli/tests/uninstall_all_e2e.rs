@@ -446,6 +446,7 @@ fn uninstall_project_mcp_configs_preserves_unrelated_project_and_server() {
     with_home(|home| {
         let project_dir = tempfile::tempdir().unwrap();
         let project_path = project_dir.path().to_str().unwrap();
+        fs::create_dir_all(project_dir.path().join(".vscode")).unwrap(); // project uses VS Code
 
         ensure_project_mcp_configs(project_path);
 

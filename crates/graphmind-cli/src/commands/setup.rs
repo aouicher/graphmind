@@ -602,49 +602,57 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
         let vscode_dir = abs_path.join(".vscode");
         let vscode_mcp = vscode_dir.join("mcp.json");
 
-        let mut config: Value = if vscode_mcp.exists() {
-            let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
-            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+        // Only projects already set up for VS Code. Creating .vscode/ in every registered repo
+        // leaves an untracked folder (or a file that gets committed) for people who don't use it.
+        if !vscode_dir.is_dir() {
+            println!("    {} VS Code: no .vscode folder in this project, skipped", "-".dimmed());
         } else {
-            json!({})
-        };
 
-        // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
-        let already = config
-            .get("servers")
-            .and_then(|m| m.get("graphmind"))
-            .is_some_and(|e| e.get("env").is_none());
+            let mut config: Value = if vscode_mcp.exists() {
+                let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
+                serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+            } else {
+                json!({})
+            };
 
-        if already {
-            println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
-        } else {
-            if vscode_mcp.exists() {
-                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
-                fs::copy(&vscode_mcp, &backup).ok();
+            // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
+            let already = config
+                .get("servers")
+                .and_then(|m| m.get("graphmind"))
+                .is_some_and(|e| e.get("env").is_none());
+
+            if already {
+                println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
+            } else {
+                if vscode_mcp.exists() {
+                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                    let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
+                    fs::copy(&vscode_mcp, &backup).ok();
+                }
+
+                let servers = config
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("servers")
+                    .or_insert_with(|| json!({}));
+                // No `env` block — `graphmind_path` is absolute. See issue #105.
+                servers.as_object_mut().unwrap().insert(
+                    "graphmind".to_string(),
+                    json!({
+                        "type": "stdio",
+                        "command": graphmind_path,
+                        "args": ["mcp"]
+                    }),
+                );
+
+                fs::create_dir_all(&vscode_dir).ok();
+                let formatted = serde_json::to_string_pretty(&config).unwrap();
+                fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
+                    println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
+                });
+                println!("    {} VS Code (.vscode/mcp.json) configured", "✓".green());
             }
-
-            let servers = config
-                .as_object_mut()
-                .unwrap()
-                .entry("servers")
-                .or_insert_with(|| json!({}));
-            // No `env` block — `graphmind_path` is absolute. See issue #105.
-            servers.as_object_mut().unwrap().insert(
-                "graphmind".to_string(),
-                json!({
-                    "type": "stdio",
-                    "command": graphmind_path,
-                    "args": ["mcp"]
-                }),
-            );
-
-            fs::create_dir_all(&vscode_dir).ok();
-            let formatted = serde_json::to_string_pretty(&config).unwrap();
-            fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
-                println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
-            });
-            println!("    {} VS Code (.vscode/mcp.json) configured", "✓".green());
+    
         }
     }
 }

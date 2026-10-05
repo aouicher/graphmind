@@ -520,6 +520,7 @@ fn ensure_project_mcp_configs_written() {
     with_home(|home| {
         let project_dir = tempfile::tempdir().unwrap();
         let project_path = project_dir.path().to_str().unwrap();
+        fs::create_dir_all(project_dir.path().join(".vscode")).unwrap(); // project uses VS Code
 
         ensure_project_mcp_configs(project_path);
 
@@ -568,10 +569,21 @@ fn ensure_project_mcp_configs_written() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn ensure_project_mcp_configs_skips_vscode_for_other_editors() {
+    with_home(|home| {
+        let project_dir = tempfile::tempdir().unwrap();
+        ensure_project_mcp_configs(project_dir.path().to_str().unwrap());
+        assert!(home.join(".claude.json").exists(), "Claude Code config still written");
+        assert!(!project_dir.path().join(".vscode").exists(), "no .vscode folder created");
+    });
+}
+
+#[test]
 fn ensure_project_mcp_configs_idempotent() {
     with_home(|_home| {
         let project_dir = tempfile::tempdir().unwrap();
         let project_path = project_dir.path().to_str().unwrap();
+        fs::create_dir_all(project_dir.path().join(".vscode")).unwrap(); // project uses VS Code
 
         ensure_project_mcp_configs(project_path);
         ensure_project_mcp_configs(project_path);
