@@ -9,7 +9,8 @@
 ///   cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
 use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_claude_desktop_mcp, install_claude_md_block,
-    install_cursor_global_mcp, install_opencode_mcp, install_shell_path, register_mcp_in_claude_code,
+    already_on_path, install_cursor_global_mcp, install_opencode_mcp, install_shell_path_for,
+    register_mcp_in_claude_code,
 };
 use serde_json::Value;
 use std::fs;
@@ -34,20 +35,45 @@ fn with_home<F: FnOnce(&std::path::Path)>(f: F) {
 #[test]
 fn setup_shell_path_idempotent() {
     with_home(|home| {
-        // Call twice — should write the export line exactly once.
-        install_shell_path();
-        install_shell_path();
+        // Not on PATH, zsh: written once, to .zshenv only.
+        let bin_dir = home.join("opt").join("bin");
+        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
+        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
 
         let zshenv = home.join(".zshenv");
-        assert!(zshenv.exists(), ".zshenv should be created");
-        let content = fs::read_to_string(&zshenv).unwrap();
-        let bin_dir = home.join(".graphmind").join("bin");
-        let export_line = format!("export PATH=\"{}:$PATH\"", bin_dir.display());
-        let count = content.matches(&export_line).count();
-        assert_eq!(
-            count, 1,
-            "export line should appear exactly once, found {count}:\n{content}"
-        );
+        let content = fs::read_to_string(&zshenv).expect(".zshenv should be created");
+        let entry = format!("\"{}:$PATH\"", bin_dir.display());
+        let count = content.matches(&entry).count();
+        assert_eq!(count, 1, "export line should appear exactly once, found {count}:\n{content}");
+        assert!(!home.join(".zshrc").exists(), ".zshrc must not be touched for zsh");
+    });
+}
+
+#[test]
+fn setup_shell_path_skips_dir_already_on_path() {
+    with_home(|home| {
+        let bin_dir = home.join(".local").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let path_env = format!("/usr/bin:{}", bin_dir.display());
+        install_shell_path_for(&bin_dir.join("graphmind"), &path_env, "/bin/zsh");
+        assert!(!home.join(".zshenv").exists(), "nothing to add when the binary is already on PATH");
+    });
+}
+
+#[test]
+fn setup_shell_path_removes_dead_legacy_line() {
+    with_home(|home| {
+        // Older setups always added ~/.graphmind/bin, even when the binary lived elsewhere.
+        let legacy = format!("export PATH=\"{}:$PATH\"", home.join(".graphmind/bin").display());
+        fs::write(home.join(".zshrc"), format!("alias ll='ls -la'\n{legacy}\n")).unwrap();
+        fs::write(home.join(".bashrc"), format!("{legacy}\n")).unwrap();
+
+        let bin_dir = home.join(".local").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/zsh");
+
+        assert_eq!(fs::read_to_string(home.join(".zshrc")).unwrap(), "alias ll='ls -la'\n");
+        assert!(!fs::read_to_string(home.join(".bashrc")).unwrap().contains(".graphmind/bin"));
     });
 }
 
@@ -597,5 +623,47 @@ fn ensure_project_mcp_configs_idempotent() {
         let json: Value = serde_json::from_str(&content).expect("valid JSON");
         let count = json["servers"].as_object().unwrap().keys().filter(|k| *k == "graphmind").count();
         assert_eq!(count, 1, "graphmind should appear exactly once in .vscode/mcp.json");
+    });
+}
+
+/// Linuxbrew / symlinked dev builds: the binary runs from a versioned directory that isn't on
+/// PATH, but the link to it is. That counts as "on PATH", so setup adds nothing.
+#[cfg(unix)]
+#[test]
+fn symlinked_binary_on_path_counts_as_on_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let cellar = dir.path().join("Cellar/graphmind/0.3.2/bin");
+    let linked = dir.path().join("linuxbrew/bin");
+    let other = dir.path().join("other/bin");
+    for d in [&cellar, &linked, &other] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let exe = cellar.join("graphmind");
+    std::fs::write(&exe, "binary").unwrap();
+    std::os::unix::fs::symlink(&exe, linked.join("graphmind")).unwrap();
+    std::fs::write(other.join("graphmind"), "a different graphmind").unwrap();
+
+    let path_env = format!("/usr/bin:{}:{}", other.display(), linked.display());
+    assert_eq!(already_on_path(&exe, &path_env), Some(linked.join("graphmind")));
+    // Another graphmind on PATH, or none, doesn't count.
+    assert_eq!(already_on_path(&exe, &format!("/usr/bin:{}", other.display())), None);
+    assert_eq!(already_on_path(&exe, "/usr/bin:/bin"), None);
+}
+
+/// The whole flow for a symlinked install: the link on PATH is enough, no profile is written.
+#[cfg(unix)]
+#[test]
+fn setup_shell_path_writes_nothing_for_a_linked_binary() {
+    with_home(|home| {
+        let cellar = home.join("Cellar/graphmind/0.3.2/bin");
+        let linked = home.join("linuxbrew/bin");
+        fs::create_dir_all(&cellar).unwrap();
+        fs::create_dir_all(&linked).unwrap();
+        let exe = cellar.join("graphmind");
+        fs::write(&exe, "binary").unwrap();
+        std::os::unix::fs::symlink(&exe, linked.join("graphmind")).unwrap();
+
+        install_shell_path_for(&exe, &format!("/usr/bin:{}", linked.display()), "/bin/zsh");
+        assert!(!home.join(".zshenv").exists(), "the versioned Cellar dir must not be added");
     });
 }

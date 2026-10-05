@@ -12,7 +12,7 @@ use graphmind_cli::commands::claude_hook::{install_hook, uninstall_hook};
 use graphmind_cli::commands::install_skill::{install_skill, uninstall_skill};
 use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_claude_desktop_mcp, install_claude_md_block,
-    install_cursor_global_mcp, install_opencode_mcp, install_shell_path,
+    install_cursor_global_mcp, install_opencode_mcp,
     register_mcp_in_claude_code, uninstall_claude_desktop_mcp, uninstall_claude_md_block,
     uninstall_cursor_global_mcp, uninstall_opencode_mcp, uninstall_project_mcp_configs,
     uninstall_shell_path, unregister_mcp_in_claude_code,
@@ -45,8 +45,10 @@ fn uninstall_shell_path_preserves_unrelated_content() {
         let unrelated_after = "\n# more stuff after\nexport FOO=bar\n";
         fs::write(&zshrc, unrelated_before).unwrap();
 
-        // Simulate what install_shell_path does, but also append unrelated content after.
-        install_shell_path();
+        // A line written by setup (marked), with unrelated content after it.
+        let bin_dir = home.join(".graphmind").join("bin");
+        let marked = format!("export PATH=\"{}:$PATH\"  # added by graphmind setup\n", bin_dir.display());
+        fs::write(&zshrc, format!("{unrelated_before}{marked}")).unwrap();
         let content = fs::read_to_string(&zshrc).unwrap();
         let content = format!("{}{}", content, unrelated_after);
         fs::write(&zshrc, &content).unwrap();
