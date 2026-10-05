@@ -261,9 +261,12 @@ impl Registry {
         config.projects.get(slug).cloned()
     }
 
+    /// Registered projects, sorted by slug (stable output for list and cross-project search).
     pub fn list() -> Vec<ProjectConfig> {
         let config = load_config();
-        config.projects.values().cloned().collect()
+        let mut projects: Vec<_> = config.projects.values().cloned().collect();
+        projects.sort_by(|a, b| a.slug.cmp(&b.slug));
+        projects
     }
 
     pub fn find_by_path(path: &str) -> Option<ProjectConfig> {

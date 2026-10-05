@@ -5,7 +5,7 @@ use graphmind_embeddings::search::semantic_search;
 use colored::Colorize;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, offset: usize, include_content: bool) {
     let slug = match resolve_project_slug(&[slug]) {
@@ -38,22 +38,18 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
     let q = GraphQueries::new(&db);
 
     // FTS search
-    let fts_query = query
-        .split(';')
-        .flat_map(|part| part.split_whitespace())
-        .filter(|w| w.len() > 1)
-        .map(|w| format!("{w}*"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let fts_query = graphmind_db::queries::fts_prefix_query(query);
+    // Hits needed before --offset is applied.
+    let wanted = limit as usize + offset;
 
     let fts_results = if fts_query.is_empty() {
         Vec::new()
     } else {
-        let raw = q.search_symbols(&fts_query, limit * 5);
+        let raw = q.search_symbols(&fts_query, wanted as i64 * 5);
         if let Some(k) = kind {
-            raw.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(limit as usize).collect()
+            raw.into_iter().filter(|r| r.kind.eq_ignore_ascii_case(k)).take(wanted).collect()
         } else {
-            raw.into_iter().take(limit as usize).collect()
+            raw.into_iter().take(wanted).collect()
         }
     };
 
@@ -67,7 +63,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
                     &emb_db_path,
                     query,
                     &|text| engine.embed(text).ok(),
-                    limit as usize,
+                    wanted,
                     kind,
                 )
             } else {
@@ -81,11 +77,15 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
     };
 
     // Fuse results with RRF
-    let mut results = fuse_results(&fts_results, &semantic_results, limit as usize);
+    // Keep enough fused hits for --offset paging.
+    let mut results = fuse_results(&fts_results, &semantic_results, wanted, |file, name| {
+        q.symbols_in_file(file).into_iter().find(|s| s.name == name)
+    });
 
     // Graph expansion: boost seeds with 1-hop neighbors
     let graph_boost = 0.3;
-    let mut neighbor_scores: HashMap<String, FusedHit> = HashMap::new();
+    // BTreeMap: neighbors are merged in a fixed order, so equal scores rank the same every run.
+    let mut neighbor_scores: BTreeMap<String, FusedHit> = BTreeMap::new();
     for hit in &results {
         let callers = q.callers(&hit.name);
         for c in callers.iter().take(3) {
@@ -124,7 +124,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
         }
     }
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    sort_hits(&mut results);
     // apply offset before truncate
     if offset > 0 {
         results.drain(..offset.min(results.len()));
@@ -228,40 +228,66 @@ struct FusedHit {
     from_graph: bool,
 }
 
+/// Highest score first; ties broken by location so the order never depends on hash order.
+fn sort_hits(hits: &mut [FusedHit]) {
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+}
+
+/// Reciprocal-rank fusion of FTS and semantic hits. Embeddings store no line number, so a
+/// semantic hit is matched to its symbol by (file, name): it adds to the FTS hit for the same
+/// symbol, or is looked up with `resolve` to get its line, signature and body.
 fn fuse_results(
     fts: &[graphmind_db::queries::SymbolRow],
     semantic: &[graphmind_embeddings::search::SearchResult],
     limit: usize,
+    resolve: impl Fn(&str, &str) -> Option<graphmind_db::queries::SymbolRow>,
 ) -> Vec<FusedHit> {
     let k = 60.0;
-    let mut scores: HashMap<String, FusedHit> = HashMap::new();
+    let mut hits: Vec<FusedHit> = Vec::new();
+    let mut by_symbol: HashMap<(String, String), usize> = HashMap::new();
+    let mut by_location: HashMap<(String, String, i64), usize> = HashMap::new();
 
     for (i, s) in fts.iter().enumerate() {
-        let key = format!("{}:{}:{}", s.file, s.name, s.line_start);
         let rrf = 1.0 / (k + i as f64 + 1.0);
-        scores.entry(key)
-            .and_modify(|e| { e.score += rrf; e.from_fts = true; })
-            .or_insert_with(|| FusedHit {
-                name: s.name.clone(), kind: s.kind.clone(), file: s.file.clone(),
-                line: s.line_start, signature: s.signature.clone(), content: s.content.clone(),
-                score: rrf, from_fts: true, from_sem: false, from_graph: false,
-            });
+        if let Some(&idx) = by_location.get(&(s.file.clone(), s.name.clone(), s.line_start)) {
+            hits[idx].score += rrf;
+            continue;
+        }
+        by_location.insert((s.file.clone(), s.name.clone(), s.line_start), hits.len());
+        by_symbol.entry((s.file.clone(), s.name.clone())).or_insert(hits.len());
+        hits.push(FusedHit {
+            name: s.name.clone(), kind: s.kind.clone(), file: s.file.clone(),
+            line: s.line_start, signature: s.signature.clone(), content: s.content.clone(),
+            score: rrf, from_fts: true, from_sem: false, from_graph: false,
+        });
     }
 
     for (i, r) in semantic.iter().enumerate() {
-        let key = format!("{}:{}:0", r.file, r.symbol_name);
         let rrf = 1.0 / (k + i as f64 + 1.0);
-        scores.entry(key)
-            .and_modify(|e| { e.score += rrf; e.from_sem = true; })
-            .or_insert_with(|| FusedHit {
-                name: r.symbol_name.clone(), kind: r.symbol_kind.clone(), file: r.file.clone(),
-                line: 0, signature: None, content: None, score: rrf,
-                from_fts: false, from_sem: true, from_graph: false,
-            });
+        let key = (r.file.clone(), r.symbol_name.clone());
+        if let Some(&idx) = by_symbol.get(&key) {
+            hits[idx].score += rrf;
+            hits[idx].from_sem = true;
+            continue;
+        }
+        by_symbol.insert(key, hits.len());
+        let sym = resolve(&r.file, &r.symbol_name);
+        hits.push(FusedHit {
+            name: r.symbol_name.clone(), kind: r.symbol_kind.clone(), file: r.file.clone(),
+            line: sym.as_ref().map_or(0, |s| s.line_start),
+            signature: sym.as_ref().and_then(|s| s.signature.clone()),
+            content: sym.and_then(|s| s.content),
+            score: rrf, from_fts: false, from_sem: true, from_graph: false,
+        });
     }
 
-    let mut results: Vec<_> = scores.into_values().collect();
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(limit);
-    results
+    sort_hits(&mut hits);
+    hits.truncate(limit);
+    hits
 }

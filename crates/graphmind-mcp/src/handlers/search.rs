@@ -11,13 +11,7 @@ pub(crate) fn handle_search(args: &Value) -> Value {
         Some(q) => q,
         None => return err_text("Missing required parameter: query"),
     };
-    let fts_query: String = raw_query
-        .split(';')
-        .flat_map(|part| part.split_whitespace())
-        .filter(|w| w.len() > 1)
-        .map(|w| format!("{w}*"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let fts_query = graphmind_db::queries::fts_prefix_query(raw_query);
     if fts_query.is_empty() {
         return err_text("Empty search query after filtering");
     }
@@ -81,7 +75,9 @@ pub(crate) fn handle_search(args: &Value) -> Value {
                     limit as usize,
                     kind_filter,
                 );
-                fuse_fts_and_semantic(&fts_results, &semantic_results, limit as usize)
+                fuse_fts_and_semantic(&fts_results, &semantic_results, limit as usize, |file, name| {
+                    gq.symbols_in_file(file).into_iter().find(|s| s.name == name)
+                })
             } else {
                 fts_results
                     .into_iter()

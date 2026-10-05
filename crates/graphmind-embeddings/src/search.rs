@@ -37,7 +37,12 @@ fn search_single(query_vec: &[f32], rows: &[(String, String, String, String, Vec
             score: cosine_similarity(query_vec, emb),
         })
         .collect();
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.symbol_name.cmp(&b.symbol_name))
+    });
     scored.truncate(limit);
     scored
 }
@@ -63,7 +68,12 @@ fn rrf_merge(rankings: &[Vec<SearchResult>], k: usize) -> Vec<SearchResult> {
             r
         })
         .collect();
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.symbol_name.cmp(&b.symbol_name))
+    });
     results
 }
 
