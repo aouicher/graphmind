@@ -29,7 +29,9 @@ impl VoyageEngine {
         self
     }
 
-    fn call_api(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
+    /// `input_type` is "document" for indexed text and "query" for searches: Voyage prepends a
+    /// different retrieval prompt to each, and vectors from both are compatible.
+    fn call_api(&self, texts: &[&str], input_type: &str) -> Result<Vec<Vec<f32>>, EmbedError> {
         let client = reqwest::blocking::Client::builder()
             .timeout(self.timeout)
             .build()
@@ -37,7 +39,7 @@ impl VoyageEngine {
         let body = serde_json::json!({
             "input": texts,
             "model": self.model,
-            "input_type": "document",
+            "input_type": input_type,
         });
 
         let resp = client
@@ -79,7 +81,15 @@ impl VoyageEngine {
 
 impl EmbeddingEngine for VoyageEngine {
     fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
-        let results = self.call_api(&[text])?;
+        let results = self.call_api(&[text], "document")?;
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbedError::ApiError("No embedding returned".into()))
+    }
+
+    fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let results = self.call_api(&[text], "query")?;
         results
             .into_iter()
             .next()
@@ -100,7 +110,7 @@ impl EmbeddingEngine for VoyageEngine {
                 for (i, chunk) in chunks[window_start..window_end].iter().enumerate() {
                     let idx = window_start + i;
                     handles.push((idx, s.spawn(move || {
-                        self.call_api(chunk)
+                        self.call_api(chunk, "document")
                     })));
                 }
                 for (i, handle) in handles {

@@ -71,7 +71,7 @@ pub(crate) fn handle_search(args: &Value) -> Value {
                 let semantic_results = graphmind_embeddings::search::semantic_search(
                     &emb_db_path,
                     raw_query,
-                    &|text| engine.embed(text).ok(),
+                    &|text| engine.embed_query(text).ok(),
                     limit as usize,
                     kind_filter,
                 );

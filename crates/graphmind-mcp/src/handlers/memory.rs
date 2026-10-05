@@ -39,7 +39,7 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
             graphmind_embeddings::search::semantic_search_memory(
                 &emb_db_path,
                 query,
-                &|text| engine.embed(text).ok(),
+                &|text| engine.embed_query(text).ok(),
                 limit * 3,
             )
             .into_iter()

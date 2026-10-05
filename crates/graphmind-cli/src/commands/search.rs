@@ -62,7 +62,7 @@ pub fn search(query: &str, slug: Option<&str>, limit: i64, kind: Option<&str>, o
                 semantic_search(
                     &emb_db_path,
                     query,
-                    &|text| engine.embed(text).ok(),
+                    &|text| engine.embed_query(text).ok(),
                     wanted,
                     kind,
                 )

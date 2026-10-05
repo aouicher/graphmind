@@ -146,6 +146,13 @@ pub struct EmbeddingConfig {
     /// Symbols sent per embedding request during builds. Default: 256.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_size: Option<usize>,
+    /// Text put in front of search queries before embedding. Meant for models trained with an
+    /// instruction on the query side only, such as Qwen3-Embedding or F2LLM (an
+    /// "Instruct: ...\nQuery: " line). Indexed text is never prefixed, so it is not a fit for
+    /// models trained with paired prefixes (nomic-embed-text's `search_query:`/`search_document:`,
+    /// e5's `query:`/`passage:`): a query-only prefix there may not help. Leave unset otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_prefix: Option<String>,
 }
 
 impl Default for EmbeddingConfig {
@@ -157,6 +164,7 @@ impl Default for EmbeddingConfig {
             api_keys: ApiKeys::default(),
             request_timeout_secs: None,
             batch_size: None,
+            query_prefix: None,
         }
     }
 }

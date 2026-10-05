@@ -20,7 +20,13 @@ impl fmt::Display for EmbedError {
 impl std::error::Error for EmbedError {}
 
 pub trait EmbeddingEngine: Send + Sync {
+    /// Embed a document (symbol text, memory entry).
     fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError>;
+    /// Embed a search query. Retrieval models embed queries and documents differently;
+    /// engines that support it (Voyage `input_type`) override this.
+    fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        self.embed(text)
+    }
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError>;
     fn dimensions(&self) -> usize;
     fn model_id(&self) -> &str;
