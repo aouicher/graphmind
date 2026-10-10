@@ -7,6 +7,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ### Fixed
 
+- **Files that aren't UTF-8 are reported.** The build dropped a source file it couldn't read as UTF-8 (a Latin-1 PHP file, say) without a word: it wasn't in the skipped count, and whatever an earlier build stored for it stayed. The build now names it (`Skipped src/legacy.php: not UTF-8`), counts it as skipped, and removes its earlier records. A file that can't be read (permissions) is skipped with a warning instead and keeps what the graph has, like a folder that can't be read.
 - **Minified files leave nothing behind.** A file indexed before it became minified (more than 5,000 characters, lines averaging over 500), or before graphmind skipped such files, kept its old symbols and file record forever: the file was still on disk, so cleanup never removed them, and the minified check meant it was never parsed again. The build now removes them the first time it skips the file, and counts them as deleted once.
 - **Skipped minified files are named.** The build prints `Skipped <path>: minified (average line N bytes)` for each one, instead of only counting them.
 - **Markdown isn't skipped as minified.** A document written one paragraph per line averages over 500 characters a line, like a minified file, and was left out of the graph. Markdown is now always indexed.

@@ -541,3 +541,47 @@ fn markdown_with_long_lines_is_indexed_not_skipped_as_minified() {
         .unwrap();
     assert!(symbols >= 4, "its headings are indexed, got {symbols}");
 }
+
+// ── Files that aren't UTF-8 ───────────────────────────────────────
+
+/// A file that isn't UTF-8 counts as skipped (it used to vanish from the counts) and, when an
+/// earlier build indexed it, its symbols, file row and hash-cache entry go, counted as deleted once.
+#[test]
+fn non_utf8_file_is_skipped_and_forgotten() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/ok.ts"), "export function ok(): number {\n  return 1;\n}\n").unwrap();
+    std::fs::write(project.join("src/legacy.ts"), "export function legacy(): string {\n  return 'cafe';\n}\n").unwrap();
+    let db_path = tmp.path().join("test.db");
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    let project_root = project.to_str().unwrap();
+    let mut builder = GraphBuilder::new(db_path.to_str().unwrap(), cache_dir.to_str().unwrap());
+
+    let count = |b: &GraphBuilder, sql: &str| -> i64 {
+        b.database().query_row(sql, ["src/legacy.ts"], |r| r.get(0)).unwrap()
+    };
+    const SYMBOLS: &str = "SELECT COUNT(*) FROM symbols WHERE file = ?1";
+    const FILES: &str = "SELECT COUNT(*) FROM files WHERE path = ?1";
+
+    let first = builder.build(project_root, &BuildOptions { full: true, ..Default::default() });
+    assert_eq!(first.files_processed, 2);
+    assert_eq!(count(&builder, SYMBOLS), 1, "legacy is indexed while it is UTF-8");
+
+    // Saved again as Latin-1: 0xE9 is "é", which isn't valid UTF-8 on its own.
+    std::fs::write(project.join("src/legacy.ts"), b"export function legacy(): string {\n  return 'caf\xe9';\n}\n").unwrap();
+
+    let result = builder.build(project_root, &BuildOptions { full: true, ..Default::default() });
+    assert_eq!(result.files_processed, 1, "only ok.ts is parsed");
+    assert_eq!(result.skipped, 1, "legacy.ts counts as skipped");
+    assert_eq!(result.deleted, 1, "legacy.ts's old records count as deleted");
+    assert_eq!(count(&builder, SYMBOLS), 0, "no stale symbols");
+    assert_eq!(count(&builder, FILES), 0, "no stale file row");
+    let hashes = std::fs::read_to_string(cache_dir.join("hashes.json")).unwrap();
+    assert!(!hashes.contains("src/legacy.ts"), "hash cache forgets it: {hashes}");
+
+    let again = builder.build(project_root, &BuildOptions::default());
+    assert_eq!(again.skipped, 2, "legacy.ts (not UTF-8) and ok.ts (unchanged)");
+    assert_eq!(again.deleted, 0, "nothing left to delete");
+}

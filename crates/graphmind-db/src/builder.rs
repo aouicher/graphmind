@@ -224,6 +224,15 @@ impl GraphBuilder {
         self.cache.remove(file);
     }
 
+    /// `forget_file` for a file an earlier build stored; true when there was something to remove.
+    fn forget_if_indexed(&mut self, file: &str, errors: &mut Vec<String>) -> bool {
+        if !self.is_indexed(file) {
+            return false;
+        }
+        self.forget_file(file, errors);
+        true
+    }
+
     pub fn build(&mut self, project_path: &str, options: &BuildOptions) -> BuildResult {
         let start = std::time::Instant::now();
         // In only_files mode, restrict to the requested files only
@@ -305,12 +314,27 @@ impl GraphBuilder {
                 eprintln!("Parsing {}/{}...", idx + 1, files.len());
             }
 
+            let rel_path = pathdiff(file.full_path.to_str().unwrap_or(""), project_path);
+
+            // A file that isn't UTF-8 is skipped and named, and, like a minified file below, loses
+            // what an earlier build stored for it. One that can't be read now (permissions) is
+            // skipped with a warning and, like an unreadable folder, keeps what the graph has.
             let content = match fs::read_to_string(&file.read_path) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    eprintln!("Skipped {}: not UTF-8", rel_path);
+                    if self.forget_if_indexed(&rel_path, &mut errors) {
+                        deleted += 1;
+                    }
+                    skipped += 1;
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("warn: cannot read {rel_path}: {e}; its records stay in the graph as they were");
+                    skipped += 1;
+                    continue;
+                }
             };
-
-            let rel_path = pathdiff(file.full_path.to_str().unwrap_or(""), project_path);
 
             // Skip minified/bundled files: avg line > 500 chars with significant size, and name
             // them. Markdown is exempt: one line per paragraph is normal prose, not a bundle. One
@@ -321,8 +345,7 @@ impl GraphBuilder {
                 let average = content.len() / line_count;
                 if average > 500 {
                     eprintln!("Skipped {}: minified (average line {} bytes)", rel_path, average);
-                    if self.is_indexed(&rel_path) {
-                        self.forget_file(&rel_path, &mut errors);
+                    if self.forget_if_indexed(&rel_path, &mut errors) {
                         deleted += 1;
                     }
                     skipped += 1;
