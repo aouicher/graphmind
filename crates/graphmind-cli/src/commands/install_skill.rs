@@ -2,7 +2,11 @@ use colored::Colorize;
 use graphmind_config::paths::home_dir;
 use std::fs;
 
+/// The main skill. It lives in `~/.claude/skills/graphmind/` (older installs, uninstall and the
+/// desktop look there), so `name: gm` is what makes Claude Code list it as `/gm`; a skill's name
+/// otherwise defaults to its directory name, which would make it `/graphmind`.
 const SKILL_CONTENT: &str = r#"---
+name: gm
 description: >
   Code intelligence via graphmind. Use /gm <query> for ALL code exploration:
   find symbols, trace callers, view dependencies, file outlines, impact analysis.
@@ -172,4 +176,30 @@ pub fn uninstall_skill() {
         removed,
         skills_base.display()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frontmatter(skill: &str) -> &str {
+        let body = skill.strip_prefix("---\n").expect("frontmatter");
+        &body[..body.find("\n---\n").expect("closing ---")]
+    }
+
+    /// Claude Code takes a skill's name from `name:`, else from its directory (`graphmind`), so
+    /// without it `/gm` doesn't exist even though every message tells people to use it.
+    #[test]
+    fn main_skill_is_named_gm() {
+        assert!(frontmatter(SKILL_CONTENT).lines().any(|l| l.trim() == "name: gm"));
+    }
+
+    /// Sub-skills are invoked by their directory name (`/gm-fn`), which is what their text says.
+    #[test]
+    fn sub_skills_are_invoked_by_their_directory_name() {
+        for (dir, content) in SUB_SKILLS {
+            assert!(dir.starts_with("gm-"), "{dir}");
+            assert!(content.contains(&format!("/{dir}")), "{dir} doesn't mention /{dir}");
+        }
+    }
 }

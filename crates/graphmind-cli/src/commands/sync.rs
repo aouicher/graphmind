@@ -117,7 +117,7 @@ To **read** a symbol's source code, use `/gm-fn <symbol>` — it returns full so
 
 Only fall back to grep for: string literals, config values, env vars, non-code patterns.
 
-Invoke: `Skill(skill: "graphmind", args: "<your query>")`
+Invoke: `Skill(skill: "gm", args: "<your query>")`
 
 **Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory **during** and after every session, without waiting for the user to ask. Save immediately when something is decided or discovered — do not wait for the end of the session.
 

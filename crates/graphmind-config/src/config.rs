@@ -54,7 +54,10 @@ pub struct LicenseConfig {
 /// v5 — the Claude Code MCP server is registered at user scope (~/.claude.json) only: setup
 /// removes the old entries from ~/.claude/settings.json and the per-project
 /// `projects.*.mcpServers.graphmind` entries once the user-scope entry is in place.
-pub const SETUP_VERSION: u32 = 5;
+///
+/// v6 — the main skill is named `gm` (`name: gm`), so `/gm` exists; it was listed as `/graphmind`
+/// after its directory. Setup rewrites the skill and the CLAUDE.md block (`Skill(skill: "gm")`).
+pub const SETUP_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {
