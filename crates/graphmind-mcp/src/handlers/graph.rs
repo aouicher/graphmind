@@ -3,6 +3,7 @@ use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use serde_json::{json, Value};
 
+use super::file_page::{page, PageRequest, MAX_FILE_BYTES};
 use crate::formatting::{err_text, json_text, text_content};
 use crate::graph_helpers::{
     all_project_slugs, compact_edges, qualify_definitions, query_symbol_filtered,
@@ -193,6 +194,10 @@ pub(crate) fn handle_file(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: file"),
     };
+    let request = match PageRequest::from_args(args) {
+        Ok(r) => r,
+        Err(e) => return err_text(&e),
+    };
     with_graph(args, |gq, proj| {
         let path = match indexed_project_file(std::path::Path::new(&proj.path), file, |p| gq.is_indexed_file(p)) {
             Ok(path) => path,
@@ -203,13 +208,29 @@ pub(crate) fn handle_file(args: &Value) -> Value {
                 return err_text(&format!("{e}{hint}"));
             }
         };
-        match std::fs::read_to_string(&path) {
-            Ok(content) => text_content(&format!(
-                "# {file} [{slug}]\n\n```\n{content}\n```",
-                slug = proj.slug
-            )),
-            Err(e) => err_text(&format!("Cannot read {file}: {e}")),
-        }
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => return err_text(&format!("Cannot read {file}: {e}")),
+        };
+        let page = match page(&content, &request, MAX_FILE_BYTES) {
+            Ok(p) => p,
+            Err(e) => return err_text(&format!("{file}: {e}")),
+        };
+        let note = page.next.map_or_else(String::new, |(line, column)| {
+            let (cut, resume) = match column {
+                1 => (String::new(), format!("offset={line}")),
+                _ => (format!(", line {line} up to column {}", column - 1), format!("offset={line} and column={column}")),
+            };
+            format!(
+                "\n\n[graphmind: showing lines {}-{} of {}{cut}; call gm_file again with {resume} to continue]",
+                page.first, page.last, page.total
+            )
+        });
+        text_content(&format!(
+            "# {file} [{slug}]\n\n```\n{text}\n```{note}",
+            text = page.text,
+            slug = proj.slug
+        ))
     })
 }
 

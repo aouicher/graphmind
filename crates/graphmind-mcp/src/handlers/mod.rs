@@ -5,6 +5,7 @@ pub(crate) mod cross;
 pub(crate) mod search;
 pub(crate) mod analysis;
 pub(crate) mod export;
+mod file_page;
 
 use crate::formatting::err_text;
 use serde_json::Value;

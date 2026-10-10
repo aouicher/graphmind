@@ -28,7 +28,7 @@ pub(crate) fn truncate_response(v: &Value) -> Value {
         Some(o) => o,
         None => {
             let s = serde_json::to_string_pretty(v).unwrap_or_default();
-            let truncated = &s[..s.len().min(MAX_RESPONSE_BYTES)];
+            let truncated = &s[..floor_char_boundary(&s, MAX_RESPONSE_BYTES)];
             return text_content(&format!("{truncated}\n\n⚠ Response truncated. Use limit/offset parameters to paginate."));
         }
     };
@@ -58,11 +58,22 @@ pub(crate) fn truncate_response(v: &Value) -> Value {
     let result = Value::Object(shrunk);
     let pretty = serde_json::to_string_pretty(&result).unwrap_or_default();
     if pretty.len() > MAX_RESPONSE_BYTES {
-        let truncated = &pretty[..MAX_RESPONSE_BYTES];
+        let truncated = &pretty[..floor_char_boundary(&pretty, MAX_RESPONSE_BYTES)];
         text_content(&format!("{truncated}\n\n⚠ Response truncated. Use limit/offset parameters to paginate."))
     } else {
         text_content(&pretty)
     }
+}
+
+/// The largest char boundary of `s` at or below `index` (capped at `s.len()`), so slicing there
+/// can't panic inside a multi-byte character. Hand-rolled `str::floor_char_boundary`, which needs
+/// Rust 1.91.
+pub(crate) fn floor_char_boundary(s: &str, index: usize) -> usize {
+    let mut end = index.min(s.len());
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
 }
 
 pub(crate) fn err_text(msg: &str) -> Value {
@@ -95,5 +106,29 @@ pub(crate) fn compact_edge_line(e: &Value) -> String {
         format!("  {name} [{kind}] {file}:{line}")
     } else {
         format!("  {name} [{kind}] {file}:{line}\n    ({sig})")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(v: &Value) -> &str {
+        v["content"][0]["text"].as_str().unwrap()
+    }
+
+    #[test]
+    fn truncate_response_cuts_on_a_char_boundary() {
+        // Pretty JSON of a string starts with `"`, so every 2-byte `é` starts on an odd byte and
+        // MAX_RESPONSE_BYTES (even) falls inside one.
+        let long = "é".repeat(MAX_RESPONSE_BYTES);
+        let out = truncate_response(&json!(long));
+        assert!(text(&out).starts_with('"'));
+        assert!(text(&out).contains("Response truncated"));
+
+        // An object whose only field is a huge string isn't shrunk, so it's hard-cut too.
+        let out = truncate_response(&json!({ "a": long }));
+        assert!(text(&out).contains("Response truncated"));
+        assert!(text(&out).len() < MAX_RESPONSE_BYTES + 100);
     }
 }

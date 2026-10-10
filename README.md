@@ -642,7 +642,7 @@ graphmind exposes 27 tools via MCP (Model Context Protocol):
 | `gm_search` | Hybrid search (FTS + semantic + graph) |
 | `gm_listeners` | Find event listeners by event name |
 | `gm_outline` | Hierarchical file structure with qualified names |
-| `gm_file` | Raw source content of a file |
+| `gm_file` | Raw source content of a file, in pages of about 10k tokens (`offset`/`limit` for line ranges) |
 | `gm_who_calls_chain` | Transitive caller chain (BFS) |
 | `gm_dead_code` | Find symbols with no incoming edges |
 | `gm_export` | Export subgraph as Mermaid/DOT |
