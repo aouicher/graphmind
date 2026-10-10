@@ -383,3 +383,16 @@ fn git_hook_environment_does_not_leak_into_other_projects() {
         "another project's identity must come from its own repo"
     );
 }
+
+#[test]
+fn clean_stale_keeps_projects_registered_below_a_checkout_root() {
+    let env = CliTestEnv::new();
+    let repo = init_repo(&env, "mono");
+    let api = repo.join("packages/api");
+    std::fs::create_dir_all(&api).unwrap();
+    env.run_ok(&["register", api.to_str().unwrap(), "--slug", "api"]);
+
+    let out = env.run_ok(&["clean", "--stale"]);
+    assert!(!out.contains("Pruned"), "a monorepo package is not a removed worktree: {out}");
+    assert!(env.run_ok(&["list"]).contains("api"));
+}

@@ -435,6 +435,15 @@ impl Registry {
     /// `None` when `dir` isn't in a git repo or no registered project matches.
     pub fn link_worktree(dir: &Path) -> Option<ProjectConfig> {
         let repo_id = git_identity::repo_id(dir)?;
+        // Lock-free early exit for the common case — a repo graphmind doesn't know —
+        // since hooks run this on every tool call there.
+        let known = load_config().projects.values().any(|p| {
+            p.repo_id.as_deref() == Some(repo_id.as_str())
+                || (p.repo_id.is_none() && Path::new(&p.path).is_dir())
+        });
+        if !known {
+            return None;
+        }
         let root = git_identity::work_tree(dir)?.root;
         let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
 
@@ -459,8 +468,10 @@ impl Registry {
             };
             config.projects.insert(slug.clone(), project.clone());
             // Locked before the registration is visible to other processes, so a
-            // build they start waits for the seed below instead of racing it.
-            let lock = crate::seed::lock_build(&slug);
+            // build they start waits for the seed below instead of racing it. Never
+            // waited for while holding the config lock (a build takes them in the
+            // other order): if it is taken, there is no seed, just a full build.
+            let lock = crate::seed::try_lock_build(&slug);
 
             let gone: Vec<String> = config
                 .projects
@@ -478,7 +489,9 @@ impl Registry {
             fs::remove_dir_all(paths::graph_dir(&slug)).ok();
         }
         let (project, sibling, lock) = linked?;
-        crate::seed::seed_graph(&project.slug, &sibling);
+        if lock.is_some() {
+            crate::seed::seed_graph(&project.slug, &sibling);
+        }
         drop(lock);
         crate::seed::worktree_linked(&project);
         Some(project)
@@ -537,8 +550,7 @@ impl Registry {
             .max_by_key(|p| p.path.len())?;
         if best.path != abs_path {
             if let Some(wt) = git_identity::work_tree(Path::new(&abs_path)) {
-                let root = wt.root.to_string_lossy();
-                if wt.linked && root.starts_with(&format!("{}/", best.path)) {
+                if wt.linked && wt.root != Path::new(&best.path) && wt.root.starts_with(&best.path) {
                     return None;
                 }
             }

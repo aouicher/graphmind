@@ -37,6 +37,14 @@ pub fn lock_build(slug: &str) -> Option<File> {
     Some(file)
 }
 
+/// [`lock_build`] without waiting: `None` while another process builds `slug`.
+pub fn try_lock_build(slug: &str) -> Option<File> {
+    use fs4::FileExt;
+    let file = open_build_lock(slug)?;
+    FileExt::try_lock(&file).ok()?;
+    Some(file)
+}
+
 /// Copies `src`'s graph, build cache and embeddings to `dst`, which must have no graph
 /// yet. The caller holds `dst`'s build lock. Skipped (returns false) when `src` has no
 /// graph or is being built right now — a graph caught mid-build would not match its

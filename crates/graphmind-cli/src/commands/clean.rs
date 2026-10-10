@@ -61,9 +61,11 @@ pub fn clean_stale() {
                     .find_map(|sibling| git_identity::list_worktrees(Path::new(&sibling.path)))
             });
             match known_worktrees {
+                // Alive while some checkout contains it: a project can be
+                // registered below a checkout's root (a monorepo package).
                 Some(worktrees) => {
                     let this_path = Path::new(&p.path).canonicalize().unwrap_or_else(|_| Path::new(&p.path).to_path_buf());
-                    !worktrees.contains(&this_path)
+                    !worktrees.iter().any(|w| this_path.starts_with(w))
                 }
                 None => false,
             }
