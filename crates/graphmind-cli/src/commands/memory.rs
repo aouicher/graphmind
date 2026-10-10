@@ -2,7 +2,9 @@ use graphmind_config::{paths, resolve_project_slug, Registry};
 use colored::Colorize;
 use graphmind_memory::consolidate::{self, Policy, Report};
 use graphmind_memory::search::search as memory_search;
-use graphmind_memory::store::{AddOptions, MemoryError, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
+use graphmind_memory::store::{
+    AddOptions, MemoryError, MemorySource, MemoryStore, MemoryType, MemoryUpdate, default_ttl_for_type,
+};
 
 fn get_store() -> MemoryStore {
     MemoryStore::new(&paths::memory_dir())
@@ -154,23 +156,51 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
     }
 }
 
-/// `graphmind memory update <id>` — edit an entry in place.
-pub fn update(
-    id: &str,
-    slug: Option<&str>,
+/// The flags of `graphmind memory update` that change the entry.
+#[derive(clap::Args)]
+pub struct UpdateFlags {
+    /// New text
+    #[arg(long)]
     content: Option<String>,
+    /// Replace the tags (to remove them all, use --clear-tags)
+    #[arg(long, num_args = 1..)]
     tags: Option<Vec<String>>,
-    entry_type: Option<&str>,
-    priority: Option<bool>,
-) {
+    /// Remove all tags
+    #[arg(long, conflicts_with = "tags")]
+    clear_tags: bool,
+    /// New type: decision, pattern, convention, bug, context, session
+    #[arg(long)]
+    r#type: Option<String>,
+    /// Make it a priority entry
+    #[arg(long, conflicts_with = "no_priority")]
+    priority: bool,
+    /// Make it a normal entry
+    #[arg(long)]
+    no_priority: bool,
+}
+
+impl UpdateFlags {
+    /// The patch these flags describe; unset flags leave their field alone. Exits on an unknown
+    /// `--type`.
+    fn into_update(self) -> MemoryUpdate {
+        MemoryUpdate {
+            content: self.content,
+            tags: if self.clear_tags { Some(Vec::new()) } else { self.tags },
+            entry_type: self.r#type.as_deref().map(parse_memory_type),
+            priority: match (self.priority, self.no_priority) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// `graphmind memory update <id>` — edit an entry in place.
+pub fn update(id: &str, slug: Option<&str>, flags: UpdateFlags) {
     let store = get_store();
     let project = resolve_memory_project(slug);
-    let changes = graphmind_memory::store::MemoryUpdate {
-        content,
-        tags,
-        entry_type: entry_type.map(parse_memory_type),
-        priority,
-    };
+    let changes = flags.into_update();
     let content_changed = changes.content.is_some();
     match store.update(id, project.as_deref(), changes) {
         Ok(e) => {
@@ -180,7 +210,10 @@ pub fn update(
             println!("{} Memory updated: {}", "OK".green().bold(), e.id.dimmed());
         }
         Err(MemoryError::NothingToChange) => {
-            eprintln!("{} Nothing to change: pass --content, --tags, --type or --priority/--no-priority", "Error:".red().bold());
+            eprintln!(
+                "{} Nothing to change: pass --content, --tags, --clear-tags, --type or --priority/--no-priority",
+                "Error:".red().bold()
+            );
             std::process::exit(1);
         }
         Err(e) => {
@@ -229,11 +262,7 @@ pub fn show(id: &str, slug: Option<&str>) {
 /// Re-embed an edited entry when an embedding engine is configured, so semantic search ranks it by
 /// its new text (best-effort, like the MCP tools).
 fn reindex(id: &str, text: &str) {
-    let config = graphmind_config::load_config();
-    if config.embedding.mode == graphmind_config::EmbeddingMode::Disabled {
-        return;
-    }
-    if let Ok(engine) = graphmind_embeddings::factory::create_engine(&config.embedding) {
+    if let Some(engine) = graphmind_embeddings::factory::engine_from_config(&graphmind_config::load_config().embedding) {
         graphmind_embeddings::search::reindex_memory(&paths::memory_embedding_db_path(), engine.as_ref(), id, text);
     }
 }

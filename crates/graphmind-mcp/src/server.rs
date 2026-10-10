@@ -119,7 +119,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "id": { "type": "string", "description": "Entry id, or its 8-character prefix as shown in search results" },
                 "content": { "type": "string", "description": "New text (optional)" },
-                "tags": { "type": "array", "items": { "type": "string" }, "description": "Replace the tags (optional)" },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Replace the tags; [] removes them all (optional)" },
                 "type": { "type": "string", "description": "New type: decision, pattern, convention, bug, context, session (optional)" },
                 "priority": { "type": "boolean", "description": "Set or clear always-inject (optional)" },
                 "project": { "type": "string", "description": "Project slug (optional)" }

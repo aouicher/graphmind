@@ -100,11 +100,7 @@ pub(crate) fn fuse_fts_and_semantic(
 }
 
 pub(crate) fn load_embed_engine() -> Option<Box<dyn graphmind_embeddings::engine::EmbeddingEngine>> {
-    let config = graphmind_config::config::load_config();
-    if config.embedding.mode == graphmind_config::config::EmbeddingMode::Disabled {
-        return None;
-    }
-    graphmind_embeddings::factory::create_engine(&config.embedding).ok()
+    graphmind_embeddings::factory::engine_from_config(&graphmind_config::config::load_config().embedding)
 }
 
 #[cfg(test)]

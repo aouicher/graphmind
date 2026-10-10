@@ -89,21 +89,21 @@ pub fn semantic_search_memory(
     semantic_search(db_path, query, embed_fn, limit, Some("memory"))
 }
 
-/// Store the vector of memory entry `id` for `text`, replacing any previous one. Embeds first: a
-/// failed embed leaves the old row (stale, but search ignores rows whose text no longer matches
-/// the entry) rather than none. Returns whether the row was written.
+/// Store the vector of memory entry `id` for `text`, replacing any previous one. Embeds first,
+/// then swaps the row in one transaction: a failed embed or write leaves the old row (stale, but
+/// search ignores rows whose text no longer matches the entry) rather than none. Returns whether
+/// the row was written.
 pub fn reindex_memory(db_path: &Path, engine: &dyn EmbeddingEngine, id: &str, text: &str) -> bool {
     let Ok(vector) = engine.embed(text) else { return false };
     let Ok(store) = EmbeddingStore::open(db_path) else { return false };
-    let _ = store.delete_by_symbol(id);
     store
-        .insert_batch(&[NewEmbeddingRow {
+        .replace_symbol(&NewEmbeddingRow {
             symbol_name: id.to_string(),
             symbol_kind: "memory".to_string(),
             file: String::new(),
             text: text.to_string(),
             embedding: float32_to_bytes(&vector),
-        }])
+        })
         .is_ok()
 }
 
@@ -206,5 +206,22 @@ mod reindex_memory_tests {
         assert_eq!(memory_texts(&db), ["new wording"]);
         assert!(!reindex_memory(&db, &Fake(false), "id-1", "newer wording"));
         assert_eq!(memory_texts(&db), ["new wording"], "a failed embed must not drop the vector");
+    }
+
+    /// The old row is deleted and the new one inserted together: a failed insert keeps the old row.
+    #[test]
+    fn failed_write_keeps_old_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("memory.db");
+        assert!(reindex_memory(&db, &Fake(true), "id-1", "old wording"));
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER refuse BEFORE INSERT ON embeddings WHEN NEW.text = 'unwritable'
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .unwrap();
+        assert!(!reindex_memory(&db, &Fake(true), "id-1", "unwritable"));
+        assert_eq!(memory_texts(&db), ["old wording"], "a failed insert must not drop the vector");
     }
 }

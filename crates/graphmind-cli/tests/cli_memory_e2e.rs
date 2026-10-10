@@ -175,3 +175,38 @@ fn memory_search_max_chars_keeps_tags() {
     assert!(line.contains("(cut;"), "text cut: {line}");
     assert!(line.contains("terraform, staging"), "tags on the entry's line: {out}");
 }
+
+/// The global entry whose content is `content`, as stored.
+fn global_entry(env: &CliTestEnv, content: &str) -> serde_json::Value {
+    let file = env.home.path().join(".graphmind").join("memory").join("global.jsonl");
+    std::fs::read_to_string(&file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|v| v["content"].as_str() == Some(content))
+        .unwrap_or_else(|| panic!("no global entry {content:?}"))
+}
+
+/// `--tags` replaces the tags and `--clear-tags` removes them (MCP does the same with `tags: []`);
+/// `--priority`/`--no-priority` pin and unpin.
+#[test]
+fn memory_update_tags_and_priority_flags() {
+    let env = CliTestEnv::new();
+    let content = "update flags fact";
+    env.run_ok(&["memory", "add", content, "--global", "--tags", "old1", "old2"]);
+    let id = global_entry(&env, content)["id"].as_str().unwrap().to_string();
+
+    env.run_ok(&["memory", "update", &id, "--tags", "new1", "new2"]);
+    assert_eq!(global_entry(&env, content)["tags"], serde_json::json!(["new1", "new2"]));
+
+    env.run_ok(&["memory", "update", &id, "--clear-tags"]);
+    assert_eq!(global_entry(&env, content)["tags"], serde_json::json!([]));
+
+    let both = env.run(&["memory", "update", &id, "--tags", "x", "--clear-tags"]);
+    assert!(!both.status.success(), "--tags and --clear-tags conflict");
+
+    env.run_ok(&["memory", "update", &id, "--priority"]);
+    assert_eq!(global_entry(&env, content)["priority"], serde_json::json!(true));
+    env.run_ok(&["memory", "update", &id, "--no-priority"]);
+    assert_eq!(global_entry(&env, content)["priority"], serde_json::json!(false));
+}

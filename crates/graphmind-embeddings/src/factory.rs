@@ -9,6 +9,16 @@ pub fn create_engine(config: &EmbeddingConfig) -> Result<Box<dyn EmbeddingEngine
     })
 }
 
+/// The engine `config` describes, or `None` when embeddings are disabled or the engine can't be
+/// built (a missing API key, say). For callers where semantic search is optional and FTS is the
+/// fallback: the MCP tools and the CLI's memory re-indexing.
+pub fn engine_from_config(config: &EmbeddingConfig) -> Option<Box<dyn EmbeddingEngine>> {
+    if config.mode == EmbeddingMode::Disabled {
+        return None;
+    }
+    create_engine(config).ok()
+}
+
 /// Adds `embedding.query_prefix` in front of search queries; documents pass through unchanged.
 struct QueryPrefixed {
     inner: Box<dyn EmbeddingEngine>,
@@ -114,6 +124,23 @@ mod timeout_tests {
     fn explicit_setting_wins() {
         assert_eq!(request_timeout(Some(90), Some("http://127.0.0.1:11434/v1")), Duration::from_secs(90));
         assert_eq!(request_timeout(Some(0), None), Duration::from_secs(1));
+    }
+}
+
+#[cfg(test)]
+mod engine_from_config_tests {
+    use super::engine_from_config;
+    use graphmind_config::config::{EmbeddingConfig, EmbeddingMode};
+
+    #[test]
+    fn none_when_disabled_or_unbuildable() {
+        assert!(engine_from_config(&EmbeddingConfig::default()).is_none(), "disabled by default");
+        let no_key = EmbeddingConfig { mode: EmbeddingMode::Openai, ..Default::default() };
+        assert!(engine_from_config(&no_key).is_none(), "no API key");
+        let mut configured = no_key.clone();
+        configured.api_keys.openai = Some("key".into());
+        let engine = engine_from_config(&configured).expect("configured engine");
+        assert_eq!(engine.provider_name(), "openai");
     }
 }
 

@@ -855,3 +855,162 @@ fn gm_status_with_explicit_project_still_resolves_correctly() {
         ctx.slug
     );
 }
+
+// ---------------------------------------------------------------------------
+// Group 8: gm_memory_update, stale vectors, batch type checks
+// ---------------------------------------------------------------------------
+
+/// Saves `content` with gm_memory_add and returns the new entry's id.
+fn add_memory(ctx: &TestCtx, content: &str) -> String {
+    let resp = ctx.dispatch("gm_memory_add", json!({ "content": content, "type": "context" }));
+    assert!(!ctx.is_error(&resp), "add failed: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    text.split("(id: ").nth(1).and_then(|rest| rest.split(',').next()).expect("id in response").to_string()
+}
+
+fn memory_list(ctx: &TestCtx) -> String {
+    let resp = ctx.dispatch("gm_memory_list", json!({}));
+    assert!(!ctx.is_error(&resp), "list failed: {}", ctx.text(&resp));
+    ctx.text(&resp)
+}
+
+#[test]
+fn gm_memory_update_changes_content_in_place() {
+    let ctx = setup();
+    let id = add_memory(&ctx, "deploys run from the main branch");
+    let resp = ctx.dispatch("gm_memory_update", json!({ "id": &id[..8], "content": "deploys run from release tags" }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    assert!(ctx.text(&resp).contains(&id), "reports the full id: {}", ctx.text(&resp));
+    let list = memory_list(&ctx);
+    assert!(list.contains(&format!("deploys run from release tags (id: {id})")), "same id, new text: {list}");
+    assert!(!list.contains("main branch"), "old text gone: {list}");
+}
+
+#[test]
+fn gm_memory_update_rejects_empty_patch() {
+    let ctx = setup();
+    let id = add_memory(&ctx, "an entry nobody edits");
+    let resp = ctx.dispatch("gm_memory_update", json!({ "id": id }));
+    assert!(ctx.is_error(&resp), "an update with no fields must fail: {}", ctx.text(&resp));
+    assert!(ctx.text(&resp).contains("nothing to change"), "{}", ctx.text(&resp));
+}
+
+#[test]
+fn gm_memory_update_unknown_id_is_an_error() {
+    let ctx = setup();
+    add_memory(&ctx, "some other entry");
+    let resp = ctx.dispatch("gm_memory_update", json!({ "id": "ffffffff", "content": "x" }));
+    assert!(ctx.is_error(&resp), "unknown id must fail: {}", ctx.text(&resp));
+    assert!(ctx.text(&resp).contains("no memory entry with that id"), "{}", ctx.text(&resp));
+    assert!(!memory_list(&ctx).contains("[context] x "), "nothing written");
+}
+
+#[test]
+fn gm_memory_update_rejects_unknown_type() {
+    let ctx = setup();
+    let id = add_memory(&ctx, "type stays context");
+    let resp = ctx.dispatch("gm_memory_update", json!({ "id": id, "type": "decisions", "content": "changed" }));
+    assert!(ctx.is_error(&resp), "unknown type must fail: {}", ctx.text(&resp));
+    assert!(ctx.text(&resp).contains("decision, pattern, convention"), "lists the valid types: {}", ctx.text(&resp));
+    let list = memory_list(&ctx);
+    assert!(list.contains("[context] type stays context"), "entry unchanged: {list}");
+}
+
+#[test]
+fn gm_session_analyze_bad_type_saves_nothing() {
+    let ctx = setup();
+    let resp = ctx.dispatch(
+        "gm_session_analyze",
+        json!({
+            "facts": [
+                { "content": "a valid fact listed before the typo", "type": "decision" },
+                { "content": "a fact with a typo'd type", "type": "decisions" }
+            ]
+        }),
+    );
+    assert!(ctx.is_error(&resp), "a bad type must fail the batch: {}", ctx.text(&resp));
+    assert!(ctx.text(&resp).contains("decision, pattern, convention"), "lists the valid types: {}", ctx.text(&resp));
+    let list = memory_list(&ctx);
+    assert!(!list.contains("valid fact listed before"), "nothing saved, not even the valid fact: {list}");
+}
+
+/// Serves an OpenAI-compatible `/embeddings` endpoint on localhost that embeds every input as
+/// `[1, 0]`, so every stored vector matches every query equally. Returns the base URL.
+fn fake_embedding_server() -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream);
+            let mut length = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            if reader.read_exact(&mut body).is_err() {
+                continue;
+            }
+            let inputs = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|v| v["input"].as_array().map(|a| a.len()))
+                .unwrap_or(1);
+            let data: Vec<Value> = (0..inputs).map(|i| json!({ "index": i, "embedding": [1.0, 0.0] })).collect();
+            let payload = json!({ "data": data }).to_string();
+            let mut stream = reader.into_inner();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            );
+        }
+    });
+    url
+}
+
+/// A semantic hit whose stored text no longer matches the entry's content (the entry was edited
+/// without re-indexing) is dropped, so the old wording can't rank the entry.
+#[test]
+fn gm_memory_search_ignores_stale_vectors() {
+    let ctx = setup();
+    let config_path = ctx._dir.path().join(".graphmind").join("config.json");
+    let mut config: Value = serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["embedding"] = json!({
+        "mode": "openai",
+        "openai_base_url": fake_embedding_server(),
+        "api_keys": { "openai": "test-key" }
+    });
+    std::fs::write(&config_path, config.to_string()).unwrap();
+
+    // Both entries get a vector through gm_memory_add; then the second one's row is rewritten
+    // with text the entry no longer has, as an edit made without re-indexing would leave it.
+    add_memory(&ctx, "fresh entry about caching");
+    let stale = add_memory(&ctx, "stale entry about retries");
+    let db = ctx._dir.path().join(".graphmind").join("memory").join("memory_embeddings.db");
+    let store = graphmind_embeddings::store::EmbeddingStore::open(&db).unwrap();
+    assert_eq!(store.all().unwrap().len(), 2, "both entries were embedded");
+    store
+        .replace_symbol(&graphmind_embeddings::store::NewEmbeddingRow {
+            symbol_name: stale,
+            symbol_kind: "memory".into(),
+            file: String::new(),
+            text: "the wording before an edit".into(),
+            embedding: graphmind_embeddings::store::float32_to_bytes(&[1.0, 0.0]),
+        })
+        .unwrap();
+
+    // Matches no entry's words, so anything returned came from semantic search.
+    let resp = ctx.dispatch("gm_memory_search", json!({ "query": "zqxv" }));
+    assert!(!ctx.is_error(&resp), "unexpected error: {}", ctx.text(&resp));
+    let text = ctx.text(&resp);
+    assert!(text.contains("fresh entry about caching"), "a current vector still matches: {text}");
+    assert!(!text.contains("stale entry about retries"), "a stale vector is ignored: {text}");
+}

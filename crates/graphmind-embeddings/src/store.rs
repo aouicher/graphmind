@@ -108,6 +108,18 @@ impl EmbeddingStore {
         tx.commit()
     }
 
+    /// Replace every row of `row.symbol_name` with `row` in one transaction, so a failed insert
+    /// leaves the previous rows in place and readers never see the symbol without a vector.
+    pub fn replace_symbol(&self, row: &NewEmbeddingRow) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM embeddings WHERE symbol_name = ?1", params![row.symbol_name])?;
+        tx.execute(
+            "INSERT INTO embeddings (symbol_name, symbol_kind, file, text, embedding) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![row.symbol_name, row.symbol_kind, row.file, row.text, row.embedding],
+        )?;
+        tx.commit()
+    }
+
     pub fn delete_by_symbol(&self, symbol_name: &str) -> rusqlite::Result<usize> {
         self.conn.execute("DELETE FROM embeddings WHERE symbol_name = ?1", params![symbol_name])
     }
