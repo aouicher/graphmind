@@ -259,52 +259,48 @@ graphmind install hook-git
 
 ## Git Worktrees & Branches
 
-graphmind is worktree-aware. Each git worktree of a repo gets its own code
-graph (the code on disk genuinely differs per worktree), while memory
-(decisions, patterns, conventions, bugs) is shared across all of a repo's
-worktrees — a decision recorded from one worktree is repo-wide knowledge,
-not tied to a specific checkout.
+graphmind is worktree-aware. Each checkout of a repo gets its own code graph,
+so answers always describe the branch you are on, while memory (decisions,
+conventions, bugs) is shared by all of them: it is repo-wide knowledge.
 
-- **Auto-link**: run any `graphmind` command (or an MCP tool call) from an
-  unregistered worktree of an already-known repo, and it links to that
-  repo's identity automatically — no manual `graphmind init` required.
-  Identity is proven by `git rev-parse --git-common-dir`, never guessed.
-- **Shared memory**: `graphmind memory add`/`search`/`gm_memory_add` write
-  to and read from one file per repo (keyed by a stable `repo_id`), not
-  one file per worktree. If two worktrees already have separate legacy
-  memory files (from before this existed), graphmind prints a notice
-  pointing at `graphmind memory merge <repo_id>` rather than silently
-  merging them.
-- **Reindex on branch switch**: `graphmind install hook-git` also installs
-  a `post-checkout` hook that incrementally rebuilds only the changed
-  files after `git checkout` switches branches — no stale graph, no
-  manual rebuild.
-- **No silent wrong answers**: if a command or MCP tool call can't resolve
-  a project — cwd isn't registered, isn't a worktree of any known repo,
-  and no `project`/`--slug` was given — it fails with an explicit error.
-  It never falls back to "the only registered project" or an arbitrary
-  pick when several are registered (e.g. one per active worktree).
-- **Cleanup**: nothing detects a removed worktree automatically. Run
-  `graphmind clean --stale` after `git worktree remove` (or after
-  deleting a worktree directory by hand) to unregister it and remove its
-  orphaned graph.
+- **Zero setup for new worktrees**: `git worktree add` (or `claude --worktree`,
+  or any graphmind command / MCP call made from a new checkout) registers the
+  worktree on the spot. Identity is proven by git (`--git-common-dir`), never
+  guessed from names.
+- **Nested worktrees**: checkouts inside the main one — Claude Code's
+  `.claude/worktrees/<name>` — resolve to themselves, never to the main
+  checkout's graph.
+- **Fast first build**: a new worktree's graph is copied from the main
+  checkout's, then updated incrementally in the background. Only the files
+  that differ between the two checkouts get parsed.
+- **Shared memory**: a worktree uses its main project's memory file
+  (`graphmind list` shows `worktree of <slug>`).
+- **Reindex on git activity**: the git hooks (`graphmind install hook-git`,
+  run by `graphmind init`) rebuild after commit, merge, rebase and branch
+  switch. Hooks live in the repo's git dir, so every worktree gets them.
+  Repos using husky or a shared `core.hooksPath` are not modified; graphmind
+  prints the lines to add.
+- **No silent wrong answers**: from a git repo that is neither registered nor
+  a worktree of a registered repo, commands fail with an explicit error
+  instead of answering from another project. Outside any git repo, a single
+  registered project is still used as before.
+- **Cleanup**: worktrees that were registered automatically are forgotten
+  once their directory is gone. `graphmind clean --stale` prunes the rest.
 
-### Multiple agents, multiple worktrees
+### Agents switching worktrees mid-session
 
-Running several coding agents in parallel, each in its own `git worktree`
-of the same repo, is a supported pattern: each agent's `graphmind mcp`
-server resolves to its own worktree's graph, and any memory one agent
-saves is immediately visible to the others (same repo, shared file).
-Two caveats worth knowing:
+An MCP server answers for the checkout it was started in. When an agent moves
+into another worktree during a session, it should pass
+`project=<absolute path of that worktree>` (or its slug) to graphmind tools;
+the server instructions tell agents to do so.
 
-- Registering many worktrees at almost the same instant is safe —
-  `config.json` writes are serialized across processes via an exclusive
-  file lock — but it's still a good habit to run `graphmind clean --stale`
-  periodically to prune worktrees you've since removed.
-- Passing an explicit `project`/`--slug` to a tool call always wins and is
-  the most reliable option in a heavily multi-agent setup; omitting it
-  relies on cwd-based resolution, which works but adds one more moving
-  part.
+### Upgrading
+
+Nothing to migrate. Existing projects, graphs and memory files are used as
+they are; projects registered before worktree support are recognized on
+first use. After the upgrade, `graphmind setup` (re-run automatically when
+the binary is updated) adds the new git hooks to repos that already have
+graphmind's hooks.
 
 ## Architecture
 
@@ -426,7 +422,6 @@ graphmind memory add "<fact>" [--project <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>
-graphmind memory merge <repo_id>    # fold a legacy per-worktree memory file into the shared one
 ```
 
 Memories persist indefinitely until explicitly deleted. They are recalled automatically — you never need to ask "do you remember X?".
@@ -512,7 +507,6 @@ graphmind memory add "<fact>" [--project <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>
-graphmind memory merge <repo_id>    # fold a legacy per-worktree memory file into the shared one
 ```
 
 ### Cross-Project
