@@ -133,7 +133,8 @@ fn now_secs() -> u64 {
 /// stdout (hooks capture it). The stamp is written before spawning, so the many commands hooks
 /// run concurrently start one setup, not one each.
 pub fn auto_setup_if_outdated() {
-    let config = graphmind_config::load_config();
+    // An unreadable config.json would read as setup_version 0: not a user who is out of date.
+    let Ok(config) = graphmind_config::read_config() else { return };
     if config.setup_version >= graphmind_config::SETUP_VERSION {
         return;
     }
@@ -177,7 +178,8 @@ pub fn auto_setup_if_outdated() {
 }
 
 pub fn check_setup_version() {
-    let config = graphmind_config::load_config();
+    // "Run graphmind setup" is the wrong advice when config.json can't be read.
+    let Ok(config) = graphmind_config::read_config() else { return };
     let local = config.setup_version;
     let expected = graphmind_config::SETUP_VERSION;
     if local < expected {

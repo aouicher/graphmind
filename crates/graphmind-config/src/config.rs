@@ -225,22 +225,67 @@ pub fn ensure_dirs() {
     }
 }
 
-pub fn load_config() -> GlobalConfig {
-    let path = paths::config_path();
-    if path.exists() {
-        match fs::read_to_string(&path) {
-            Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
-            Err(_) => GlobalConfig::default(),
+/// config.json exists but can't be used.
+#[derive(Debug)]
+pub enum ConfigError {
+    Read(std::io::Error),
+    Parse(serde_json::Error),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::Read(e) => write!(f, "cannot read {}: {e}", paths::config_path().display()),
+            ConfigError::Parse(e) => write!(f, "{} is not valid JSON: {e}", paths::config_path().display()),
         }
-    } else {
-        GlobalConfig::default()
     }
+}
+
+/// A config followed by stray bytes (e.g. the tail of an interrupted concurrent write) still
+/// parses: the config itself is intact, and the next save rewrites the whole file.
+fn parse_config(raw: &str) -> serde_json::Result<GlobalConfig> {
+    serde_json::from_str(raw).or_else(|strict| {
+        serde_json::Deserializer::from_str(raw)
+            .into_iter::<GlobalConfig>()
+            .next()
+            .unwrap_or(Err(strict))
+    })
+}
+
+/// The config on disk; defaults when there is no config.json yet, or an empty one: a `touch`, or
+/// a crash during an older version's non-atomic write, which can also leave the file's length
+/// filled with NUL bytes. Either way there is nothing in it to protect.
+pub fn read_config() -> Result<GlobalConfig, ConfigError> {
+    match fs::read_to_string(paths::config_path()) {
+        Ok(raw) if raw.trim_matches(|c: char| c.is_whitespace() || c == '\0').is_empty() => {
+            Ok(GlobalConfig::default())
+        }
+        Ok(raw) => parse_config(&raw).map_err(ConfigError::Parse),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(GlobalConfig::default()),
+        Err(e) => Err(ConfigError::Read(e)),
+    }
+}
+
+/// The config, or defaults (with a warning, once per process) when config.json can't be read.
+/// For read-only use: anything that writes the config back is protected by `save_config`.
+pub fn load_config() -> GlobalConfig {
+    read_config().unwrap_or_else(|e| {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| eprintln!("Warning: {e}. Using defaults; fix or remove the file."));
+        GlobalConfig::default()
+    })
 }
 
 /// Writes `config` atomically (temp file + rename on the same filesystem),
 /// so a concurrent reader always sees either the old or the new complete
-/// file, never a truncated/corrupt one.
+/// file, never a truncated/corrupt one. Refuses while config.json exists but
+/// can't be read: `config` would then be the defaults `load_config` fell back
+/// to, and saving them would unregister every project.
 pub fn save_config(config: &GlobalConfig) {
+    if let Err(e) = read_config() {
+        eprintln!("Error: not saving the config: {e}. Fix or remove the file first.");
+        return;
+    }
     ensure_dirs();
     let json = serde_json::to_string_pretty(config).unwrap_or_default();
     let path = paths::config_path();
@@ -306,29 +351,17 @@ fn canonical(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-/// Like [`load_config`], but `None` when config.json exists and can't be read or
-/// parsed. Anything that writes the config back must use this: saving the defaults
-/// `load_config` falls back to would unregister every project.
-fn try_load_config() -> Option<GlobalConfig> {
-    let path = paths::config_path();
-    if !path.exists() {
-        return Some(GlobalConfig::default());
-    }
-    let raw = fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&raw).ok()
-}
-
 /// Read-modify-write of config.json under the cross-process lock. `f` returns its
 /// result and whether the config changed (only then is it written). `None` when
 /// the config on disk is unreadable: it is left as is.
 fn mutate_config<R>(f: impl FnOnce(&mut GlobalConfig) -> (R, bool)) -> Option<R> {
     with_config_lock(|| {
-        let Some(mut config) = try_load_config() else {
-            eprintln!(
-                "Warning: {} could not be read — not modifying it",
-                paths::config_path().display()
-            );
-            return None;
+        let mut config = match read_config() {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Error: not modifying the config: {e}. Fix or remove the file first.");
+                return None;
+            }
         };
         let (result, changed) = f(&mut config);
         if changed {
@@ -633,6 +666,10 @@ mod startup_config_tests {
     }
 }
 
+/// Serializes the tests that point HOME at a temp dir: HOME is process-wide.
+#[cfg(test)]
+static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod concurrent_registration_tests {
     use super::*;
@@ -645,6 +682,7 @@ mod concurrent_registration_tests {
     /// a winning thread's — this asserts none are lost.
     #[test]
     fn concurrent_register_calls_lose_no_project() {
+        let _home = super::TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("HOME", dir.path()) };
 
@@ -683,5 +721,54 @@ mod concurrent_registration_tests {
                 "proj-{i} should be registered"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod parse_config_tests {
+    use super::*;
+
+    fn valid_json() -> String {
+        serde_json::to_string_pretty(&GlobalConfig::default()).unwrap()
+    }
+
+    #[test]
+    fn trailing_bytes_after_a_valid_config_parse() {
+        assert!(parse_config(&valid_json()).is_ok());
+        assert!(parse_config(&(valid_json() + "aw")).is_ok());
+    }
+
+    /// An empty, whitespace-only or NUL-filled config.json is like a missing one: nothing to
+    /// protect, so it reads as the defaults and must not block every save.
+    #[test]
+    fn empty_config_file_reads_as_defaults() {
+        let _home = super::TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+        ensure_dirs();
+        let defaults = serde_json::to_value(GlobalConfig::default()).unwrap();
+        for raw in ["", "  \n\t", "\0\0\0\0", "\0\0\n\0"] {
+            fs::write(paths::config_path(), raw).unwrap();
+            let config = read_config().unwrap_or_else(|e| panic!("{raw:?}: {e}"));
+            assert_eq!(serde_json::to_value(config).unwrap(), defaults, "{raw:?}");
+        }
+    }
+
+    /// NUL bytes inside a config aren't an empty file: that config is damaged, not missing.
+    #[test]
+    fn nul_bytes_after_a_config_do_not_read_as_empty() {
+        let _home = super::TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+        ensure_dirs();
+        fs::write(paths::config_path(), "\0\0{\"projects\": [").unwrap();
+        assert!(read_config().is_err());
+    }
+
+    #[test]
+    fn truncated_or_garbage_does_not_parse() {
+        let raw = valid_json();
+        assert!(parse_config(&raw[..raw.len() / 2]).is_err());
+        assert!(parse_config("not json").is_err());
     }
 }
