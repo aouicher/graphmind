@@ -102,23 +102,30 @@ const SUB_SKILLS: &[(&str, &str)] = &[
     ("gm-file", "---\ndescription: >\n  Read raw source content of an indexed file from a registered project.\n  Use when you need the full file rather than individual symbols.\nallowed-tools: Bash\n---\n\n# /gm-file — Raw file content\n\nUsage: `/gm-file <file>`\n\nRuns `graphmind file <file>` to read an indexed file (one the graph covers) by path relative to the project root.\n\n## Execution\n\nRun via Bash: `graphmind file <file>`\n"),
 ];
 
-pub fn install_skill() {
+/// Number of sub-skills `install_skill` installs next to /gm.
+pub fn sub_skill_count() -> usize {
+    SUB_SKILLS.len()
+}
+
+/// Install the /gm skill and its sub-skills in ~/.claude/skills. `Ok` when all of them were
+/// written; `Err` with the reason otherwise (the sub-skills are skipped when /gm fails).
+pub fn install_skill() -> Result<(), String> {
     let skills_base = home_dir()
         .join(".claude")
         .join("skills");
 
-    // Main skill
+    // Main skill. Written atomically: Claude Code reads skills while it runs.
     let skill_dir = skills_base.join("graphmind");
-    fs::create_dir_all(&skill_dir).unwrap_or_else(|e| {
+    if let Err(e) = fs::create_dir_all(&skill_dir) {
         eprintln!("{} Failed to create skill directory: {}", "Error:".red().bold(), e);
-        std::process::exit(1);
-    });
+        return Err(format!("can't create {} ({e})", skill_dir.display()));
+    }
 
     let skill_path = skill_dir.join("SKILL.md");
-    fs::write(&skill_path, SKILL_CONTENT).unwrap_or_else(|e| {
+    if let Err(e) = graphmind_config::write_atomic(&skill_path, SKILL_CONTENT.as_bytes()) {
         eprintln!("{} Failed to write SKILL.md: {}", "Error:".red().bold(), e);
-        std::process::exit(1);
-    });
+        return Err(format!("can't write {} ({e})", skill_path.display()));
+    }
 
     // Sub-skills
     let mut installed = 0;
@@ -126,7 +133,7 @@ pub fn install_skill() {
     for (name, content) in SUB_SKILLS {
         let dir = skills_base.join(name);
         fs::create_dir_all(&dir).ok();
-        match fs::write(dir.join("SKILL.md"), content) {
+        match graphmind_config::write_atomic(&dir.join("SKILL.md"), content.as_bytes()) {
             Ok(_) => installed += 1,
             Err(e) => failed.push(format!("{name}: {e}")),
         }
@@ -139,11 +146,13 @@ pub fn install_skill() {
         skills_base.display()
     );
 
-    if !failed.is_empty() {
-        for f in &failed {
-            eprintln!("    {} {}", "✗".red(), f);
-        }
+    if failed.is_empty() {
+        return Ok(());
     }
+    for f in &failed {
+        eprintln!("    {} {}", "✗".red(), f);
+    }
+    Err(format!("{} of {} sub-skills not written", failed.len(), SUB_SKILLS.len()))
 }
 
 /// Remove the /gm skill and all sub-skills installed by `install_skill()`.

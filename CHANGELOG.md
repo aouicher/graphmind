@@ -21,6 +21,8 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 - **A build fails when the project directory can't be read.** It used to report 0 files and empty the graph; the graph is now left as it was and `graphmind build` exits non-zero.
 - **Memory tools only accept registered projects.** `project` must be a registered slug or the path of a registered checkout or worktree; anything else returns an error listing the registered projects. Memory files are only ever created in `~/.graphmind/memory`.
 - **`graphmind file` only shows indexed files of the project.**
+- **Setup reports what it did, and leaves a broken `settings.json` alone.** The summary said the hooks and skills were installed even when they weren't; it now reports what happened, and a hook or skill that can't be written no longer stops setup halfway. A `~/.claude/settings.json` that can't be read is no longer replaced by one holding only graphmind's hooks: it is left as is and the summary says so (a missing or empty one is still created). `graphmind install hook-claude` and `graphmind install skill` exit with an error when they couldn't finish. Thanks @KennethWKZ.
+- **`CLAUDE_CONFIG_DIR` reaches the desktop app.** Apps started from the Finder don't inherit it, so the desktop's Claude Code card looked at `~/.claude.json` while Claude Code used `$CLAUDE_CONFIG_DIR/.claude.json`. `graphmind setup` run with the variable records the folder in `~/.graphmind/config.json` (`claude_config_dir`), and processes without the variable use it while the folder exists; `CLAUDE_CONFIG_DIR= graphmind setup` goes back to `~/.claude.json`. Thanks @KennethWKZ.
 
 ### Changed
 

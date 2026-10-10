@@ -1,10 +1,66 @@
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use graphmind_cli::commands::setup::{install_mcp_client, repair_claude_settings, McpClient, Outcome};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Mutex, OnceLock};
 
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// `graphmind setup` run as a command: `exe` in `home`, with `shell` as $SHELL and only the system
+/// directories on PATH, so no `claude` or `opencode` from the machine running the tests is used.
+/// The caller checks the status and reads stdout.
+pub fn run_setup_as(exe: &Path, home: &Path, shell: &str) -> Output {
+    Command::new(exe)
+        .arg("setup")
+        .env("HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("SHELL", shell)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env("NO_COLOR", "1")
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
+        .output()
+        .expect("failed to run graphmind setup")
+}
+
+/// True when running as root, where file permissions don't stop writes. A test that needs them
+/// returns early when this is true, and the skip is printed so it can't pass unnoticed.
+pub fn skip_as_root(test: &str) -> bool {
+    let root = Command::new("id").arg("-u").output().is_ok_and(|out| out.stdout == b"0\n");
+    if root {
+        eprintln!("{test} skipped: running as root, so file permissions don't apply");
+    }
+    root
+}
+
+/// Setup's Claude Code step: register at user scope, then repair settings.json.
+pub fn claude_code_step() -> Outcome {
+    let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
+    repair_claude_settings(outcome.is_in_place());
+    outcome
+}
+
+/// A fake `claude` CLI in `<home>/bin`: logs its arguments to `<home>/claude-calls.log`, then runs
+/// `script_body`.
+#[cfg(unix)]
+pub fn fake_claude(home: &Path, script_body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("claude");
+    std::fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{script_body}\n")).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Writes ~/.claude.json (in `$CLAUDE_CONFIG_DIR` when that is set) the way `claude mcp add -s
+/// user` does (with an empty `env`).
+#[cfg(unix)]
+pub const FAKE_CLAUDE_OK: &str = r#"file="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+case "$2" in
+  add) printf '{"mcpServers":{"graphmind":{"type":"stdio","command":"%s","args":["mcp"],"env":{}}}}' "$7" > "$file" ;;
+  remove) printf '{"mcpServers":{}}' > "$file" ;;
+esac"#;
 
 /// For suites that call setup functions in-process: create a fresh temp HOME, point `HOME` at it,
 /// run `f`, then drop. PATH holds the system directories plus `<home>/bin` (empty unless a test

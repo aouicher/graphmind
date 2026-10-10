@@ -105,6 +105,22 @@ fn uninstall_shell_path_noop_when_absent() {
     });
 }
 
+#[test]
+fn uninstall_shell_path_leaves_a_non_utf8_profile_alone() {
+    with_home(|home| {
+        let zshenv = home.join(".zshenv");
+        let mut content = b"# caf\xe9\n".to_vec();
+        content.extend_from_slice(
+            format!("export PATH=\"{}:$PATH\"  # added by graphmind setup\n", home.join("bin").display()).as_bytes(),
+        );
+        fs::write(&zshenv, &content).unwrap();
+
+        uninstall_shell_path();
+
+        assert_eq!(fs::read(&zshenv).unwrap(), content, "a profile that can't be read must not be rewritten");
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 2. Claude Code MCP settings.json — removes mcpServers.graphmind + PATH prefix,
 //    unrelated mcpServers entry AND unrelated top-level key survive
@@ -428,7 +444,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
         fs::create_dir_all(&other_skill).unwrap();
         fs::write(other_skill.join("SKILL.md"), "unrelated skill content").unwrap();
 
-        install_skill();
+        install_skill().unwrap();
 
         // Sanity: graphmind + all 19 sub-skills exist.
         assert!(skills_base.join("graphmind").exists());
@@ -545,7 +561,7 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         });
         fs::write(&settings_path, serde_json::to_string_pretty(&canary_settings).unwrap()).unwrap();
 
-        install_hook();
+        install_hook().unwrap();
         uninstall_hook();
 
         let content = fs::read_to_string(&settings_path).unwrap();

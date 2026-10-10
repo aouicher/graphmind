@@ -7,92 +7,24 @@
 ///
 /// Run with:
 ///   cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
-use common::{backups_of, with_home};
+use common::{backups_of, claude_code_step, fake_claude, with_home, FAKE_CLAUDE_OK};
+use graphmind_cli::commands::claude_hook::install_hook;
 use graphmind_cli::commands::setup::{
-    already_on_path, ensure_project_mcp_configs, home_dir, install_mcp_client,
-    install_shell_path_for, migrate_project_mcp_entries, repair_claude_settings, setup, McpClient,
-    Outcome,
+    ensure_project_mcp_configs, home_dir, install_mcp_client,
+    migrate_project_mcp_entries, repair_claude_settings, setup, McpClient, Outcome,
 };
 use serde_json::{json, Value};
 use std::fs;
 
 mod common;
 
-/// Setup's Claude Code step: register at user scope, then repair settings.json.
-fn claude_code_step() -> Outcome {
-    let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
-    repair_claude_settings(outcome.is_in_place());
-    outcome
+/// `graphmind setup` run as a command in `home`, as zsh. Returns its stdout.
+fn run_setup(home: &std::path::Path) -> String {
+    let out = common::run_setup_as(std::path::Path::new(env!("CARGO_BIN_EXE_graphmind")), home, "/bin/zsh");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "setup failed\nstdout: {stdout}\nstderr: {}", String::from_utf8_lossy(&out.stderr));
+    stdout
 }
-
-/// A fake `claude` CLI in `<home>/bin`: logs its arguments to `<home>/claude-calls.log`, then runs
-/// `script_body`.
-#[cfg(unix)]
-fn fake_claude(home: &std::path::Path, script_body: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    let bin = home.join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    let script = bin.join("claude");
-    fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{script_body}\n")).unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-/// Writes ~/.claude.json the way `claude mcp add -s user` does (with an empty `env`).
-#[cfg(unix)]
-const FAKE_CLAUDE_OK: &str = r#"case "$2" in
-  add) printf '{"mcpServers":{"graphmind":{"type":"stdio","command":"%s","args":["mcp"],"env":{}}}}' "$7" > "$HOME/.claude.json" ;;
-  remove) printf '{"mcpServers":{}}' > "$HOME/.claude.json" ;;
-esac"#;
-
-// ---------------------------------------------------------------------------
-// 1. Shell PATH
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_shell_path_idempotent() {
-    with_home(|home| {
-        // Not on PATH, zsh: written once, to .zshenv only.
-        let bin_dir = home.join("opt").join("bin");
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
-
-        let zshenv = home.join(".zshenv");
-        let content = fs::read_to_string(&zshenv).expect(".zshenv should be created");
-        let entry = format!("\"{}:$PATH\"", bin_dir.display());
-        let count = content.matches(&entry).count();
-        assert_eq!(count, 1, "export line should appear exactly once, found {count}:\n{content}");
-        assert!(!home.join(".zshrc").exists(), ".zshrc must not be touched for zsh");
-    });
-}
-
-#[test]
-fn setup_shell_path_skips_dir_already_on_path() {
-    with_home(|home| {
-        let bin_dir = home.join(".local").join("bin");
-        fs::create_dir_all(&bin_dir).unwrap();
-        let path_env = format!("/usr/bin:{}", bin_dir.display());
-        install_shell_path_for(&bin_dir.join("graphmind"), &path_env, "/bin/zsh");
-        assert!(!home.join(".zshenv").exists(), "nothing to add when the binary is already on PATH");
-    });
-}
-
-#[test]
-fn setup_shell_path_removes_dead_legacy_line() {
-    with_home(|home| {
-        // Older setups always added ~/.graphmind/bin, even when the binary lived elsewhere.
-        let legacy = format!("export PATH=\"{}:$PATH\"", home.join(".graphmind/bin").display());
-        fs::write(home.join(".zshrc"), format!("alias ll='ls -la'\n{legacy}\n")).unwrap();
-        fs::write(home.join(".bashrc"), format!("{legacy}\n")).unwrap();
-
-        let bin_dir = home.join(".local").join("bin");
-        fs::create_dir_all(&bin_dir).unwrap();
-        install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/zsh");
-
-        assert_eq!(fs::read_to_string(home.join(".zshrc")).unwrap(), "alias ll='ls -la'\n");
-        assert!(!fs::read_to_string(home.join(".bashrc")).unwrap().contains(".graphmind/bin"));
-    });
-}
-
 
 // ---------------------------------------------------------------------------
 // 2. Claude Desktop MCP — written
@@ -733,48 +665,6 @@ fn ensure_project_mcp_configs_idempotent() {
     });
 }
 
-/// Linuxbrew / symlinked dev builds: the binary runs from a versioned directory that isn't on
-/// PATH, but the link to it is. That counts as "on PATH", so setup adds nothing.
-#[cfg(unix)]
-#[test]
-fn symlinked_binary_on_path_counts_as_on_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let cellar = dir.path().join("Cellar/graphmind/0.3.2/bin");
-    let linked = dir.path().join("linuxbrew/bin");
-    let other = dir.path().join("other/bin");
-    for d in [&cellar, &linked, &other] {
-        std::fs::create_dir_all(d).unwrap();
-    }
-    let exe = cellar.join("graphmind");
-    std::fs::write(&exe, "binary").unwrap();
-    std::os::unix::fs::symlink(&exe, linked.join("graphmind")).unwrap();
-    std::fs::write(other.join("graphmind"), "a different graphmind").unwrap();
-
-    let path_env = format!("/usr/bin:{}:{}", other.display(), linked.display());
-    assert_eq!(already_on_path(&exe, &path_env), Some(linked.join("graphmind")));
-    // Another graphmind on PATH, or none, doesn't count.
-    assert_eq!(already_on_path(&exe, &format!("/usr/bin:{}", other.display())), None);
-    assert_eq!(already_on_path(&exe, "/usr/bin:/bin"), None);
-}
-
-/// The whole flow for a symlinked install: the link on PATH is enough, no profile is written.
-#[cfg(unix)]
-#[test]
-fn setup_shell_path_writes_nothing_for_a_linked_binary() {
-    with_home(|home| {
-        let cellar = home.join("Cellar/graphmind/0.3.2/bin");
-        let linked = home.join("linuxbrew/bin");
-        fs::create_dir_all(&cellar).unwrap();
-        fs::create_dir_all(&linked).unwrap();
-        let exe = cellar.join("graphmind");
-        fs::write(&exe, "binary").unwrap();
-        std::os::unix::fs::symlink(&exe, linked.join("graphmind")).unwrap();
-
-        install_shell_path_for(&exe, &format!("/usr/bin:{}", linked.display()), "/bin/zsh");
-        assert!(!home.join(".zshenv").exists(), "the versioned Cellar dir must not be added");
-    });
-}
-
 // ---------------------------------------------------------------------------
 // 12. Setup version — stamped only once the Claude Code entry is in place
 // ---------------------------------------------------------------------------
@@ -794,31 +684,114 @@ fn setup_version_waits_for_the_claude_code_entry() {
     });
 }
 
+
 // ---------------------------------------------------------------------------
-// 13. CLAUDE_CONFIG_DIR — where Claude Code (and `claude mcp add`) keeps ~/.claude.json then
+// 14. Claude Code hooks — settings.json that can't be used is left alone
 // ---------------------------------------------------------------------------
 
 #[test]
-fn claude_code_entry_follows_claude_config_dir() {
+fn install_hook_leaves_an_unparseable_settings_json_alone() {
     with_home(|home| {
-        let config_dir = home.join("claude-config");
-        fs::create_dir_all(&config_dir).unwrap();
-        let claude_json = config_dir.join(".claude.json");
-        fs::write(
-            &claude_json,
-            r#"{"projects": {"/repo/a": {"mcpServers": {"graphmind": {"command": "/old/graphmind"}}}}}"#,
-        )
-        .unwrap();
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &config_dir) };
+        let settings = home.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        for broken in [r#"{"permissions": {},}"#, "[1, 2]"] {
+            fs::write(&settings, broken).unwrap();
+            assert!(install_hook().is_err(), "{broken}");
+            assert_eq!(fs::read_to_string(&settings).unwrap(), broken);
+            assert_eq!(backups_of(&settings), 0);
+        }
+    });
+}
 
-        let outcome = claude_code_step();
-        migrate_project_mcp_entries(outcome.is_in_place());
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+#[cfg(unix)]
+#[test]
+fn install_hook_leaves_an_unreadable_settings_json_alone() {
+    with_home(|home| {
+        use std::os::unix::fs::PermissionsExt;
+        let settings = home.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(&settings, r#"{"permissions": {"allow": ["Bash"]}}"#).unwrap();
+        fs::set_permissions(&settings, fs::Permissions::from_mode(0o200)).unwrap(); // write-only
+        if fs::read(&settings).is_ok() {
+            return; // running as root: permissions don't apply
+        }
 
-        assert_eq!(outcome, Outcome::Written);
-        let json: Value = serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
-        assert!(json["mcpServers"]["graphmind"]["command"].is_string(), "{json}");
-        assert!(json["projects"]["/repo/a"]["mcpServers"]["graphmind"].is_null(), "migrated in the same file: {json}");
-        assert!(!home.join(".claude.json").exists(), "no second entry in ~/.claude.json");
+        let outcome = install_hook();
+
+        fs::set_permissions(&settings, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(fs::read_to_string(&settings).unwrap(), r#"{"permissions": {"allow": ["Bash"]}}"#);
+    });
+}
+
+/// Every 0.3.2 install registers graphmind-stop.sh. While settings.json is left alone it still
+/// points at the script, so the script must stay too.
+#[test]
+fn install_hook_keeps_retired_scripts_while_settings_json_is_left_alone() {
+    with_home(|home| {
+        let hooks = home.join(".claude").join("hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        let stop = hooks.join("graphmind-stop.sh");
+        fs::write(&stop, "#!/bin/sh\n").unwrap();
+        let settings = home.join(".claude").join("settings.json");
+        // A Latin-1 byte: not UTF-8, so the file can't be read as JSON.
+        let mut content = br#"{"x": "caf"#.to_vec();
+        content.push(0xe9);
+        content.extend_from_slice(
+            format!(r#"", "hooks": {{"Stop": [{{"matcher": "*", "hooks": [{{"type": "command", "command": "{}"}}]}}]}}}}"#, stop.display())
+                .as_bytes(),
+        );
+        fs::write(&settings, &content).unwrap();
+
+        let outcome = install_hook();
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(fs::read(&settings).unwrap(), content, "settings.json changed");
+        assert!(stop.exists(), "graphmind-stop.sh removed while settings.json still runs it");
+    });
+}
+
+#[test]
+fn install_hook_creates_a_missing_or_empty_settings_json() {
+    with_home(|home| {
+        let settings = home.join(".claude").join("settings.json");
+        for initial in [None, Some("")] {
+            if let Some(content) = initial {
+                fs::write(&settings, content).unwrap();
+            }
+            assert_eq!(install_hook(), Ok(()), "{initial:?}");
+            let json: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+            for event in ["PreToolUse", "SessionStart", "UserPromptSubmit"] {
+                assert!(json["hooks"][event].is_array(), "{initial:?}: {json}");
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 15. Setup summary — from what happened, not a fixed text
+// ---------------------------------------------------------------------------
+
+#[test]
+fn setup_summary_reports_what_happened_to_hooks_and_skills() {
+    with_home(|home| {
+        let claude_dir = home.join(".claude");
+        let settings = claude_dir.join("settings.json");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(&settings, r#"{"permissions": {},}"#).unwrap();
+        fs::write(claude_dir.join("skills"), "a file where the skills folder goes").unwrap();
+
+        let out = run_setup(home);
+        assert!(out.contains("Claude Code hooks not registered"), "{out}");
+        assert!(!out.contains("hooks registered ("), "{out}");
+        assert!(out.contains("/gm skills not fully installed"), "{out}");
+        assert!(out.contains("Setup complete"), "setup runs to the end: {out}");
+        assert_eq!(fs::read_to_string(&settings).unwrap(), r#"{"permissions": {},}"#);
+
+        fs::write(&settings, r#"{"permissions": {}}"#).unwrap();
+        fs::remove_file(claude_dir.join("skills")).unwrap();
+        let out = run_setup(home);
+        assert!(out.contains("3 hooks registered (PreToolUse, SessionStart, UserPromptSubmit)"), "{out}");
+        assert!(out.contains("/gm skill + 19 sub-skills installed"), "{out}");
     });
 }

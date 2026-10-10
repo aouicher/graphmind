@@ -1,6 +1,6 @@
 use colored::Colorize;
 use graphmind_config::claude_settings::{self, PathRepair};
-use graphmind_config::mcp_clients::{self, graphmind_binary};
+use graphmind_config::mcp_clients::{self, graphmind_binary, RecordedConfigDir};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -29,15 +29,16 @@ pub fn setup() {
     install_shell_path();
 
     print_step(2, 10, "Claude Code hooks");
-    super::claude_hook::install_hook();
+    let hooks = super::claude_hook::install_hook();
 
     print_step(3, 10, "Claude Code skills");
-    super::install_skill::install_skill();
+    let skills = super::install_skill::install_skill();
 
     print_step(4, 10, "Claude Desktop MCP config");
     let desktop = install_mcp_client(&McpClient::ClaudeDesktop);
 
     print_step(5, 10, "Claude Code MCP server (user scope)");
+    sync_claude_config_dir();
     let claude_code = install_mcp_client(&McpClient::ClaudeCodeUser);
     // Separate from the registration: a settings.json that doesn't parse must not block it, and
     // the old settings.json entry goes only once the user-scope one is in place.
@@ -73,8 +74,7 @@ pub fn setup() {
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
     println!("  {} PATH configured in shell profiles", "✓".green());
-    println!("  {} 3 hooks registered (PreToolUse, SessionStart, UserPromptSubmit)", "✓".green());
-    println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
+    print_hooks_and_skills_summary(&hooks, &skills);
     print_mcp_summary(&[
         (McpClient::ClaudeDesktop.label(), &desktop),
         (McpClient::ClaudeCodeUser.label(), &claude_code),
@@ -168,6 +168,51 @@ fn print_install(client: &McpClient, outcome: &Outcome) {
         Outcome::Written => println!("    {} configured at {}", "✓".green(), path.display()),
         Outcome::NotInstalled => println!("    {} {} not installed, skipped", "⊘".yellow(), client.label()),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+    }
+}
+
+fn print_hooks_and_skills_summary(hooks: &Result<(), String>, skills: &Result<(), String>) {
+    let events = super::claude_hook::hook_events();
+    if hooks.is_ok() {
+        println!("  {} {} hooks registered ({})", "✓".green(), events.len(), events.join(", "));
+    } else {
+        println!("  {} Claude Code hooks not registered (see above)", "✗".red());
+    }
+    if skills.is_ok() {
+        let count = super::install_skill::sub_skill_count();
+        println!("  {} /gm skill + {count} sub-skills installed", "✓".green());
+    } else {
+        println!("  {} /gm skills not fully installed (see above)", "✗".red());
+    }
+}
+
+/// Record `CLAUDE_CONFIG_DIR` for processes that don't inherit it, such as the desktop app (see
+/// `mcp_clients::sync_claude_config_dir`), and say when the Claude Code entry goes to a folder
+/// this process only knows from that record.
+fn sync_claude_config_dir() {
+    match mcp_clients::sync_claude_config_dir() {
+        Ok(RecordedConfigDir::Recorded(dir)) => println!(
+            "    {} recorded CLAUDE_CONFIG_DIR ({}) for the desktop app and other processes without it",
+            "✓".green(),
+            dir.display()
+        ),
+        Ok(RecordedConfigDir::Cleared(dir)) => println!(
+            "    {} dropped the recorded CLAUDE_CONFIG_DIR ({}): back to ~/.claude.json",
+            "✓".green(),
+            dir.display()
+        ),
+        Ok(RecordedConfigDir::Unchanged) => {}
+        Err(reason) => println!("    {} {reason}", "✗".red()),
+    }
+    if std::env::var_os("CLAUDE_CONFIG_DIR").is_none() {
+        if let Some(dir) = McpClient::ClaudeCodeUser.config_path().parent().filter(|dir| *dir != home_dir()) {
+            println!(
+                "    {} using CLAUDE_CONFIG_DIR {} from an earlier setup; run {} to use ~/.claude.json again",
+                "!".yellow(),
+                dir.display(),
+                "CLAUDE_CONFIG_DIR= graphmind setup".cyan()
+            );
+        }
     }
 }
 

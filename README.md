@@ -95,7 +95,7 @@ That's it. Claude Code, Claude Desktop, Cursor, and VS Code will use graphmind a
 ### `graphmind setup` (once, global)
 
 Configures your machine so all AI tools can use graphmind:
-1. Shell PATH: when graphmind isn't on PATH yet, one marked line in the profile your shell reads (`~/.zshenv` for zsh, `~/.bashrc` for bash, `~/.profile` otherwise). On Windows, `~/.graphmind/bin` goes on the user PATH and into your PowerShell profile instead
+1. Shell PATH: when graphmind isn't on PATH yet, one marked line in the profile your shell reads, after a backup of that profile (`~/.zshenv` for zsh, `~/.bashrc` for bash, `~/.profile` otherwise). On Windows, `~/.graphmind/bin` goes on the user PATH and into your PowerShell profile instead
 2. Claude Code hooks (session context, prompt pre-fetch, and a once-per-session nudge from grep/find searches and Explore agents to graphmind)
 3. Claude Code skill (`/gm` + 19 sub-skills)
 4. Claude Desktop MCP (`claude_desktop_config.json`; the location per OS is under [Manual setup](#manual-setup-if-you-prefer-granular-control))

@@ -115,12 +115,7 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
                 || existing.contains("memory add '[commit]");
             if is_outdated {
                 // Backup before overwriting
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let backup = hook_path.with_extension(format!("{ts}.bak"));
-                fs::copy(&hook_path, &backup).ok();
+                graphmind_config::back_up(&hook_path).ok();
                 fs::write(&hook_path, content).ok();
                 println!("  {}: updated (removed outdated patterns)", name.dimmed());
             } else {
@@ -129,12 +124,7 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
             }
         } else {
             // Backup before appending
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let backup = hook_path.with_extension(format!("{ts}.bak"));
-            fs::copy(&hook_path, &backup).ok();
+            graphmind_config::back_up(&hook_path).ok();
             let stripped: String = content
                 .lines()
                 .filter(|l| !l.starts_with("#!"))

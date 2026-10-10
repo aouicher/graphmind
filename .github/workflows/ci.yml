@@ -78,7 +78,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # These suites point HOME at a temp dir inside the test process.
-      - run: cargo test -p graphmind-cli --test setup_e2e --test setup_claude_md_e2e --test uninstall_all_e2e -- --test-threads=1
+      - run: cargo test -p graphmind-cli --test setup_e2e --test setup_shell_path_e2e --test setup_claude_config_dir_e2e --test setup_claude_md_e2e --test uninstall_all_e2e -- --test-threads=1
 
   e2e-cli:
     runs-on: ubuntu-latest

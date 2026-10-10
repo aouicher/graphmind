@@ -49,10 +49,8 @@ pub fn install_claude_md_block() -> Outcome {
         return Outcome::Unchanged;
     }
     if claude_md.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = claude_md.with_extension(format!("md.{ts}.bak"));
-        if let Err(e) = fs::write(&backup, &content) {
-            return left_alone(format!("can't back up {} ({e}); left unchanged", claude_md.display()));
+        if let Err(reason) = graphmind_config::back_up(&claude_md) {
+            return left_alone(reason);
         }
     } else if let Some(parent) = claude_md.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
@@ -81,9 +79,7 @@ pub fn uninstall_claude_md_block() {
     };
 
     // Backup before modifying (timestamped)
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = claude_md.with_extension(format!("md.{ts}.bak"));
-    fs::write(&backup, &content).ok();
+    graphmind_config::back_up(&claude_md).ok();
 
     let end = content.find("<!-- GM:END -->")
         .map(|i| i + "<!-- GM:END -->".len())

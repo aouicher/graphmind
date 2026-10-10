@@ -8,7 +8,7 @@ pub mod paths;
 pub mod resolve;
 pub mod seed;
 
-pub use atomic::write_atomic;
+pub use atomic::{back_up, write_atomic};
 pub use breaking::{update_crosses_breaking, BREAKING_VERSIONS};
 pub use config::{
     ensure_dirs, load_config, read_config, save_config, slugify, ConfigError, DefaultsConfig,

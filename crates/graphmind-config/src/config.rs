@@ -218,6 +218,11 @@ pub struct GlobalConfig {
     pub build_all_on_startup: bool,
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// `CLAUDE_CONFIG_DIR` as the last `graphmind setup` that had it set saw it: where Claude
+    /// Code keeps its user-scope MCP servers for processes that don't inherit the variable (the
+    /// desktop app started from Finder, the setup it runs). See `mcp_clients::sync_claude_config_dir`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_config_dir: Option<PathBuf>,
 }
 
 impl Default for GlobalConfig {
@@ -234,6 +239,7 @@ impl Default for GlobalConfig {
             launch_at_login: false,
             build_all_on_startup: false,
             memory: MemoryConfig::default(),
+            claude_config_dir: None,
         }
     }
 }
@@ -365,23 +371,25 @@ fn canonical(path: &str) -> String {
 }
 
 /// Read-modify-write of config.json under the cross-process lock. `f` returns its
-/// result and whether the config changed (only then is it written). `None` when
-/// the config on disk is unreadable: it is left as is.
-fn mutate_config<R>(f: impl FnOnce(&mut GlobalConfig) -> (R, bool)) -> Option<R> {
+/// result and whether the config changed (only then is it written). `Err` with the
+/// read error when the config on disk is unreadable: it is left as is.
+pub(crate) fn mutate_config<R>(f: impl FnOnce(&mut GlobalConfig) -> (R, bool)) -> Result<R, String> {
     with_config_lock(|| {
-        let mut config = match read_config() {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("Error: not modifying the config: {e}. Fix or remove the file first.");
-                return None;
-            }
-        };
+        let mut config = read_config().map_err(|e| e.to_string())?;
         let (result, changed) = f(&mut config);
         if changed {
             save_config(&config);
         }
-        Some(result)
+        Ok(result)
     })
+}
+
+/// For callers that carry on without saving when config.json is unreadable: the reason goes to
+/// stderr, and the result is `None`.
+fn report_unsaved<R>(result: Result<R, String>) -> Option<R> {
+    result
+        .map_err(|e| eprintln!("Error: not modifying the config: {e}. Fix or remove the file first."))
+        .ok()
 }
 
 /// `base`, unless a project at another path already uses it: then `base-<hash of
@@ -465,7 +473,7 @@ impl Registry {
             primary,
         };
 
-        let project = mutate_config(|config| {
+        let project = report_unsaved(mutate_config(|config| {
             backfill_repo_ids(config);
             let existing = config.projects.values().find(|p| p.path == abs_path).cloned();
             let slug = match (slug, &existing) {
@@ -487,7 +495,7 @@ impl Registry {
             let project = build(slug.clone(), primary);
             config.projects.insert(slug, project.clone());
             (project, true)
-        })
+        }))
         .unwrap_or_else(|| build(slug.map(String::from).unwrap_or_else(|| slugify(&abs_path)), None));
 
         fs::create_dir_all(paths::graph_dir(&project.slug)).ok();
@@ -517,7 +525,7 @@ impl Registry {
         let root = git_identity::work_tree(dir)?.root;
         let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
 
-        let (linked, pruned) = mutate_config(|config| {
+        let (linked, pruned) = report_unsaved(mutate_config(|config| {
             let backfilled = backfill_repo_ids(config);
             let Some((here, sibling)) = family_match(config, &repo_id, &root, &dir) else {
                 return ((None, Vec::new()), backfilled);
@@ -553,7 +561,7 @@ impl Registry {
                 config.projects.remove(slug);
             }
             ((Some((project, sibling.slug, lock)), gone), true)
-        })?;
+        }))?;
 
         for slug in pruned {
             fs::remove_dir_all(paths::graph_dir(&slug)).ok();
@@ -575,7 +583,7 @@ impl Registry {
             .values()
             .any(|p| p.repo_id.is_none() && Path::new(&p.path).is_dir());
         if needed {
-            mutate_config(|config| ((), backfill_repo_ids(config)));
+            report_unsaved(mutate_config(|config| ((), backfill_repo_ids(config))));
         }
     }
 
@@ -589,10 +597,10 @@ impl Registry {
     }
 
     pub fn unregister(slug: &str) -> bool {
-        mutate_config(|config| {
+        report_unsaved(mutate_config(|config| {
             let removed = config.projects.remove(slug).is_some();
             (removed, removed)
-        })
+        }))
         .unwrap_or(false)
     }
 
@@ -632,13 +640,13 @@ impl Registry {
     }
 
     pub fn update_project(slug: &str, f: impl FnOnce(&mut ProjectConfig)) {
-        mutate_config(|config| match config.projects.get_mut(slug) {
+        report_unsaved(mutate_config(|config| match config.projects.get_mut(slug) {
             Some(project) => {
                 f(project);
                 ((), true)
             }
             None => ((), false),
-        });
+        }));
     }
 
     pub fn get_config() -> GlobalConfig {

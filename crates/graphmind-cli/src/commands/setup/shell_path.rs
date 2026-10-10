@@ -3,6 +3,7 @@
 
 use super::home_dir;
 use colored::Colorize;
+use graphmind_config::back_up;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -70,7 +71,9 @@ fn install_shell_path_unix() {
 /// 2. if PATH already reaches it (`already_on_path`), change nothing — otherwise every upgrade
 ///    would append another line, silently through auto-setup;
 /// 3. otherwise write one marked line to the profile for the shell: `.zshenv` for zsh (every
-///    zsh reads it, interactive or not), `.bashrc` for bash, `.profile` for anything else.
+///    zsh reads it, interactive or not), `.bashrc` for bash, `.profile` for anything else. A
+///    missing profile is created; an existing one is backed up first, and one that can't be read
+///    as text is left as is.
 #[doc(hidden)]
 pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) {
     remove_dead_legacy_line();
@@ -83,37 +86,83 @@ pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) {
     let bin_dir = bin_dir_for(exe);
     let bin_dir_str = bin_dir.to_string_lossy();
     let export_line = format!("export PATH=\"{}:$PATH\"  {}", bin_dir_str, PATH_MARKER);
+    let needle = format!("\"{}:$PATH\"", bin_dir_str);
     let profile = match shell.rsplit('/').next().unwrap_or("") {
         "zsh" => ".zshenv",
         "bash" => ".bashrc",
         _ => ".profile",
     };
-    let path = home_dir().join(profile);
-    let content = fs::read_to_string(&path).unwrap_or_default();
-    if content.contains(&format!("\"{}:$PATH\"", bin_dir_str)) {
-        println!("    {} PATH already configured in ~/{}", "✓".green(), profile);
-        return;
+    match append_line(&home_dir().join(profile), &export_line, |content| content.contains(&needle)) {
+        Ok(Appended::AlreadyPresent) => println!("    {} PATH already configured in ~/{}", "✓".green(), profile),
+        Ok(Appended::Written) => {
+            println!("    {} added {} to ~/{}", "✓".green(), bin_dir.display(), profile);
+            println!("    {} restart your shell or run: source ~/{}", "→".cyan(), profile);
+        }
+        Err(reason) => {
+            println!("    {} {reason}", "⊘".yellow());
+            println!("    {} add {} to PATH yourself", "→".cyan(), bin_dir.display());
+        }
     }
-    let new_content = if content.is_empty() {
-        format!("{}\n", export_line)
-    } else {
-        format!("{}\n{}\n", content.trim_end(), export_line)
+}
+
+/// What [`append_line`] did with a profile.
+enum Appended {
+    /// The profile already has the line: nothing written, nothing backed up.
+    AlreadyPresent,
+    /// The line was added at the end, after backing up an existing profile.
+    Written,
+}
+
+/// Add `line` to the end of the shell profile at `path` unless `already_present` says the content
+/// has it. An existing profile is backed up first; a missing one is created. `Err` holds the
+/// reason when the profile is left as it was: it can't be read as text (permissions, not UTF-8),
+/// can't be backed up, or can't be rewritten. Rewriting an unreadable profile would replace it
+/// with just the line, so it is never attempted.
+fn append_line(path: &Path, line: &str, already_present: impl Fn(&str) -> bool) -> Result<Appended, String> {
+    let content = match read_profile(path)? {
+        Some(content) if already_present(&content) => return Ok(Appended::AlreadyPresent),
+        Some(content) => {
+            back_up(path)?;
+            content
+        }
+        None => {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("can't create {} ({e}); left unchanged", parent.display()))?;
+            }
+            String::new()
+        }
     };
-    if let Err(e) = graphmind_config::write_atomic(&path, new_content.as_bytes()) {
-        println!("    {} failed to update {}: {e}", "✗".red(), profile);
+    let new_content = if content.is_empty() {
+        format!("{line}\n")
     } else {
-        println!("    {} added {} to ~/{}", "✓".green(), bin_dir.display(), profile);
-        println!("    {} restart your shell or run: source ~/{}", "→".cyan(), profile);
+        format!("{}\n{line}\n", content.trim_end())
+    };
+    graphmind_config::write_atomic(path, new_content.as_bytes())
+        .map_err(|e| format!("failed to update {} ({e}); left unchanged", path.display()))?;
+    Ok(Appended::Written)
+}
+
+/// A shell profile's content: `Ok(None)` when it doesn't exist, `Err` with the reason when it
+/// exists but can't be read as text (permissions, not UTF-8). Rewriting a profile that couldn't
+/// be read would replace it, so callers leave it as is.
+fn read_profile(path: &Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("can't read {} ({e}); left unchanged", path.display())),
     }
 }
 
 /// Drop the legacy `~/.graphmind/bin` PATH line when that folder has no graphmind binary.
+/// Profiles that can't be read keep it: a dead PATH entry is harmless, and the install step
+/// reports the profile it needs.
 fn remove_dead_legacy_line() {
     if home_dir().join(".graphmind").join("bin").join("graphmind").exists() {
         return;
     }
     let legacy = legacy_export_line();
-    let removed = remove_profile_lines(&|line| line == legacy);
+    let (removed, _) = remove_profile_lines(&|line| line == legacy);
     if !removed.is_empty() {
         println!(
             "    {} removed unused ~/.graphmind/bin PATH line from: {}",
@@ -163,25 +212,15 @@ fn install_shell_path_windows() {
             let profile_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let profile_path = std::path::PathBuf::from(&profile_path);
             let add_line = format!("$env:PATH = '{};' + $env:PATH", install_dir_str);
-            let content = if profile_path.exists() {
-                fs::read_to_string(&profile_path).unwrap_or_default()
-            } else {
-                String::new()
-            };
-            if !content.contains(&install_dir_str) {
-                if let Some(parent) = profile_path.parent() {
-                    fs::create_dir_all(parent).ok();
-                }
-                let new_content = if content.is_empty() {
-                    format!("{}\n", add_line)
-                } else {
-                    format!("{}\n{}\n", content.trim_end(), add_line)
-                };
-                if let Err(e) = graphmind_config::write_atomic(&profile_path, new_content.as_bytes()) {
-                    println!("    {} failed to update PowerShell profile: {e}", "✗".red());
-                } else {
+            match append_line(&profile_path, &add_line, |content| content.contains(&install_dir_str)) {
+                Ok(Appended::AlreadyPresent) => {}
+                Ok(Appended::Written) => {
                     println!("    {} added to PowerShell profile", "✓".green());
                     println!("    {} restart PowerShell to pick up changes", "→".cyan());
+                }
+                Err(reason) => {
+                    println!("    {} {reason}", "⊘".yellow());
+                    println!("    {} add {} to PATH yourself", "→".cyan(), install_dir.display());
                 }
             }
         }
@@ -199,33 +238,42 @@ pub fn uninstall_shell_path() {
 
 fn uninstall_shell_path_unix() {
     let legacy = legacy_export_line();
-    let updated = remove_profile_lines(&|line| line == legacy || line.trim_end().ends_with(PATH_MARKER));
-    if updated.is_empty() {
+    let (updated, left_alone) =
+        remove_profile_lines(&|line| line == legacy || line.trim_end().ends_with(PATH_MARKER));
+    for reason in &left_alone {
+        println!("    {} {reason}", "⊘".yellow());
+    }
+    if updated.is_empty() && left_alone.is_empty() {
         println!("    {} no graphmind PATH line found", "✓".green());
-    } else {
+    } else if !updated.is_empty() {
         println!("    {} removed graphmind PATH line from: {}", "✓".green(), updated.join(", "));
     }
 }
 
 /// Remove matching lines from the shell profiles graphmind has ever written to (backup first),
-/// collapsing a blank line left orphaned. Returns the profiles changed.
-fn remove_profile_lines(matches: &dyn Fn(&str) -> bool) -> Vec<&'static str> {
+/// collapsing a blank line left orphaned. Returns the profiles changed, and the reasons for those
+/// left as is (can't be read or backed up).
+fn remove_profile_lines(matches: &dyn Fn(&str) -> bool) -> (Vec<&'static str>, Vec<String>) {
     let profiles: &[&'static str] = &[".zshenv", ".zshrc", ".bashrc", ".profile"];
     let mut updated = Vec::new();
+    let mut left_alone = Vec::new();
     for profile in profiles {
         let path = home_dir().join(profile);
-        if !path.exists() {
-            continue;
-        }
-        let content = fs::read_to_string(&path).unwrap_or_default();
+        let content = match read_profile(&path) {
+            Ok(Some(content)) => content,
+            Ok(None) => continue,
+            Err(reason) => {
+                left_alone.push(reason);
+                continue;
+            }
+        };
         if !content.lines().any(matches) {
             continue;
         }
-
-        // Backup before modifying
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = path.with_extension(format!("{}.{ts}.bak", profile.trim_start_matches('.')));
-        fs::copy(&path, &backup).ok();
+        if let Err(reason) = back_up(&path) {
+            left_alone.push(reason);
+            continue;
+        }
 
         let lines: Vec<&str> = content.lines().collect();
         let mut new_lines: Vec<&str> = Vec::with_capacity(lines.len());
@@ -257,7 +305,7 @@ fn remove_profile_lines(matches: &dyn Fn(&str) -> bool) -> Vec<&'static str> {
         }
     }
 
-    updated
+    (updated, left_alone)
 }
 
 fn uninstall_shell_path_windows() {
@@ -300,12 +348,13 @@ fn uninstall_shell_path_windows() {
             let profile_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let profile_path = std::path::PathBuf::from(&profile_path);
             let target_line = format!("$env:PATH = '{};' + $env:PATH", install_dir_str);
-            if profile_path.exists() {
-                let content = fs::read_to_string(&profile_path).unwrap_or_default();
-                if content.contains(&target_line) {
-                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                    let backup = profile_path.with_extension(format!("ps1.{ts}.bak"));
-                    fs::copy(&profile_path, &backup).ok();
+            match read_profile(&profile_path) {
+                Err(reason) => println!("    {} {reason}", "⊘".yellow()),
+                Ok(Some(content)) if content.contains(&target_line) => {
+                    if let Err(reason) = back_up(&profile_path) {
+                        println!("    {} {reason}", "⊘".yellow());
+                        return;
+                    }
 
                     let new_content: String = content
                         .lines()
@@ -318,6 +367,7 @@ fn uninstall_shell_path_windows() {
                         println!("    {} removed from PowerShell profile", "✓".green());
                     }
                 }
+                Ok(_) => {}
             }
         }
     }

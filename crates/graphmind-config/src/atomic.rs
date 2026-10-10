@@ -2,11 +2,47 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Numbers each call's temp file, so threads of one process writing the same file don't share it.
 static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Backups of one file made in the same second: `<name>.<ts>.bak`, then `-1`, `-2`, ... before
+/// `.bak`. Past this many, `back_up` gives up rather than loop forever.
+const MAX_BACKUPS_PER_SECOND: u32 = 100;
+
+/// Copy `path` to a new backup next to it, `<name>.<UTC timestamp>.bak`, and return its path.
+/// It never overwrites an existing backup: a name already taken gets a suffix, so the older
+/// backup, the state before the first change, is kept. The copy keeps the file's permissions.
+/// `Err` names the file and the reason, and leaves no partial backup behind.
+pub fn back_up(path: &Path) -> Result<PathBuf, String> {
+    let fail = |e: std::io::Error| format!("can't back up {} ({e}); left unchanged", path.display());
+    let mut source = fs::File::open(path).map_err(fail)?;
+    let perms = source.metadata().map_err(fail)?.permissions();
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    for n in 0..MAX_BACKUPS_PER_SECOND {
+        let suffix = if n == 0 { String::new() } else { format!("-{n}") };
+        let backup = path.with_file_name(format!("{name}.{ts}{suffix}.bak"));
+        let mut dest = match fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+            Ok(dest) => dest,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(fail(e)),
+        };
+        let copied = dest
+            .set_permissions(perms.clone())
+            .and_then(|()| std::io::copy(&mut source, &mut dest).map(drop));
+        return match copied {
+            Ok(()) => Ok(backup),
+            Err(e) => {
+                fs::remove_file(&backup).ok();
+                Err(fail(e))
+            }
+        };
+    }
+    Err(format!("can't back up {} (too many backups this second); left unchanged", path.display()))
+}
 
 /// Replace `path`'s content atomically: a temp file in the same directory, written with the
 /// target's permissions already set, synced, then renamed over the target. A symlink is
@@ -34,8 +70,47 @@ pub fn write_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::write_atomic;
+    use super::{back_up, write_atomic};
     use std::fs;
+
+    /// Two backups in the same second (a profile backed up before a removal and again before the
+    /// append) both exist: the second gets a suffix, so the first, the original state, survives.
+    #[test]
+    fn back_up_never_overwrites_a_backup_from_the_same_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".zshenv");
+        fs::write(&path, "original\n").unwrap();
+        let first = back_up(&path).unwrap();
+        fs::write(&path, "changed\n").unwrap();
+        let second = back_up(&path).unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(fs::read_to_string(&first).unwrap(), "original\n");
+        assert_eq!(fs::read_to_string(&second).unwrap(), "changed\n");
+        assert!(first.file_name().unwrap().to_string_lossy().starts_with(".zshenv."));
+        assert!(first.extension().is_some_and(|e| e == "bak"));
+    }
+
+    #[test]
+    fn back_up_of_a_missing_file_names_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+        let err = back_up(&path).unwrap_err();
+        assert!(err.contains("missing.json") && err.contains("left unchanged"), "{err}");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0, "no partial backup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn back_up_keeps_the_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secret.json");
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let backup = back_up(&path).unwrap();
+        assert_eq!(fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     /// Config files are often managed with dotfile tools: a symlink stays a link, its target gets
     /// the new content with its permissions kept, and no temp file is left behind.
