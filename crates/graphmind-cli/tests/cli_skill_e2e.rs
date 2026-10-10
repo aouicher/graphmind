@@ -160,3 +160,26 @@ fn positional_slug_and_slug_flag_together_are_rejected() {
         assert!(stderr.contains("cannot be used with"), "{command}: {stderr}");
     }
 }
+
+/// `graphmind uninstall skill`, which the desktop app's skill toggle runs, removes the /gm skill
+/// and its sub-skills and leaves other skills alone.
+#[test]
+fn uninstall_skill_removes_the_installed_skills_and_keeps_others() {
+    let env = CliTestEnv::new();
+    let skills = env.home.path().join(".claude").join("skills");
+    let other = skills.join("some-other-skill");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("SKILL.md"), "unrelated").unwrap();
+
+    env.run_ok(&["install", "skill"]);
+    assert!(skills.join("graphmind").join("SKILL.md").exists());
+    assert!(skills.join("gm-fn").join("SKILL.md").exists());
+
+    env.run_ok(&["uninstall", "skill"]);
+    assert!(!skills.join("graphmind").exists(), "the /gm skill should be removed");
+    assert!(!skills.join("gm-fn").exists(), "sub-skills should be removed");
+    assert_eq!(fs::read_to_string(other.join("SKILL.md")).unwrap(), "unrelated");
+
+    // Nothing left to remove is not an error: the desktop toggle can run it twice.
+    env.run_ok(&["uninstall", "skill"]);
+}
