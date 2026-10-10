@@ -7,7 +7,7 @@
 ///
 /// Run with:
 ///   cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
-use common::{backups_of, with_home};
+use common::{backups_of, graphmind_command, with_home};
 use graphmind_cli::commands::setup::{
     already_on_path, ensure_project_mcp_configs, home_dir, install_claude_code_entries,
     install_mcp_client, install_shell_path_for, repair_claude_settings, McpClient, Outcome,
@@ -90,6 +90,40 @@ fn setup_shell_path_removes_dead_legacy_line_from_bash_profile() {
         assert_eq!(fs::read_to_string(&bash_profile).unwrap(), "export EDITOR=vim\n");
         assert_eq!(backups_of(&bash_profile), 1, "backed up before the rewrite");
     });
+}
+
+/// Coverage of the desktop flow: the app puts graphmind in `~/.local/bin` and runs its setup from
+/// there, graphmind not on PATH. Setup adds `~/.local/bin` (not `~/.graphmind/bin`) to .zshenv
+/// once, and drops the dead `~/.graphmind/bin` line an older setup left in .zshrc.
+#[cfg(unix)]
+#[test]
+fn setup_puts_local_bin_on_path_for_a_desktop_install() {
+    let home = tempfile::tempdir().unwrap();
+    let local_bin = home.path().join(".local").join("bin");
+    fs::create_dir_all(&local_bin).unwrap();
+    let exe = local_bin.join("graphmind");
+    fs::copy(env!("CARGO_BIN_EXE_graphmind"), &exe).unwrap();
+    let legacy = format!("export PATH=\"{}:$PATH\"", home.path().join(".graphmind/bin").display());
+    fs::write(home.path().join(".zshrc"), format!("{legacy}\n")).unwrap();
+
+    let out = graphmind_command(&exe, home.path(), &["setup"])
+        .env("PATH", "/usr/bin:/bin")
+        .env("SHELL", "/bin/zsh")
+        .output()
+        .expect("failed to run graphmind setup");
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+    assert!(out.status.success(), "setup failed\n{text}");
+
+    // Compared canonicalized: the executable's own spelling (macOS keeps /var, Linux resolves).
+    let zshenv = fs::read_to_string(home.path().join(".zshenv")).unwrap_or_default();
+    let added: Vec<_> = zshenv
+        .lines()
+        .filter(|l| l.contains("PATH"))
+        .map(|l| l.strip_prefix("export PATH=\"").and_then(|l| l.strip_suffix(":$PATH\"  # added by graphmind setup")))
+        .map(|dir| dir.and_then(|d| fs::canonicalize(d).ok()))
+        .collect();
+    assert_eq!(added, [fs::canonicalize(&local_bin).ok()], ".zshenv:\n{zshenv}\noutput:\n{text}");
+    assert_eq!(fs::read_to_string(home.path().join(".zshrc")).unwrap(), "", "legacy line kept");
 }
 
 
