@@ -88,6 +88,9 @@ jobs:
             --test cli_auth_e2e \
             --test cli_worktree_e2e \
             --test cli_git_hooks_e2e \
+            --test cli_incremental_edges_e2e \
+            --test cli_embedding_resilience_e2e \
+            --test cli_search_e2e \
             -- --test-threads=1 &
           PID2=$!
 
