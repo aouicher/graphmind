@@ -1,6 +1,6 @@
 use colored::Colorize;
 use graphmind_config::claude_settings::{self, PathRepair};
-use graphmind_config::mcp_clients::{self, graphmind_binary, RecordedConfigDir};
+use graphmind_config::mcp_clients::{self, graphmind_binary, ConfigDirEnv, RecordedConfigDir};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -39,7 +39,8 @@ pub fn setup() {
 
     print_step(5, 10, "Claude Code MCP server (user scope)");
     sync_claude_config_dir();
-    let claude_code = install_mcp_client(&McpClient::ClaudeCodeUser);
+    let claude_code_client = McpClient::claude_code();
+    let claude_code = install_mcp_client(&claude_code_client);
     // Separate from the registration: a settings.json that doesn't parse must not block it, and
     // the old settings.json entry goes only once the user-scope one is in place.
     repair_claude_settings(claude_code.is_in_place());
@@ -84,7 +85,7 @@ pub fn setup() {
     print_hooks_and_skills_summary(&hooks, &skills);
     print_mcp_summary(&[
         (McpClient::ClaudeDesktop.label(), &desktop),
-        (McpClient::ClaudeCodeUser.label(), &claude_code),
+        (claude_code_client.label(), &claude_code),
         (McpClient::Cursor.label(), &cursor),
         (McpClient::OpenCode.label(), &opencode),
     ]);
@@ -193,13 +194,20 @@ fn print_hooks_and_skills_summary(hooks: &Result<(), String>, skills: &Result<()
     }
 }
 
-/// Record `CLAUDE_CONFIG_DIR` for processes that don't inherit it, such as the desktop app (see
-/// `mcp_clients::sync_claude_config_dir`), and say when the Claude Code entry goes to a folder
-/// this process only knows from that record.
+/// Record `CLAUDE_CONFIG_DIR` for the desktop app, which doesn't inherit it when started from
+/// Finder (see `mcp_clients::sync_claude_config_dir`). Say when a relative value is ignored, and
+/// when the desktop app keeps using a folder this setup doesn't configure.
 fn sync_claude_config_dir() {
+    if let ConfigDirEnv::Ignored(value) = mcp_clients::claude_config_dir_env() {
+        println!(
+            "    {} CLAUDE_CONFIG_DIR={} is relative, ignored: set it to an absolute path; setting up ~/.claude.json",
+            "!".yellow(),
+            value.to_string_lossy()
+        );
+    }
     match mcp_clients::sync_claude_config_dir() {
         Ok(RecordedConfigDir::Recorded(dir)) => println!(
-            "    {} recorded CLAUDE_CONFIG_DIR ({}) for the desktop app and other processes without it",
+            "    {} recorded CLAUDE_CONFIG_DIR ({}) for the desktop app",
             "✓".green(),
             dir.display()
         ),
@@ -208,18 +216,14 @@ fn sync_claude_config_dir() {
             "✓".green(),
             dir.display()
         ),
+        Ok(RecordedConfigDir::Kept(dir)) => println!(
+            "    {} this configures ~/.claude.json; the desktop app keeps using {} from an earlier setup (run {} to drop it)",
+            "!".yellow(),
+            dir.display(),
+            "CLAUDE_CONFIG_DIR= graphmind setup".cyan()
+        ),
         Ok(RecordedConfigDir::Unchanged) => {}
         Err(reason) => println!("    {} {reason}", "✗".red()),
-    }
-    if std::env::var_os("CLAUDE_CONFIG_DIR").is_none() {
-        if let Some(dir) = McpClient::ClaudeCodeUser.config_path().parent().filter(|dir| *dir != home_dir()) {
-            println!(
-                "    {} using CLAUDE_CONFIG_DIR {} from an earlier setup; run {} to use ~/.claude.json again",
-                "!".yellow(),
-                dir.display(),
-                "CLAUDE_CONFIG_DIR= graphmind setup".cyan()
-            );
-        }
     }
 }
 
@@ -299,21 +303,36 @@ pub fn repair_claude_settings(remove_legacy_entry: bool) {
 ///
 /// - Claude Code: older versions wrote `projects.<path>.mcpServers.graphmind` into
 ///   ~/.claude.json on every `init`. A project entry takes precedence over the user-scope one,
-///   so a stale `command` there would win. They are removed, but only once the user-scope entry
-///   is in place (`user_scope_in_place`).
+///   so a stale `command` there would win. They are removed from every `.claude.json` graphmind
+///   knows of (`mcp_clients::claude_code_files`), but only once the user-scope entry is in place
+///   (`user_scope_in_place`).
 /// - VS Code: an existing `.vscode/mcp.json` entry that isn't current (a pre-#105 `env.PATH`, a
 ///   moved binary) is rewritten. Projects without one are left alone.
 #[doc(hidden)]
 pub fn migrate_project_mcp_entries(user_scope_in_place: bool) {
     if user_scope_in_place {
-        match mcp_clients::remove_claude_project_entries(None) {
-            Ok(0) => println!("    {} no project-scope Claude Code entries", "✓".green()),
-            Ok(n) => println!(
-                "    {} removed {n} project-scope Claude Code entr{} (the user-scope entry covers every project)",
-                "✓".green(),
-                if n == 1 { "y" } else { "ies" }
-            ),
-            Err(reason) => println!("    {} {reason}", "✗".red()),
+        // Whether a line was printed for any file: a removal or an error.
+        let mut reported = false;
+        for target in mcp_clients::claude_code_files() {
+            match mcp_clients::remove_claude_project_entries(&target, None) {
+                Ok(0) => {}
+                Ok(n) => {
+                    reported = true;
+                    println!(
+                        "    {} removed {n} project-scope Claude Code entr{} from {} (the user-scope entry covers every project)",
+                        "✓".green(),
+                        if n == 1 { "y" } else { "ies" },
+                        target.config_path().display()
+                    );
+                }
+                Err(reason) => {
+                    reported = true;
+                    println!("    {} {reason}", "✗".red());
+                }
+            }
+        }
+        if !reported {
+            println!("    {} no project-scope Claude Code entries", "✓".green());
         }
     } else {
         println!(
@@ -359,24 +378,31 @@ fn canonical_project_path(project_path: &str) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(project_path))
 }
 
-/// Remove the user-scope Claude Code entry, plus what older versions left in
-/// ~/.claude/settings.json (the MCP entry and the `env.PATH` segment).
+/// Remove the user-scope Claude Code entry from every `.claude.json` graphmind knows of
+/// (`mcp_clients::claude_code_files`: this process's, ~/.claude.json and the recorded folder's),
+/// plus what older versions left in ~/.claude/settings.json (the MCP entry and the `env.PATH`
+/// segment).
 #[doc(hidden)]
 pub fn unregister_mcp_in_claude_code() {
-    uninstall_mcp_client(&McpClient::ClaudeCodeUser);
+    for target in mcp_clients::claude_code_files() {
+        uninstall_mcp_client(&target);
+    }
     // Reuse the #105 repair so uninstall and setup converge on identical results.
     repair_claude_settings(true);
 }
 
 /// Remove graphmind from one project's MCP configs: the project-scope entry older versions wrote
-/// to `~/.claude.json`, and `<project>/.vscode/mcp.json`. Parent entries and files stay.
+/// to `.claude.json` (every one `mcp_clients::claude_code_files` lists), and
+/// `<project>/.vscode/mcp.json`. Parent entries and files stay.
 #[doc(hidden)]
 pub fn uninstall_project_mcp_configs(project_path: &str) {
     let abs_path = canonical_project_path(project_path);
-    match mcp_clients::remove_claude_project_entries(Some(&abs_path.to_string_lossy())) {
-        Ok(0) => {}
-        Ok(_) => println!("    {} removed from ~/.claude.json (project scope)", "✓".green()),
-        Err(reason) => println!("    {} {reason}", "✗".red()),
+    for target in mcp_clients::claude_code_files() {
+        match mcp_clients::remove_claude_project_entries(&target, Some(&abs_path.to_string_lossy())) {
+            Ok(0) => {}
+            Ok(_) => println!("    {} removed from {} (project scope)", "✓".green(), target.config_path().display()),
+            Err(reason) => println!("    {} {reason}", "✗".red()),
+        }
     }
     uninstall_mcp_client(&McpClient::VsCode(abs_path));
 }
@@ -422,8 +448,11 @@ pub fn uninstall_all(purge: bool, yes: bool) {
         uninstall_project_mcp_configs(&project.path);
     }
 
+    // The recorded CLAUDE_CONFIG_DIR goes too: its .claude.json was cleaned above, and the
+    // desktop app would otherwise keep using it.
     let mut config = graphmind_config::load_config();
     config.setup_version = 0;
+    config.claude_config_dir = None;
     graphmind_config::save_config(&config);
 
     println!("\n{}", "─".repeat(50).dimmed());

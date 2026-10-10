@@ -9,6 +9,12 @@ use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Started from the Finder, the app doesn't inherit CLAUDE_CONFIG_DIR: take the folder setup
+    // recorded, so the Claude Code card and every graphmind command the app starts use the
+    // folder Claude Code does. First, before any thread exists: changing the environment isn't
+    // thread-safe.
+    graphmind_config::mcp_clients::inherit_recorded_claude_config_dir();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())

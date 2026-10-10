@@ -133,8 +133,8 @@ fn setup_leaves_an_unreadable_claude_md_alone() {
         fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
         fs::write(&claude_md, "# My own instructions\n").unwrap();
         fs::set_permissions(&claude_md, fs::Permissions::from_mode(0o200)).unwrap(); // write-only
-        if fs::read(&claude_md).is_ok() {
-            return; // running as root: permissions don't apply
+        if common::skip_as_root("setup_leaves_an_unreadable_claude_md_alone") {
+            return;
         }
 
         assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));

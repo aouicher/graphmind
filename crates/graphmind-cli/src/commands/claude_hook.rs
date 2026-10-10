@@ -532,17 +532,21 @@ fn register_in_settings() -> Result<(), String> {
 
     let hooks = settings
         .as_object_mut()
-        .ok_or("settings is not an object")?
+        .ok_or_else(|| format!("{} isn't a JSON object; left unchanged", path.display()))?
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
-    let hooks_obj = hooks.as_object_mut().ok_or("hooks is not an object")?;
+    let hooks_obj = hooks
+        .as_object_mut()
+        .ok_or_else(|| format!("\"hooks\" in {} isn't an object; left unchanged", path.display()))?;
     strip_graphmind_hooks(hooks_obj);
 
     let dir = hooks_dir();
     for hook in HOOKS {
         let cmd = dir.join(hook.file).to_string_lossy().into_owned();
         let list = hooks_obj.entry(hook.event).or_insert_with(|| serde_json::json!([]));
-        let arr = list.as_array_mut().ok_or_else(|| format!("{} is not an array", hook.event))?;
+        let arr = list.as_array_mut().ok_or_else(|| {
+            format!("\"hooks\".\"{}\" in {} isn't an array; left unchanged", hook.event, path.display())
+        })?;
         for &matcher in hook.matchers {
             // Join an existing entry for the same matcher, so other tools' hooks there keep
             // running first.

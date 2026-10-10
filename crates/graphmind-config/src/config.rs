@@ -218,9 +218,10 @@ pub struct GlobalConfig {
     pub build_all_on_startup: bool,
     #[serde(default)]
     pub memory: MemoryConfig,
-    /// `CLAUDE_CONFIG_DIR` as the last `graphmind setup` that had it set saw it: where Claude
-    /// Code keeps its user-scope MCP servers for processes that don't inherit the variable (the
-    /// desktop app started from Finder, the setup it runs). See `mcp_clients::sync_claude_config_dir`.
+    /// `CLAUDE_CONFIG_DIR` as the last `graphmind setup` that had it set saw it, for the desktop
+    /// app, which doesn't inherit the variable when started from Finder: it sets the variable
+    /// from this at startup. The CLI doesn't read it; uninstall cleans this folder's .claude.json
+    /// too and clears it. See `mcp_clients::sync_claude_config_dir`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_config_dir: Option<PathBuf>,
 }
@@ -689,7 +690,7 @@ mod startup_config_tests {
 
 /// Serializes the tests that point HOME at a temp dir: HOME is process-wide.
 #[cfg(test)]
-static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod concurrent_registration_tests {

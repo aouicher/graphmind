@@ -20,6 +20,8 @@ use serde_json::{json, Value};
 use std::fs;
 use std::sync::Mutex;
 
+mod common;
+
 // Serialize all tests — HOME is process-wide.
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -146,7 +148,7 @@ fn unregister_mcp_in_claude_code_preserves_unrelated() {
         fs::write(home.join(".claude.json"), r#"{"projects": {}, "numStartups": 7}"#).unwrap();
 
         // Setup's Claude Code step.
-        let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
+        let outcome = install_mcp_client(&McpClient::claude_code());
         repair_claude_settings(outcome.is_in_place());
 
         // Moved: gone from settings.json, present at user scope in ~/.claude.json.
@@ -168,6 +170,76 @@ fn unregister_mcp_in_claude_code_preserves_unrelated() {
         assert!(json["mcpServers"]["some-other-server"].is_object());
         assert_eq!(json["someUnrelatedKey"].as_str(), Some("keep-me"));
     });
+}
+
+/// With CLAUDE_CONFIG_DIR set, uninstall removes graphmind from that folder's .claude.json and
+/// from ~/.claude.json (which Claude Code reads without the variable), user and project scope.
+#[test]
+fn uninstall_covers_home_and_claude_config_dir() {
+    with_home(|home| {
+        let project_dir = tempfile::tempdir().unwrap();
+        let project = project_dir.path().canonicalize().unwrap();
+        let project_key = project.to_string_lossy().to_string();
+        let config_dir = home.join("claude-config");
+        fs::create_dir_all(&config_dir).unwrap();
+        let installed = json!({
+            "mcpServers": { "graphmind": { "type": "stdio", "command": "/bin/gm", "args": ["mcp"] }, "other": { "command": "other" } },
+            "projects": { project_key.clone(): { "mcpServers": { "graphmind": { "command": "/old/graphmind" } } } }
+        });
+        let files = [config_dir.join(".claude.json"), home.join(".claude.json")];
+        for file in &files {
+            fs::write(file, installed.to_string()).unwrap();
+        }
+
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &config_dir) };
+        unregister_mcp_in_claude_code();
+        uninstall_project_mcp_configs(&project_key);
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+
+        for file in &files {
+            let json: Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+            assert!(json["mcpServers"]["graphmind"].is_null(), "{}: {json}", file.display());
+            assert_eq!(json["mcpServers"]["other"]["command"], "other", "{}: {json}", file.display());
+            assert!(json["projects"][&project_key]["mcpServers"]["graphmind"].is_null(), "{}: {json}", file.display());
+        }
+    });
+}
+
+/// `uninstall all` from a shell without CLAUDE_CONFIG_DIR still cleans the folder setup recorded
+/// (the desktop app's), along with ~/.claude.json, and clears the record.
+#[test]
+fn uninstall_all_without_the_variable_cleans_the_recorded_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let graphmind = |args: &[&str], config_dir: Option<&std::path::Path>| {
+        let mut command = common::graphmind_in(std::path::Path::new(env!("CARGO_BIN_EXE_graphmind")), home, "/bin/zsh");
+        if let Some(dir) = config_dir {
+            command.env("CLAUDE_CONFIG_DIR", dir);
+        }
+        let out = command.args(args).output().unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let config_dir = home.join("claude-config");
+    fs::create_dir_all(&config_dir).unwrap();
+    let home_json = home.join(".claude.json");
+    fs::write(&home_json, r#"{"mcpServers": {"graphmind": {"command": "/old/gm"}, "other": {"command": "other"}}}"#).unwrap();
+    let read = |path: &std::path::Path| -> Value { serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap() };
+
+    graphmind(&["setup"], Some(&config_dir));
+    let config_json = home.join(".graphmind/config.json");
+    assert_eq!(read(&config_json)["claude_config_dir"], json!(config_dir));
+    assert!(read(&config_dir.join(".claude.json"))["mcpServers"]["graphmind"].is_object());
+
+    graphmind(&["uninstall", "all"], None);
+
+    for file in [config_dir.join(".claude.json"), home_json] {
+        let json = read(&file);
+        assert!(json["mcpServers"]["graphmind"].is_null(), "{}: {json}", file.display());
+    }
+    assert_eq!(read(&home.join(".claude.json"))["mcpServers"]["other"]["command"], "other");
+    let config = read(&config_json);
+    assert!(config["claude_config_dir"].is_null(), "record kept: {config}");
+    assert_eq!(config["setup_version"], 0);
 }
 
 #[test]

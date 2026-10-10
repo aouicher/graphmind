@@ -357,7 +357,7 @@ fn setup_registers_through_claude_cli_when_available() {
         // A stale entry: the CLI refuses to add over it, so it is removed first.
         fs::write(home.join(".claude.json"), r#"{"mcpServers": {"graphmind": {"command": "/old/graphmind"}}}"#).unwrap();
 
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Written);
+        assert_eq!(install_mcp_client(&McpClient::claude_code()), Outcome::Written);
 
         let log = fs::read_to_string(home.join("claude-calls.log")).unwrap();
         let bin = home.join(".graphmind/bin/graphmind");
@@ -368,7 +368,7 @@ fn setup_registers_through_claude_cli_when_available() {
         assert_eq!(backups_of(&home.join(".claude.json")), 0, "the CLI wrote the file, not graphmind");
 
         // What the CLI wrote (with an empty `env`) counts as current: no second call.
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Unchanged);
+        assert_eq!(install_mcp_client(&McpClient::claude_code()), Outcome::Unchanged);
         assert_eq!(fs::read_to_string(home.join("claude-calls.log")).unwrap(), log);
     });
 }
@@ -380,7 +380,7 @@ fn setup_falls_back_to_direct_write_when_claude_cli_fails() {
         fake_claude(home, "echo 'config locked' >&2\nexit 1");
         fs::write(home.join(".claude.json"), r#"{"numStartups": 7}"#).unwrap();
 
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Written);
+        assert_eq!(install_mcp_client(&McpClient::claude_code()), Outcome::Written);
 
         assert!(fs::read_to_string(home.join("claude-calls.log")).unwrap().starts_with("mcp add"));
         let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
@@ -533,7 +533,7 @@ fn setup_never_replaces_unparseable_json() {
 
         let claude_json = home.join(".claude.json");
         fs::write(&claude_json, "{\"projects\": {").unwrap(); // mid-write
-        assert!(matches!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::LeftAlone(_)));
+        assert!(matches!(install_mcp_client(&McpClient::claude_code()), Outcome::LeftAlone(_)));
         migrate_project_mcp_entries(true);
         assert_eq!(fs::read_to_string(&claude_json).unwrap(), "{\"projects\": {");
 
@@ -683,6 +683,23 @@ fn install_hook_leaves_an_unparseable_settings_json_alone() {
     });
 }
 
+/// A settings.json whose "hooks" (or one of its events) has the wrong type is left alone, and the
+/// reason names the file.
+#[test]
+fn install_hook_names_the_file_when_hooks_has_the_wrong_type() {
+    with_home(|home| {
+        let settings = home.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        for broken in [r#"{"hooks": []}"#, r#"{"hooks": {"SessionStart": {}}}"#] {
+            fs::write(&settings, broken).unwrap();
+            let Err(reason) = install_hook() else { panic!("{broken} was not left alone") };
+            assert!(reason.contains(&*settings.to_string_lossy()), "{reason}");
+            assert!(reason.ends_with("left unchanged"), "{reason}");
+            assert_eq!(fs::read_to_string(&settings).unwrap(), broken);
+        }
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn install_hook_leaves_an_unreadable_settings_json_alone() {
@@ -692,8 +709,8 @@ fn install_hook_leaves_an_unreadable_settings_json_alone() {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         fs::write(&settings, r#"{"permissions": {"allow": ["Bash"]}}"#).unwrap();
         fs::set_permissions(&settings, fs::Permissions::from_mode(0o200)).unwrap(); // write-only
-        if fs::read(&settings).is_ok() {
-            return; // running as root: permissions don't apply
+        if common::skip_as_root("install_hook_leaves_an_unreadable_settings_json_alone") {
+            return;
         }
 
         let outcome = install_hook();

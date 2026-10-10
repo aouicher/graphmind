@@ -7,21 +7,27 @@ use std::sync::{Mutex, OnceLock};
 
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-/// `graphmind setup` run as a command: `exe` in `home`, with `shell` as $SHELL and only the system
-/// directories on PATH, so no `claude` or `opencode` from the machine running the tests is used.
-/// The caller checks the status and reads stdout.
-pub fn run_setup_as(exe: &Path, home: &Path, shell: &str) -> Output {
-    Command::new(exe)
-        .arg("setup")
+/// `exe` as a command in `home` (its working directory too), with `shell` as $SHELL and only the
+/// system directories on PATH, so no `claude` or `opencode` from the machine running the tests is
+/// used. CLAUDE_CONFIG_DIR is removed; a test that needs it sets it on the command.
+pub fn graphmind_in(exe: &Path, home: &Path, shell: &str) -> Command {
+    let mut command = Command::new(exe);
+    command
+        .current_dir(home)
         .env("HOME", home)
         .env("PATH", "/usr/bin:/bin")
         .env("SHELL", shell)
         .env_remove("CLAUDE_CONFIG_DIR")
         .env("NO_COLOR", "1")
         .env("GRAPHMIND_SKIP_NOTICES", "1")
-        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
-        .output()
-        .expect("failed to run graphmind setup")
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1");
+    command
+}
+
+/// `graphmind setup` run as a command (see [`graphmind_in`]). The caller checks the status and
+/// reads stdout.
+pub fn run_setup_as(exe: &Path, home: &Path, shell: &str) -> Output {
+    graphmind_in(exe, home, shell).arg("setup").output().expect("failed to run graphmind setup")
 }
 
 /// True when running as root, where file permissions don't stop writes. A test that needs them
@@ -36,7 +42,7 @@ pub fn skip_as_root(test: &str) -> bool {
 
 /// Setup's Claude Code step: register at user scope, then repair settings.json.
 pub fn claude_code_step() -> Outcome {
-    let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
+    let outcome = install_mcp_client(&McpClient::claude_code());
     repair_claude_settings(outcome.is_in_place());
     outcome
 }
