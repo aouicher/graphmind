@@ -11,11 +11,10 @@
 use graphmind_cli::commands::claude_hook::{install_hook, uninstall_hook};
 use graphmind_cli::commands::install_skill::{install_skill, uninstall_skill};
 use graphmind_cli::commands::setup::{
-    ensure_project_mcp_configs, home_dir, install_claude_desktop_mcp, install_claude_md_block,
-    install_cursor_global_mcp, install_opencode_mcp,
-    register_mcp_in_claude_code, uninstall_claude_desktop_mcp, uninstall_claude_md_block,
-    uninstall_cursor_global_mcp, uninstall_opencode_mcp, uninstall_project_mcp_configs,
-    uninstall_shell_path, unregister_mcp_in_claude_code,
+    ensure_project_mcp_configs, home_dir, install_claude_md_block, install_mcp_client,
+    repair_claude_settings, uninstall_claude_md_block, uninstall_mcp_client,
+    uninstall_project_mcp_configs, uninstall_shell_path, unregister_mcp_in_claude_code, McpClient,
+    Outcome,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -24,11 +23,18 @@ use std::sync::Mutex;
 // Serialize all tests — HOME is process-wide.
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-/// Helper: create a fresh temp HOME, point `HOME` at it, run `f`, then drop.
+/// Helper: create a fresh temp HOME, point `HOME` at it, run `f`, then drop. PATH holds only the
+/// system directories, so the `claude` and `opencode` installed on the machine running the tests
+/// are never used.
 fn with_home<F: FnOnce(&std::path::Path)>(f: F) {
     let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("HOME", dir.path()) };
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+        std::env::set_var("PATH", "/usr/bin:/bin");
+        // Claude Code's config would move there, out of the temp HOME.
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
     f(dir.path());
     // dir dropped here — content cleaned up, HOME still points at it but that's harmless.
 }
@@ -109,44 +115,42 @@ fn unregister_mcp_in_claude_code_preserves_unrelated() {
     with_home(|home| {
         let claude_dir = home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
-
-        register_mcp_in_claude_code();
-
         let settings_path = claude_dir.join("settings.json");
-        let content = fs::read_to_string(&settings_path).unwrap();
-        let mut json: Value = serde_json::from_str(&content).unwrap();
+        let bin_dir = home.join(".graphmind").join("bin").to_string_lossy().to_string();
 
-        // Inject an unrelated mcpServers entry and an unrelated top-level key.
-        json["mcpServers"]["some-other-server"] = json!({"command": "other", "args": []});
-        json["someUnrelatedKey"] = json!("keep-me");
-        fs::write(&settings_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+        // An install from an older version: entry in settings.json, env.PATH prefix.
+        fs::write(&settings_path, serde_json::to_string_pretty(&json!({
+            "mcpServers": {
+                "graphmind": {"command": "/old/graphmind", "args": ["mcp"]},
+                "some-other-server": {"command": "other", "args": []}
+            },
+            "env": {"PATH": format!("{bin_dir}:/usr/bin")},
+            "someUnrelatedKey": "keep-me"
+        })).unwrap()).unwrap();
+        fs::write(home.join(".claude.json"), r#"{"projects": {}, "numStartups": 7}"#).unwrap();
+
+        // Setup's Claude Code step.
+        let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
+        repair_claude_settings(outcome.is_in_place());
+
+        // Moved: gone from settings.json, present at user scope in ~/.claude.json.
+        let json: Value = serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert!(json["mcpServers"]["graphmind"].is_null(), "settings.json entry removed: {json}");
+        assert!(json["mcpServers"]["some-other-server"].is_object(), "{json}");
+        assert_eq!(json["someUnrelatedKey"].as_str(), Some("keep-me"));
+        assert!(!json["env"]["PATH"].as_str().unwrap_or("").contains(&bin_dir), "{json}");
+        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+        assert!(user["mcpServers"]["graphmind"]["command"].is_string(), "{user}");
+        assert_eq!(user["numStartups"], 7, "rest of ~/.claude.json kept");
 
         unregister_mcp_in_claude_code();
 
-        let content = fs::read_to_string(&settings_path).unwrap();
-        let json: Value = serde_json::from_str(&content).unwrap();
-
-        assert!(
-            json["mcpServers"]["graphmind"].is_null(),
-            "mcpServers.graphmind should be removed, got: {json}"
-        );
-        assert!(
-            json["mcpServers"]["some-other-server"].is_object(),
-            "unrelated mcpServers entry should survive, got: {json}"
-        );
-        assert_eq!(
-            json["someUnrelatedKey"].as_str(),
-            Some("keep-me"),
-            "unrelated top-level key should survive, got: {json}"
-        );
-
-        // The env.PATH prefix graphmind added should be stripped.
-        let bin_dir = home.join(".graphmind").join("bin").to_string_lossy().to_string();
-        let path_val = json["env"]["PATH"].as_str().unwrap_or("");
-        assert!(
-            !path_val.starts_with(&format!("{bin_dir}:")),
-            "env.PATH prefix should be stripped, got: {path_val}"
-        );
+        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+        assert!(user["mcpServers"]["graphmind"].is_null(), "{user}");
+        assert_eq!(user["numStartups"], 7);
+        let json: Value = serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert!(json["mcpServers"]["some-other-server"].is_object());
+        assert_eq!(json["someUnrelatedKey"].as_str(), Some("keep-me"));
     });
 }
 
@@ -235,7 +239,7 @@ fn uninstall_claude_desktop_mcp_preserves_unrelated() {
         };
         fs::create_dir_all(&config_dir).unwrap();
 
-        install_claude_desktop_mcp();
+        install_mcp_client(&McpClient::ClaudeDesktop);
 
         let config_file = config_dir.join("claude_desktop_config.json");
         let content = fs::read_to_string(&config_file).unwrap();
@@ -243,7 +247,7 @@ fn uninstall_claude_desktop_mcp_preserves_unrelated() {
         json["mcpServers"]["sibling"] = json!({"command": "sibling-cmd"});
         fs::write(&config_file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
-        uninstall_claude_desktop_mcp();
+        uninstall_mcp_client(&McpClient::ClaudeDesktop);
 
         let content = fs::read_to_string(&config_file).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -262,7 +266,8 @@ fn uninstall_claude_desktop_mcp_preserves_unrelated() {
 #[test]
 fn uninstall_cursor_global_mcp_preserves_unrelated() {
     with_home(|home| {
-        install_cursor_global_mcp();
+        fs::create_dir_all(home.join(".cursor")).unwrap(); // Cursor installed
+        install_mcp_client(&McpClient::Cursor);
 
         let config_path = home.join(".cursor").join("mcp.json");
         let content = fs::read_to_string(&config_path).unwrap();
@@ -270,7 +275,7 @@ fn uninstall_cursor_global_mcp_preserves_unrelated() {
         json["mcpServers"]["sibling"] = json!({"command": "sibling-cmd"});
         fs::write(&config_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
-        uninstall_cursor_global_mcp();
+        uninstall_mcp_client(&McpClient::Cursor);
 
         let content = fs::read_to_string(&config_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -289,7 +294,8 @@ fn uninstall_cursor_global_mcp_preserves_unrelated() {
 #[test]
 fn uninstall_opencode_mcp_preserves_unrelated() {
     with_home(|home| {
-        install_opencode_mcp();
+        fs::create_dir_all(home.join(".config/opencode")).unwrap(); // OpenCode installed
+        install_mcp_client(&McpClient::OpenCode);
 
         let config_path = home.join(".config").join("opencode").join("opencode.jsonc");
         let content = fs::read_to_string(&config_path).unwrap();
@@ -297,7 +303,7 @@ fn uninstall_opencode_mcp_preserves_unrelated() {
         json["mcp"]["sibling"] = json!({"type": "local", "command": ["sibling"]});
         fs::write(&config_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
-        uninstall_opencode_mcp();
+        uninstall_mcp_client(&McpClient::OpenCode);
 
         let content = fs::read_to_string(&config_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -313,9 +319,24 @@ fn uninstall_opencode_mcp_preserves_unrelated() {
 fn uninstall_opencode_mcp_noop_when_absent() {
     with_home(|_home| {
         // No file exists at all — must be a safe no-op.
-        uninstall_opencode_mcp();
+        assert_eq!(uninstall_mcp_client(&McpClient::OpenCode), Outcome::Unchanged);
         let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
         assert!(!config_path.exists(), "should not create a file that didn't exist");
+    });
+}
+
+#[test]
+fn uninstall_opencode_mcp_keeps_jsonc_comments() {
+    with_home(|home| {
+        let config_path = home.join(".config").join("opencode").join("opencode.jsonc");
+        fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        // Rewriting this file to remove the entry would drop the comments.
+        let commented = "{\n  // my servers\n  \"mcp\": {\"graphmind\": {\"type\": \"local\", \"command\": [\"gm\", \"mcp\"]}}\n}\n";
+        fs::write(&config_path, commented).unwrap();
+
+        assert!(matches!(uninstall_mcp_client(&McpClient::OpenCode), Outcome::LeftAlone(_)));
+
+        assert_eq!(fs::read_to_string(&config_path).unwrap(), commented);
     });
 }
 
@@ -447,6 +468,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
 fn uninstall_project_mcp_configs_preserves_unrelated_project_and_server() {
     with_home(|home| {
         let project_dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(project_dir.path().join(".vscode")).unwrap(); // a VS Code project
         let project_path = project_dir.path().to_str().unwrap();
 
         ensure_project_mcp_configs(project_path);
@@ -456,12 +478,13 @@ fn uninstall_project_mcp_configs_preserves_unrelated_project_and_server() {
             .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
         let abs_str = abs_path.to_string_lossy().to_string();
 
-        // Inject an unrelated second project entry into ~/.claude.json.
+        // The project-scope entry older versions wrote, next to an unrelated project.
         let claude_json_path = home.join(".claude.json");
-        let content = fs::read_to_string(&claude_json_path).unwrap();
-        let mut json: Value = serde_json::from_str(&content).unwrap();
-        json["projects"]["/some/other/project"] = json!({
-            "mcpServers": { "other-tool": { "command": "other" } }
+        let json = json!({
+            "projects": {
+                abs_str.clone(): { "mcpServers": { "graphmind": { "type": "stdio", "command": "/old/graphmind", "args": ["mcp"] } } },
+                "/some/other/project": { "mcpServers": { "other-tool": { "command": "other" } } }
+            }
         });
         fs::write(&claude_json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
@@ -550,8 +573,8 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         let canary_cursor = json!({ "mcpServers": { "canary-server": { "command": "canary" } } });
         fs::write(&cursor_path, serde_json::to_string_pretty(&canary_cursor).unwrap()).unwrap();
 
-        install_cursor_global_mcp();
-        uninstall_cursor_global_mcp();
+        install_mcp_client(&McpClient::Cursor);
+        uninstall_mcp_client(&McpClient::Cursor);
 
         let content = fs::read_to_string(&cursor_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -568,8 +591,8 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         let canary_opencode = json!({ "mcp": { "canary-server": { "type": "local", "command": ["canary"] } } });
         fs::write(&opencode_path, serde_json::to_string_pretty(&canary_opencode).unwrap()).unwrap();
 
-        install_opencode_mcp();
-        uninstall_opencode_mcp();
+        install_mcp_client(&McpClient::OpenCode);
+        uninstall_mcp_client(&McpClient::OpenCode);
 
         let content = fs::read_to_string(&opencode_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();

@@ -1,7 +1,11 @@
 use colored::Colorize;
-use serde_json::{json, Value};
+use graphmind_config::claude_settings::{self, PathRepair};
+use graphmind_config::mcp_clients::{self, graphmind_binary};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+#[doc(hidden)]
+pub use graphmind_config::mcp_clients::{McpClient, Outcome};
 
 mod shell_path;
 #[doc(hidden)]
@@ -29,19 +33,22 @@ pub fn setup() {
     super::install_skill::install_skill();
 
     print_step(4, 10, "Claude Desktop MCP config");
-    install_claude_desktop_mcp();
+    let desktop = install_mcp_client(&McpClient::ClaudeDesktop);
 
-    print_step(5, 10, "Claude Code MCP server");
-    register_mcp_in_claude_code();
+    print_step(5, 10, "Claude Code MCP server (user scope)");
+    let claude_code = install_mcp_client(&McpClient::ClaudeCodeUser);
+    // Separate from the registration: a settings.json that doesn't parse must not block it, and
+    // the old settings.json entry goes only once the user-scope one is in place.
+    repair_claude_settings(claude_code.is_in_place());
 
     print_step(6, 10, "OpenCode MCP config");
-    install_opencode_mcp();
+    let opencode = install_mcp_client(&McpClient::OpenCode);
 
     print_step(7, 10, "Cursor global MCP config");
-    install_cursor_global_mcp();
+    let cursor = install_mcp_client(&McpClient::Cursor);
 
-    print_step(8, 10, "Repair legacy env.PATH (issue #105)");
-    repair_project_mcp_env();
+    print_step(8, 10, "Project MCP entries (Claude Code project scope, VS Code)");
+    migrate_project_mcp_entries(claude_code.is_in_place());
 
     print_step(9, 10, "Git hooks of registered projects");
     match super::hooks::refresh_installed() {
@@ -50,20 +57,41 @@ pub fn setup() {
     }
 
     print_step(10, 10, "CLAUDE.md instruction");
-    install_claude_md_block();
+    let claude_md = install_claude_md_block();
 
-    // Stamp setup version so CLI/desktop can detect outdated config
-    let mut config = graphmind_config::load_config();
-    config.setup_version = graphmind_config::SETUP_VERSION;
-    graphmind_config::save_config(&config);
+    // Stamp setup version so CLI/desktop can detect outdated config. Not while the Claude Code
+    // entry is missing: auto-setup must retry it, and the project-scope migration waits for it.
+    if claude_code.is_in_place() {
+        if let Ok(mut config) = graphmind_config::read_config() {
+            config.setup_version = graphmind_config::SETUP_VERSION;
+            graphmind_config::save_config(&config);
+        }
+    }
 
     println!("\n{}", "─".repeat(50).dimmed());
     println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
     println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 5 hooks registered (PreToolUse, SessionStart, UserPromptSubmit, PostToolUse, Stop)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
-    println!("  {} MCP server configured (Claude Desktop + Claude Code + Cursor + OpenCode)", "✓".green());
-    println!("  {} CLAUDE.md instruction block updated", "✓".green());
+    print_mcp_summary(&[
+        (McpClient::ClaudeDesktop.label(), &desktop),
+        (McpClient::ClaudeCodeUser.label(), &claude_code),
+        (McpClient::Cursor.label(), &cursor),
+        (McpClient::OpenCode.label(), &opencode),
+    ]);
+    match claude_md {
+        Outcome::Written => println!("  {} CLAUDE.md instruction block updated", "✓".green()),
+        Outcome::Unchanged => println!("  {} CLAUDE.md instruction block already current", "✓".green()),
+        Outcome::NotInstalled | Outcome::LeftAlone(_) => {
+            println!("  {} CLAUDE.md instruction block left as is (see above)", "⊘".yellow())
+        }
+    }
+    if !claude_code.is_in_place() {
+        println!(
+            "  {} setup not marked complete: it runs again until the Claude Code MCP entry is in place",
+            "⊘".yellow()
+        );
+    }
     println!();
     println!("  Next: run {} in each project to index.", "graphmind init".cyan().bold());
     println!("  Update later with {}.", "graphmind update".dimmed());
@@ -83,7 +111,7 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     print_step(1, 4, &format!("Register project ({})", project_path));
     super::register::register(project_path, None, &[]);
 
-    print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
+    print_step(2, 4, "VS Code MCP config (projects with a .vscode/ folder)");
     ensure_project_mcp_configs(project_path);
 
     print_step(3, 4, "Git hooks (commit, merge, rebase, checkout, push)");
@@ -106,82 +134,80 @@ fn print_step(n: u8, total: u8, label: &str) {
     println!("  {} {}", format!("[{n}/{total}]").cyan().bold(), label);
 }
 
+/// Add or update graphmind's MCP entry for `client` and say what happened. Claude Code goes
+/// through `claude mcp add -s user` when the CLI is available.
 #[doc(hidden)]
-pub fn install_claude_desktop_mcp() {
-    let config_path = claude_desktop_config_path();
-    let Some(config_path) = config_path else {
-        println!("    {} Claude Desktop config not found (not installed?)", "⊘".yellow());
-        return;
-    };
-
-    let graphmind_path = find_graphmind_binary();
-
-    let mut config: Value = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
-    };
-
-    let mcp_servers = config
-        .as_object_mut()
-        .unwrap()
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
-
-    // Backup before modifying
-    if config_path.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = config_path.with_extension(format!("json.{ts}.bak"));
-        fs::copy(&config_path, &backup).ok();
-    }
-
-    if mcp_servers.get("graphmind").is_some() {
-        println!("    {} already configured", "✓".green());
-        return;
-    }
-
-    // No `env` block: `graphmind_path` is absolute, so the server needs nothing
-    // from PATH to launch. Setting `env.PATH` here would REPLACE the inherited
-    // environment and break nvm/asdf/mise/Homebrew-on-ARM setups. See issue #105.
-    mcp_servers.as_object_mut().unwrap().insert(
-        "graphmind".to_string(),
-        json!({
-            "command": graphmind_path,
-            "args": ["mcp"]
-        }),
-    );
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).ok();
-    }
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-    println!("    {} configured at {}", "✓".green(), config_path.display());
+pub fn install_mcp_client(client: &McpClient) -> Outcome {
+    let outcome = mcp_clients::upsert(client, &graphmind_binary(), &mut print_cli_fallback);
+    print_install(client, &outcome);
+    outcome
 }
 
+/// Remove graphmind's MCP entry for `client` and say what happened.
 #[doc(hidden)]
-pub fn register_mcp_in_claude_code() {
-    let settings_path = home_dir().join(".claude").join("settings.json");
-    let graphmind_path = find_graphmind_binary();
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
+pub fn uninstall_mcp_client(client: &McpClient) -> Outcome {
+    let outcome = mcp_clients::remove(client, &mut print_cli_fallback);
+    match &outcome {
+        Outcome::Written => println!("    {} removed from {}", "✓".green(), client.config_path().display()),
+        Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+        Outcome::Unchanged | Outcome::NotInstalled => {}
+    }
+    outcome
+}
 
-    let mut config: Value = if settings_path.exists() {
-        let content = fs::read_to_string(&settings_path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
+fn print_cli_fallback(reason: &str) {
+    println!("    {} {reason}; writing the file directly", "!".yellow());
+}
+
+fn print_install(client: &McpClient, outcome: &Outcome) {
+    let path = client.config_path();
+    match outcome {
+        Outcome::Unchanged => println!("    {} already configured ({})", "✓".green(), path.display()),
+        Outcome::Written => println!("    {} configured at {}", "✓".green(), path.display()),
+        Outcome::NotInstalled => println!("    {} {} not installed, skipped", "⊘".yellow(), client.label()),
+        Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+    }
+}
+
+fn print_mcp_summary(results: &[(&str, &Outcome)]) {
+    let names = |wanted: fn(&Outcome) -> bool| {
+        results
+            .iter()
+            .filter(|(_, outcome)| wanted(outcome))
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
     };
+    let configured = names(Outcome::is_in_place);
+    let skipped = names(|o| *o == Outcome::NotInstalled);
+    let left_alone = names(|o| matches!(o, Outcome::LeftAlone(_)));
+    if !configured.is_empty() {
+        println!("  {} MCP server configured for {configured}", "✓".green());
+    }
+    if !skipped.is_empty() {
+        println!("  {} not installed, skipped: {skipped}", "⊘".yellow());
+    }
+    if !left_alone.is_empty() {
+        println!("  {} MCP config left unchanged for {left_alone} (see above)", "✗".red());
+    }
+}
 
-    // Repair any env.PATH pollution written by graphmind <= v0.2.211.
-    // We deliberately do NOT set a global env.PATH: it applies to every Bash tool
-    // call in Claude Code, and the old code seeded it from a hardcoded
-    // "/usr/local/bin:/usr/bin:/bin" default, wiping nvm/asdf/Homebrew-ARM paths.
-    // The hook scripts already self-prefix PATH (see claude_hook.rs), so hooks
-    // resolve `graphmind` without any settings.json help. See issue #105.
-    match repair_claude_settings_path(&mut config, &graphmind_bin_dir) {
+/// Repair ~/.claude/settings.json (see `claude_settings::repair_claude_settings`) and say what
+/// changed. Setup sets `remove_legacy_entry` only once the user-scope entry is in place, so Claude
+/// Code is never left without one.
+#[doc(hidden)]
+pub fn repair_claude_settings(remove_legacy_entry: bool) {
+    let repair = match claude_settings::repair_claude_settings(remove_legacy_entry) {
+        Ok(repair) => repair,
+        Err(reason) => {
+            println!("    {} {reason}", "✗".red());
+            return;
+        }
+    };
+    if repair.legacy_entry_removed {
+        println!("    {} removed the old MCP entry from ~/.claude/settings.json", "✓".green());
+    }
+    match repair.path {
         PathRepair::NotNeeded => {}
         PathRepair::KeyRemoved => {
             println!(
@@ -213,500 +239,70 @@ pub fn register_mcp_in_claude_code() {
             );
         }
     }
-
-    let mcp_entry = json!({
-        "command": graphmind_path,
-        "args": ["mcp"]
-    });
-
-    let mcp_servers = config
-        .as_object_mut()
-        .unwrap()
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
-
-    // An entry is current only when it points at the right binary AND carries no
-    // `env` block. Pre-#105 entries have `env.PATH` and must be rewritten.
-    let already_correct = mcp_servers
-        .get("graphmind")
-        .is_some_and(|e| {
-            e.get("env").is_none()
-                && e.get("command").and_then(|c| c.as_str()) == Some(graphmind_path.as_str())
-        });
-
-    if !already_correct {
-        mcp_servers.as_object_mut().unwrap().insert("graphmind".to_string(), mcp_entry);
-    }
-
-    // Backup before writing
-    if settings_path.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = settings_path.with_extension(format!("json.{ts}.bak"));
-        fs::copy(&settings_path, &backup).ok();
-    }
-
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&settings_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write settings: {e}", "✗".red());
-    });
-    println!("    {} configured", "✓".green());
 }
 
-/// Strip the stale `env.PATH` blocks that graphmind <= v0.2.211 wrote into every
-/// per-project MCP entry of `~/.claude.json` and `<project>/.vscode/mcp.json`
-/// (issue #105).
+/// Per-project MCP entries of registered projects.
 ///
-/// `setup()` only rewrites the *global* client configs; per-project entries would
-/// otherwise keep their broken `env` until the user happened to re-run `init` in
-/// each project. This sweeps them all in one pass.
-///
-/// Only the `env` key of graphmind's own entry is touched — other servers and any
-/// user-added fields are left untouched.
+/// - Claude Code: older versions wrote `projects.<path>.mcpServers.graphmind` into
+///   ~/.claude.json on every `init`. A project entry takes precedence over the user-scope one,
+///   so a stale `command` there would win. They are removed, but only once the user-scope entry
+///   is in place (`user_scope_in_place`).
+/// - VS Code: an existing `.vscode/mcp.json` entry that isn't current (a pre-#105 `env.PATH`, a
+///   moved binary) is rewritten. Projects without one are left alone.
 #[doc(hidden)]
-pub fn repair_project_mcp_env() {
-    let mut repaired = 0usize;
-
-    // 1. ~/.claude.json — every project-scoped graphmind entry
-    let claude_json_path = home_dir().join(".claude.json");
-    if claude_json_path.exists() {
-        let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
-        if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
-            let mut changed = false;
-            if let Some(projects) = config.get_mut("projects").and_then(|p| p.as_object_mut()) {
-                for (_, project) in projects.iter_mut() {
-                    if let Some(entry) = project
-                        .get_mut("mcpServers")
-                        .and_then(|m| m.get_mut("graphmind"))
-                        .and_then(|e| e.as_object_mut())
-                    {
-                        if entry.remove("env").is_some() {
-                            changed = true;
-                            repaired += 1;
-                        }
-                    }
-                }
-            }
-            if changed {
-                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
-                fs::copy(&claude_json_path, &backup).ok();
-                let formatted = serde_json::to_string_pretty(&config).unwrap();
-                graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).ok();
-            }
+pub fn migrate_project_mcp_entries(user_scope_in_place: bool) {
+    if user_scope_in_place {
+        match mcp_clients::remove_claude_project_entries(None) {
+            Ok(0) => println!("    {} no project-scope Claude Code entries", "✓".green()),
+            Ok(n) => println!(
+                "    {} removed {n} project-scope Claude Code entr{} (the user-scope entry covers every project)",
+                "✓".green(),
+                if n == 1 { "y" } else { "ies" }
+            ),
+            Err(reason) => println!("    {} {reason}", "✗".red()),
         }
-    }
-
-    // 2. <project>/.vscode/mcp.json for every registered project
-    for project in graphmind_config::Registry::list() {
-        let vscode_mcp = std::path::Path::new(&project.path).join(".vscode").join("mcp.json");
-        if !vscode_mcp.exists() {
-            continue;
-        }
-        let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
-        let Ok(mut config) = serde_json::from_str::<Value>(&content) else {
-            continue;
-        };
-        let removed = config
-            .get_mut("servers")
-            .and_then(|s| s.get_mut("graphmind"))
-            .and_then(|e| e.as_object_mut())
-            .is_some_and(|e| e.remove("env").is_some());
-        if removed {
-            let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-            let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
-            fs::copy(&vscode_mcp, &backup).ok();
-            let formatted = serde_json::to_string_pretty(&config).unwrap();
-            graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).ok();
-            repaired += 1;
-        }
-    }
-
-    if repaired > 0 {
+    } else {
         println!(
-            "    {} cleaned stale env.PATH from {repaired} project MCP entr{}",
-            "✓".green(),
-            if repaired == 1 { "y" } else { "ies" }
+            "    {} project-scope Claude Code entries kept until the user-scope entry is in place",
+            "⊘".yellow()
         );
-    } else {
-        println!("    {} no stale env.PATH found", "✓".green());
+    }
+
+    let bin = graphmind_binary();
+    let mut updated = 0usize;
+    for project in graphmind_config::Registry::list() {
+        let client = McpClient::VsCode(PathBuf::from(&project.path));
+        if !mcp_clients::has_entry(&client) {
+            continue;
+        }
+        match mcp_clients::upsert(&client, &bin, &mut print_cli_fallback) {
+            Outcome::Written => updated += 1,
+            Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+            Outcome::Unchanged | Outcome::NotInstalled => {}
+        }
+    }
+    if updated > 0 {
+        println!("    {} updated the VS Code entry in {updated} project(s)", "✓".green());
     }
 }
 
-/// Remove the `~/.graphmind/bin` segment that graphmind <= v0.2.211 injected into
-/// the global `env.PATH` of `~/.claude/settings.json` (issue #105).
-///
-/// That key applies to every Bash tool call in Claude Code, and the old code
-/// seeded it from a hardcoded `/usr/local/bin:/usr/bin:/bin` when absent — so
-/// users on nvm/asdf/mise/Homebrew-ARM silently lost those directories.
-///
-/// The repair is deliberately careful, because a user may have edited the value
-/// by hand since:
-///   - only the exact `~/.graphmind/bin` segment is dropped, wherever it sits;
-///   - if every remaining segment is a standard system directory, `env.PATH` is
-///     removed entirely so Claude Code falls back to the inherited shell PATH.
-///     Such a value carries no information the shell would not already provide,
-///     and keeping it truncated is actively harmful: it still shadows the user's
-///     real PATH (pyenv/bun/cargo/plugin bins), which is the whole bug;
-///   - any segment outside that set may be a deliberate user choice, so the key
-///     is KEPT with our segment removed. We cannot tell a purposeful entry apart
-///     from one the user added to work around this very bug, and overwriting
-///     intent is the mistake #105 is about. The caller warns instead;
-///   - an `env` object left empty is removed too, to avoid dead keys.
-///
-/// Returns what was done, so the caller can tell the user when a truncated
-/// `env.PATH` survived and still shadows their shell PATH.
-#[derive(Debug, PartialEq)]
-enum PathRepair {
-    /// Our segment was not present — config untouched.
-    NotNeeded,
-    /// Only system dirs remained, so `env.PATH` was removed entirely and the
-    /// inherited shell PATH now wins. Fully fixed.
-    KeyRemoved,
-    /// User-specific segments remained, so the key survives minus our segment.
-    /// Still overrides the shell PATH — needs a heads-up.
-    Truncated { remaining: String },
-}
-
-fn repair_claude_settings_path(config: &mut Value, graphmind_bin_dir: &str) -> PathRepair {
-    let Some(env) = config.get_mut("env").and_then(|e| e.as_object_mut()) else {
-        return PathRepair::NotNeeded;
-    };
-    let Some(current) = env.get("PATH").and_then(|p| p.as_str()) else {
-        return PathRepair::NotNeeded;
-    };
-
-    let kept: Vec<&str> = current
-        .split(':')
-        .filter(|seg| !seg.is_empty() && *seg != graphmind_bin_dir)
-        .collect();
-
-    if kept.len() == current.split(':').filter(|s| !s.is_empty()).count() {
-        return PathRepair::NotNeeded; // our segment was not there
-    }
-
-    // Directories a login shell provides anyway. A PATH made only of these adds
-    // nothing but still shadows the real environment, so the key is dropped.
-    // Includes both Homebrew prefixes (ARM and x86).
-    const SYSTEM_DIRS: [&str; 8] = [
-        "/usr/local/bin",
-        "/usr/local/sbin",
-        "/usr/bin",
-        "/bin",
-        "/usr/sbin",
-        "/sbin",
-        "/opt/homebrew/bin",
-        "/opt/homebrew/sbin",
-    ];
-
-    let outcome = if kept.iter().all(|seg| SYSTEM_DIRS.contains(seg)) {
-        env.remove("PATH");
-        PathRepair::KeyRemoved
-    } else {
-        let joined = kept.join(":");
-        env.insert("PATH".to_string(), json!(joined.clone()));
-        PathRepair::Truncated { remaining: joined }
-    };
-
-    if env.is_empty() {
-        config.as_object_mut().unwrap().remove("env");
-    }
-    outcome
-}
-
-#[doc(hidden)]
-pub fn install_opencode_mcp() {
-    let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
-    let graphmind_path = find_graphmind_binary();
-
-    let mut config: Value = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        // Strip JSONC line comments before parsing
-        let stripped: String = content.lines().map(|l| {
-            if let Some(idx) = l.find("//") {
-                // Only strip if // is not inside a string (simple heuristic)
-                let before = &l[..idx];
-                if before.chars().filter(|&c| c == '"').count() % 2 == 0 {
-                    return before.trim_end().to_string();
-                }
-            }
-            l.to_string()
-        }).collect::<Vec<_>>().join("\n");
-        serde_json::from_str(&stripped).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
-    };
-
-    let mcp = config
-        .as_object_mut()
-        .unwrap()
-        .entry("mcp")
-        .or_insert_with(|| json!({}));
-
-    // Backup before modifying
-    if config_path.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = config_path.with_extension(format!("jsonc.{ts}.bak"));
-        fs::copy(&config_path, &backup).ok();
-    }
-
-    // Re-write when a stale pre-#105 entry carries an `environment` block.
-    if mcp
-        .get("graphmind")
-        .is_some_and(|e| e.get("environment").is_none())
-    {
-        println!("    {} already configured", "✓".green());
-        return;
-    }
-
-    // No `environment` block — the command array holds an absolute path. See issue #105.
-    mcp.as_object_mut().unwrap().insert(
-        "graphmind".to_string(),
-        json!({
-            "type": "local",
-            "command": [graphmind_path, "mcp"]
-        }),
-    );
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).ok();
-    }
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-
-    if std::process::Command::new("which").arg("opencode").output().is_ok_and(|o| o.status.success()) {
-        println!("    {} configured at {}", "✓".green(), config_path.display());
-    } else {
-        println!("    {} configured (opencode not detected, config written for future use)", "⊘".yellow());
-    }
-}
-
-#[doc(hidden)]
-pub fn install_cursor_global_mcp() {
-    let config_path = home_dir().join(".cursor").join("mcp.json");
-    let graphmind_path = find_graphmind_binary();
-
-    let mut config: Value = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
-    };
-
-    // Re-write when a stale pre-#105 entry carries an `env` block.
-    if config
-        .get("mcpServers")
-        .and_then(|m| m.get("graphmind"))
-        .is_some_and(|e| e.get("env").is_none())
-    {
-        println!("    {} already configured", "✓".green());
-        return;
-    }
-
-    // Backup before modifying
-    if config_path.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = config_path.with_extension(format!("json.{ts}.bak"));
-        fs::copy(&config_path, &backup).ok();
-    }
-
-    let mcp_servers = config
-        .as_object_mut()
-        .unwrap()
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
-    // No `env` block — `graphmind_path` is absolute. See issue #105.
-    mcp_servers.as_object_mut().unwrap().insert(
-        "graphmind".to_string(),
-        json!({
-            "command": graphmind_path,
-            "args": ["mcp"]
-        }),
-    );
-
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).ok();
-    }
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-    println!("    {} configured at {}", "✓".green(), config_path.display());
-}
-
-/// Ensure per-project MCP configs are in place for Claude Code (~/.claude.json)
-/// and VS Code (<project>/.vscode/mcp.json).
-/// Idempotent — safe to call on every build.
+/// VS Code reads MCP servers per project, from `<project>/.vscode/mcp.json`. The entry is written
+/// only in projects that already use VS Code (have a `.vscode/` folder): elsewhere it would leave
+/// an untracked folder, or a committed file pointing at this machine's binary. Claude Code needs
+/// nothing here: setup registers graphmind at user scope, which covers every project.
 #[doc(hidden)]
 pub fn ensure_project_mcp_configs(project_path: &str) {
-    let abs_path = std::path::Path::new(project_path)
+    let client = McpClient::VsCode(canonical_project_path(project_path));
+    let outcome = mcp_clients::upsert(&client, &graphmind_binary(), &mut print_cli_fallback);
+    if outcome != Outcome::NotInstalled {
+        print_install(&client, &outcome);
+    }
+}
+
+fn canonical_project_path(project_path: &str) -> PathBuf {
+    Path::new(project_path)
         .canonicalize()
-        .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
-    let abs_str = abs_path.to_string_lossy().to_string();
-
-    let graphmind_path = find_graphmind_binary();
-
-    // 1. Claude Code — ~/.claude.json project-scoped entry
-    {
-        let claude_json_path = home_dir().join(".claude.json");
-        let mut config: Value = if claude_json_path.exists() {
-            let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
-            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-        } else {
-            json!({})
-        };
-
-        // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
-        let already = config
-            .get("projects")
-            .and_then(|p| p.get(&abs_str))
-            .and_then(|p| p.get("mcpServers"))
-            .and_then(|m| m.get("graphmind"))
-            .is_some_and(|e| e.get("env").is_none());
-
-        if already {
-            println!("    {} Claude Code (~/.claude.json) already configured", "✓".green());
-        } else {
-            if claude_json_path.exists() {
-                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
-                fs::copy(&claude_json_path, &backup).ok();
-            }
-
-            let projects = config
-                .as_object_mut()
-                .unwrap()
-                .entry("projects")
-                .or_insert_with(|| json!({}));
-            let project_entry = projects
-                .as_object_mut()
-                .unwrap()
-                .entry(abs_str.clone())
-                .or_insert_with(|| json!({}));
-            let mcp_servers = project_entry
-                .as_object_mut()
-                .unwrap()
-                .entry("mcpServers")
-                .or_insert_with(|| json!({}));
-            // No `env` block — `graphmind_path` is absolute. See issue #105.
-            mcp_servers.as_object_mut().unwrap().insert(
-                "graphmind".to_string(),
-                json!({
-                    "type": "stdio",
-                    "command": graphmind_path,
-                    "args": ["mcp"]
-                }),
-            );
-
-            let formatted = serde_json::to_string_pretty(&config).unwrap();
-            graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).unwrap_or_else(|e| {
-                println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
-            });
-            println!("    {} Claude Code (~/.claude.json) configured", "✓".green());
-        }
-    }
-
-    // 2. VS Code — <project>/.vscode/mcp.json
-    {
-        let vscode_dir = abs_path.join(".vscode");
-        let vscode_mcp = vscode_dir.join("mcp.json");
-
-        let mut config: Value = if vscode_mcp.exists() {
-            let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
-            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-        } else {
-            json!({})
-        };
-
-        // Stale pre-#105 entries carry `env.PATH` and must be rewritten.
-        let already = config
-            .get("servers")
-            .and_then(|m| m.get("graphmind"))
-            .is_some_and(|e| e.get("env").is_none());
-
-        if already {
-            println!("    {} VS Code (.vscode/mcp.json) already configured", "✓".green());
-        } else {
-            if vscode_mcp.exists() {
-                let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
-                fs::copy(&vscode_mcp, &backup).ok();
-            }
-
-            let servers = config
-                .as_object_mut()
-                .unwrap()
-                .entry("servers")
-                .or_insert_with(|| json!({}));
-            // No `env` block — `graphmind_path` is absolute. See issue #105.
-            servers.as_object_mut().unwrap().insert(
-                "graphmind".to_string(),
-                json!({
-                    "type": "stdio",
-                    "command": graphmind_path,
-                    "args": ["mcp"]
-                }),
-            );
-
-            fs::create_dir_all(&vscode_dir).ok();
-            let formatted = serde_json::to_string_pretty(&config).unwrap();
-            graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).unwrap_or_else(|e| {
-                println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
-            });
-            println!("    {} VS Code (.vscode/mcp.json) configured", "✓".green());
-        }
-    }
-}
-
-fn claude_desktop_config_path() -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = if cfg!(target_os = "windows") {
-        // %APPDATA%\Claude — derived from HOME so test HOME-override works
-        vec![
-            home_dir().join("AppData").join("Roaming").join("Claude").join("claude_desktop_config.json"),
-        ]
-    } else if cfg!(target_os = "macos") {
-        vec![
-            home_dir().join("Library/Application Support/Claude/claude_desktop_config.json"),
-        ]
-    } else {
-        vec![
-            home_dir().join(".config/claude/claude_desktop_config.json"),
-        ]
-    };
-    for p in &candidates {
-        if p.exists() {
-            return Some(p.clone());
-        }
-    }
-    candidates.into_iter().next()
-}
-
-fn find_graphmind_binary() -> String {
-    // Prefer known install location — avoids relying on shell PATH
-    let bin_name = if cfg!(target_os = "windows") { "graphmind.exe" } else { "graphmind" };
-    let local_path = home_dir().join(".graphmind").join("bin").join(bin_name);
-    if local_path.exists() {
-        return local_path.to_string_lossy().to_string();
-    }
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    if let Ok(output) = std::process::Command::new(which_cmd)
-        .arg("graphmind")
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !path.is_empty() {
-                return path;
-            }
-        }
-    }
-    local_path.to_string_lossy().to_string()
+        .unwrap_or_else(|_| PathBuf::from(project_path))
 }
 
 fn gm_block() -> String {
@@ -747,262 +343,26 @@ Be selective — only facts useful in a future session. Skip task details and te
 <!-- GM:END -->"#)
 }
 
-#[doc(hidden)]
-pub fn uninstall_claude_desktop_mcp() {
-    let Some(config_path) = claude_desktop_config_path() else {
-        return;
-    };
-    if !config_path.exists() {
-        return;
-    }
-
-    let content = fs::read_to_string(&config_path).unwrap_or_default();
-    let mut config: Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-
-    let had_entry = config
-        .get("mcpServers")
-        .and_then(|m| m.get("graphmind"))
-        .is_some();
-    if !had_entry {
-        return;
-    }
-
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = config_path.with_extension(format!("json.{ts}.bak"));
-    fs::copy(&config_path, &backup).ok();
-
-    if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
-        mcp_servers.remove("graphmind");
-    }
-
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-    println!("    {} removed from {}", "✓".green(), config_path.display());
-}
-
+/// Remove the user-scope Claude Code entry, plus what older versions left in
+/// ~/.claude/settings.json (the MCP entry and the `env.PATH` segment).
 #[doc(hidden)]
 pub fn unregister_mcp_in_claude_code() {
-    let settings_path = home_dir().join(".claude").join("settings.json");
-    if !settings_path.exists() {
-        return;
-    }
-
-    let content = fs::read_to_string(&settings_path).unwrap_or_default();
-    let mut config: Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-
-    let graphmind_bin_dir = home_dir().join(".graphmind").join("bin").to_string_lossy().to_string();
-
-    let had_mcp_entry = config
-        .get("mcpServers")
-        .and_then(|m| m.get("graphmind"))
-        .is_some();
-    // Segment-aware: catches our directory wherever it sits, even if the user
-    // reordered the value by hand (a plain strip_prefix would miss that).
-    let has_path_segment = config
-        .get("env")
-        .and_then(|e| e.get("PATH"))
-        .and_then(|p| p.as_str())
-        .is_some_and(|p| p.split(':').any(|seg| seg == graphmind_bin_dir));
-
-    if !had_mcp_entry && !has_path_segment {
-        return;
-    }
-
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = settings_path.with_extension(format!("json.{ts}.bak"));
-    fs::copy(&settings_path, &backup).ok();
-
-    if had_mcp_entry {
-        if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
-            mcp_servers.remove("graphmind");
-        }
-        // Drop an emptied mcpServers object rather than leaving a dead key.
-        if config
-            .get("mcpServers")
-            .and_then(|m| m.as_object())
-            .is_some_and(|m| m.is_empty())
-        {
-            config.as_object_mut().unwrap().remove("mcpServers");
-        }
-    }
-
+    uninstall_mcp_client(&McpClient::ClaudeCodeUser);
     // Reuse the #105 repair so uninstall and setup converge on identical results.
-    repair_claude_settings_path(&mut config, &graphmind_bin_dir);
-
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&settings_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write settings: {e}", "✗".red());
-    });
-    println!("    {} unregistered from Claude Code settings", "✓".green());
+    repair_claude_settings(true);
 }
 
-#[doc(hidden)]
-pub fn uninstall_opencode_mcp() {
-    let config_path = home_dir().join(".config").join("opencode").join("opencode.jsonc");
-    if !config_path.exists() {
-        return;
-    }
-
-    let content = fs::read_to_string(&config_path).unwrap_or_default();
-    // Strip JSONC line comments before parsing (same heuristic as install_opencode_mcp)
-    let stripped: String = content.lines().map(|l| {
-        if let Some(idx) = l.find("//") {
-            let before = &l[..idx];
-            if before.chars().filter(|&c| c == '"').count() % 2 == 0 {
-                return before.trim_end().to_string();
-            }
-        }
-        l.to_string()
-    }).collect::<Vec<_>>().join("\n");
-
-    let mut config: Value = match serde_json::from_str(&stripped) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-
-    let had_entry = config
-        .get("mcp")
-        .and_then(|m| m.get("graphmind"))
-        .is_some();
-    if !had_entry {
-        return;
-    }
-
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = config_path.with_extension(format!("jsonc.{ts}.bak"));
-    fs::copy(&config_path, &backup).ok();
-
-    if let Some(mcp) = config.get_mut("mcp").and_then(|m| m.as_object_mut()) {
-        mcp.remove("graphmind");
-    }
-
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-    println!("    {} removed from {}", "✓".green(), config_path.display());
-}
-
-#[doc(hidden)]
-pub fn uninstall_cursor_global_mcp() {
-    let config_path = home_dir().join(".cursor").join("mcp.json");
-    if !config_path.exists() {
-        return;
-    }
-
-    let content = fs::read_to_string(&config_path).unwrap_or_default();
-    let mut config: Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-
-    let had_entry = config
-        .get("mcpServers")
-        .and_then(|m| m.get("graphmind"))
-        .is_some();
-    if !had_entry {
-        return;
-    }
-
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = config_path.with_extension(format!("json.{ts}.bak"));
-    fs::copy(&config_path, &backup).ok();
-
-    if let Some(mcp_servers) = config.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
-        mcp_servers.remove("graphmind");
-    }
-
-    let formatted = serde_json::to_string_pretty(&config).unwrap();
-    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write config: {e}", "✗".red());
-    });
-    println!("    {} removed from {}", "✓".green(), config_path.display());
-}
-
-/// Reverse `ensure_project_mcp_configs` for a single project — removes only the
-/// graphmind entries from `~/.claude.json` and `<project>/.vscode/mcp.json`,
-/// never deleting the parent entries/files themselves.
+/// Remove graphmind from one project's MCP configs: the project-scope entry older versions wrote
+/// to `~/.claude.json`, and `<project>/.vscode/mcp.json`. Parent entries and files stay.
 #[doc(hidden)]
 pub fn uninstall_project_mcp_configs(project_path: &str) {
-    let abs_path = std::path::Path::new(project_path)
-        .canonicalize()
-        .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
-    let abs_str = abs_path.to_string_lossy().to_string();
-
-    // 1. Claude Code — ~/.claude.json project-scoped entry
-    {
-        let claude_json_path = home_dir().join(".claude.json");
-        if claude_json_path.exists() {
-            let content = fs::read_to_string(&claude_json_path).unwrap_or_default();
-            if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
-                let has_entry = config
-                    .get("projects")
-                    .and_then(|p| p.get(&abs_str))
-                    .and_then(|p| p.get("mcpServers"))
-                    .and_then(|m| m.get("graphmind"))
-                    .is_some();
-
-                if has_entry {
-                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                    let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
-                    fs::copy(&claude_json_path, &backup).ok();
-
-                    if let Some(mcp_servers) = config
-                        .get_mut("projects")
-                        .and_then(|p| p.get_mut(&abs_str))
-                        .and_then(|p| p.get_mut("mcpServers"))
-                        .and_then(|m| m.as_object_mut())
-                    {
-                        mcp_servers.remove("graphmind");
-                    }
-
-                    let formatted = serde_json::to_string_pretty(&config).unwrap();
-                    graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).unwrap_or_else(|e| {
-                        println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
-                    });
-                    println!("    {} removed from ~/.claude.json", "✓".green());
-                }
-            }
-        }
+    let abs_path = canonical_project_path(project_path);
+    match mcp_clients::remove_claude_project_entries(Some(&abs_path.to_string_lossy())) {
+        Ok(0) => {}
+        Ok(_) => println!("    {} removed from ~/.claude.json (project scope)", "✓".green()),
+        Err(reason) => println!("    {} {reason}", "✗".red()),
     }
-
-    // 2. VS Code — <project>/.vscode/mcp.json
-    {
-        let vscode_mcp = abs_path.join(".vscode").join("mcp.json");
-        if vscode_mcp.exists() {
-            let content = fs::read_to_string(&vscode_mcp).unwrap_or_default();
-            if let Ok(mut config) = serde_json::from_str::<Value>(&content) {
-                let has_entry = config
-                    .get("servers")
-                    .and_then(|m| m.get("graphmind"))
-                    .is_some();
-
-                if has_entry {
-                    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                    let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
-                    fs::copy(&vscode_mcp, &backup).ok();
-
-                    if let Some(servers) = config.get_mut("servers").and_then(|m| m.as_object_mut()) {
-                        servers.remove("graphmind");
-                    }
-
-                    let formatted = serde_json::to_string_pretty(&config).unwrap();
-                    graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).unwrap_or_else(|e| {
-                        println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
-                    });
-                    println!("    {} removed from .vscode/mcp.json", "✓".green());
-                }
-            }
-        }
-    }
+    uninstall_mcp_client(&McpClient::VsCode(abs_path));
 }
 
 #[doc(hidden)]
@@ -1033,10 +393,10 @@ pub fn uninstall_claude_md_block() {
         new_content = new_content.replace("\n\n\n", "\n\n");
     }
 
-    graphmind_config::write_atomic(&claude_md, new_content.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
-    });
-    println!("    {} instruction block removed", "✓".green());
+    match graphmind_config::write_atomic(&claude_md, new_content.as_bytes()) {
+        Ok(()) => println!("    {} instruction block removed", "✓".green()),
+        Err(e) => println!("    {} failed to write CLAUDE.md: {e}", "✗".red()),
+    }
 }
 
 /// Reverse everything `setup()` and `init()` did, across every registered project.
@@ -1056,16 +416,16 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     super::install_skill::uninstall_skill();
 
     print_step(3, 10, "Claude Desktop MCP config");
-    uninstall_claude_desktop_mcp();
+    uninstall_mcp_client(&McpClient::ClaudeDesktop);
 
     print_step(4, 10, "Claude Code MCP server");
     unregister_mcp_in_claude_code();
 
     print_step(5, 10, "OpenCode MCP config");
-    uninstall_opencode_mcp();
+    uninstall_mcp_client(&McpClient::OpenCode);
 
     print_step(6, 10, "Cursor global MCP config");
-    uninstall_cursor_global_mcp();
+    uninstall_mcp_client(&McpClient::Cursor);
 
     print_step(7, 10, "CLAUDE.md instruction");
     uninstall_claude_md_block();
@@ -1122,7 +482,7 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     println!();
     println!(
         "  Note: the graphmind binary itself was not removed. Delete it manually: {}",
-        find_graphmind_binary().dimmed()
+        graphmind_binary().dimmed()
     );
     println!(
         "  You may still need to manually remove the now-orphaned PATH export from any shell profile this tool didn't touch (e.g. fish, custom profiles)."
@@ -1130,40 +490,122 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     println!();
 }
 
-#[doc(hidden)]
-pub fn install_claude_md_block() {
-    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+/// `gm_fingerprint(gm_block_body(..))` of every stock block text graphmind wrote before blocks
+/// carried a fingerprint (0.2.77 to 0.3.2, oldest first; from the history of `gm_block`). A block
+/// without a fingerprint is replaced only when its whole text is one of these: any other text was
+/// written or edited by the person.
+const STOCK_BLOCK_FINGERPRINTS: [&str; 7] = [
+    "f3ddd91a594a5fd8",
+    "6e566843a79d888f",
+    "762c74aa1f1dca65",
+    "badc817d7e6bb45b",
+    "52a140c2072244b5",
+    "c5869b2212e82172",
+    "cd767b14b681f9cf",
+];
 
-    let content = if claude_md.exists() {
-        let c = fs::read_to_string(&claude_md).unwrap_or_default();
-        // Backup before modifying (timestamped)
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = claude_md.with_extension(format!("md.{ts}.bak"));
-        fs::write(&backup, &c).ok();
-        c
-    } else {
-        String::new()
+/// Lines of a GM block without its marker comments (START, VERSION, HASH, END).
+fn gm_block_body(block: &str) -> String {
+    block
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("<!-- GM:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+/// FNV-1a: a fingerprint that is stable across Rust versions (DefaultHasher isn't).
+fn gm_fingerprint(text: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// The GM block as written by this version, with a fingerprint of its text so a later setup can
+/// tell whether the person has edited it.
+fn gm_block_marked() -> String {
+    let block = gm_block();
+    let hash = gm_fingerprint(&gm_block_body(&block));
+    block.replacen("<!-- GM:START -->", &format!("<!-- GM:START -->\n<!-- GM:HASH:{hash} -->"), 1)
+}
+
+/// True when the existing block's text is not what graphmind wrote: it doesn't match its
+/// fingerprint or, for a block from before fingerprints, isn't one of the stock texts.
+fn gm_block_edited(existing: &str) -> bool {
+    let fingerprint = gm_fingerprint(&gm_block_body(existing));
+    let recorded = existing
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("<!-- GM:HASH:")?.strip_suffix(" -->"));
+    match recorded {
+        Some(recorded) => recorded != fingerprint,
+        None => !STOCK_BLOCK_FINGERPRINTS.contains(&fingerprint.as_str()),
+    }
+}
+
+/// Install or update the graphmind block in ~/.claude/CLAUDE.md. A block the person edited, or
+/// a CLAUDE.md that can't be read, is left as is; a backup is made only when the file changes.
+#[doc(hidden)]
+pub fn install_claude_md_block() -> Outcome {
+    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+    let left_alone = |reason: String| {
+        println!("    {} {reason}", "⊘".yellow());
+        Outcome::LeftAlone(reason)
     };
+
+    let content = match fs::read_to_string(&claude_md) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        // Writing now would replace the person's file with just the block.
+        Err(e) => return left_alone(format!("can't read {} ({e}); left unchanged", claude_md.display())),
+    };
+    let block = gm_block_marked();
 
     let new_content = if let Some(start) = content.find("<!-- GM:START -->") {
         // Replace existing block in place — use char-safe slicing via find (returns byte indices on valid UTF-8 boundaries)
         let end = content.find("<!-- GM:END -->")
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
-        format!("{}{}{}", &content[..start], gm_block(), &content[end..])
+        if gm_block_edited(&content[start..end]) {
+            return left_alone(
+                "graphmind block in CLAUDE.md was edited; left as is (delete the block to get the current one)"
+                    .to_string(),
+            );
+        }
+        format!("{}{}{}", &content[..start], block, &content[end..])
     } else if let Some(omc_start) = content.find("<!-- OMC:START -->") {
         // Insert before OMC block — highest attention weight position
-        format!("{}{}\n\n{}", &content[..omc_start], gm_block(), &content[omc_start..])
+        format!("{}{}\n\n{}", &content[..omc_start], block, &content[omc_start..])
     } else {
         // No existing block — prepend before other content
-        format!("{}\n\n{}", gm_block(), content)
+        format!("{}\n\n{}", block, content)
     };
 
-    fs::create_dir_all(claude_md.parent().unwrap()).ok();
-    graphmind_config::write_atomic(&claude_md, new_content.as_bytes()).unwrap_or_else(|e| {
-        println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
-    });
-    println!("    {} instruction block installed", "✓".green());
+    if new_content == content {
+        println!("    {} instruction block already current", "✓".green());
+        return Outcome::Unchanged;
+    }
+    if claude_md.exists() {
+        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup = claude_md.with_extension(format!("md.{ts}.bak"));
+        if let Err(e) = fs::write(&backup, &content) {
+            return left_alone(format!("can't back up {} ({e}); left unchanged", claude_md.display()));
+        }
+    } else if let Some(parent) = claude_md.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            return left_alone(format!("can't create {} ({e})", parent.display()));
+        }
+    }
+    match graphmind_config::write_atomic(&claude_md, new_content.as_bytes()) {
+        Ok(()) => {
+            println!("    {} instruction block installed", "✓".green());
+            Outcome::Written
+        }
+        Err(e) => left_alone(format!("failed to write {} ({e}); left unchanged", claude_md.display())),
+    }
 }
 
 #[cfg(test)]

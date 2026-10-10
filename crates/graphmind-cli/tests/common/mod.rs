@@ -17,6 +17,8 @@ impl CliTestEnv {
         let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("HOME", home.path()) };
+        // A `claude` subprocess would write to CLAUDE_CONFIG_DIR instead of the temp HOME.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 
         let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -41,6 +43,7 @@ impl CliTestEnv {
         Command::new(&self.binary)
             .args(args)
             .env("HOME", self.home.path())
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env("GRAPHMIND_SKIP_NOTICES", "1")
             // A background build outliving the command would race the test's assertions.
             .env("GRAPHMIND_NO_AUTO_BUILD", "1")
@@ -56,6 +59,7 @@ impl CliTestEnv {
             .args(args)
             .current_dir(dir)
             .env("HOME", self.home.path())
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env("GRAPHMIND_SKIP_NOTICES", "1")
             // A background build outliving the command would race the test's assertions.
             .env("GRAPHMIND_NO_AUTO_BUILD", "1")
@@ -154,6 +158,7 @@ impl SharedProject {
             let out = Command::new(&binary)
                 .args(["register", fixture_path.to_str().unwrap(), "--slug", &slug])
                 .env("HOME", dir.path())
+                .env_remove("CLAUDE_CONFIG_DIR")
                 .env("GRAPHMIND_SKIP_NOTICES", "1")
                 .output()
                 .expect("register failed");
@@ -162,6 +167,7 @@ impl SharedProject {
             let out = Command::new(&binary)
                 .args(["build", &slug])
                 .env("HOME", dir.path())
+                .env_remove("CLAUDE_CONFIG_DIR")
                 .env("GRAPHMIND_SKIP_NOTICES", "1")
                 .output()
                 .expect("build failed");
@@ -208,6 +214,8 @@ impl QueryTestEnv {
         std::fs::write(home.path().join(".graphmind").join("config.json"), &new_config).unwrap();
 
         unsafe { std::env::set_var("HOME", home.path()) };
+        // A `claude` subprocess would write to CLAUDE_CONFIG_DIR instead of the temp HOME.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 
         let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent().unwrap()
@@ -226,6 +234,7 @@ impl QueryTestEnv {
         Command::new(&self.binary)
             .args(args)
             .env("HOME", self.home.path())
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env("GRAPHMIND_SKIP_NOTICES", "1")
             // A background build outliving the command would race the test's assertions.
             .env("GRAPHMIND_NO_AUTO_BUILD", "1")

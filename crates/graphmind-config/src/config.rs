@@ -50,7 +50,11 @@ pub struct LicenseConfig {
 ///
 /// v4 — git worktree support: setup adds the post-checkout / post-merge /
 /// post-rewrite git hooks to repos that already have graphmind's hooks.
-pub const SETUP_VERSION: u32 = 4;
+///
+/// v5 — the Claude Code MCP server is registered at user scope (~/.claude.json) only: setup
+/// removes the old entries from ~/.claude/settings.json and the per-project
+/// `projects.*.mcpServers.graphmind` entries once the user-scope entry is in place.
+pub const SETUP_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {

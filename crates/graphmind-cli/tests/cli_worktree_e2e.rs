@@ -371,6 +371,7 @@ fn git_hook_environment_does_not_leak_into_other_projects() {
         .arg("status")
         .current_dir(&wt2)
         .env("HOME", env.home.path())
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env("GRAPHMIND_SKIP_NOTICES", "1")
         .env("GRAPHMIND_NO_AUTO_BUILD", "1")
         .env("GIT_DIR", git_dir.trim())

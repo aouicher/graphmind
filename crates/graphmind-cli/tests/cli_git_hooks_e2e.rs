@@ -84,6 +84,7 @@ fn second_build_waits_for_the_first() {
     let mut child = Command::new(&env.binary)
         .args(["build", "locked"])
         .env("HOME", env.home.path())
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env("GRAPHMIND_SKIP_NOTICES", "1")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -113,6 +114,7 @@ fn worktree_add_registers_and_seeds_the_new_worktree() {
         .arg(&repo)
         .args(["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()])
         .env("HOME", env.home.path())
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env("GRAPHMIND_SKIP_NOTICES", "1")
         .output()
         .unwrap();
@@ -179,6 +181,7 @@ fn auto_setup_after_an_upgrade_finishes_after_the_command_exits() {
     let out = Command::new(&env.binary)
         .arg("list")
         .env("HOME", env.home.path())
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env("GRAPHMIND_NO_AUTO_BUILD", "1")
         .output()
         .unwrap();
