@@ -60,7 +60,7 @@ Query for context, decisions, conventions:
 
 Save rules:
 - Do NOT ask "should I save this?" — just save it
-- Use `project=<slug>` for project-specific facts
+- Use `project=<slug>` for project-specific facts (or the absolute path of the checkout — in a git worktree, its path selects its own graph and the repo's shared memory)
 - Use `global=true` for user preferences, team conventions, cross-project knowledge
 - Keep entries atomic: one fact per entry, clear and reusable
 - Do NOT save ephemeral task progress or things derivable from code/git

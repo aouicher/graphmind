@@ -14,6 +14,11 @@ on:
         description: "Version to release from main, e.g. v0.3.0 (must match Cargo.toml)"
         required: true
         type: string
+      notes_only:
+        description: "Only replace the notes of this existing release with its CHANGELOG.md entry"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && 'release' || github.ref }}
@@ -28,6 +33,7 @@ permissions:
 
 jobs:
   rust-check:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.notes_only) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +96,7 @@ jobs:
   verify-tag-on-main:
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push')
-      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && !inputs.notes_only)
     runs-on: ubuntu-latest
     outputs:
       on_main: ${{ steps.check.outputs.on_main }}
@@ -284,15 +290,39 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
+          # Notes: the version's CHANGELOG.md entry, else GitHub's generated list.
+          NOTES=(--generate-notes)
+          scripts/changelog-section.sh "${TAG#v}" > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            NOTES=(--notes-file "$RUNNER_TEMP/notes.md")
+          fi
           PRERELEASE="false"
           if [[ "$TAG" == *"-rc"* ]]; then
             PRERELEASE="true"
-            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes --title "$TAG" --prerelease
+            gh release create "$TAG" --target "$GITHUB_SHA" "${NOTES[@]}" --title "$TAG" --prerelease
           else
-            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes --title "$TAG"
+            gh release create "$TAG" --target "$GITHUB_SHA" "${NOTES[@]}" --title "$TAG"
           fi
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+  # Manual run with notes_only: rewrite an existing release's notes from CHANGELOG.md.
+  release-notes:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.notes_only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace release notes with the CHANGELOG entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          scripts/changelog-section.sh "${TAG#v}" > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md has no entry for ${TAG#v}." >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
   release-assets:
     needs: [release, rust-build, desktop-build]

@@ -102,7 +102,10 @@ Configures your machine so all AI tools can use graphmind:
 5. Claude Code MCP (`~/.claude/settings.json`)
 6. OpenCode MCP (`~/.config/opencode/opencode.jsonc`)
 7. Cursor global MCP (`~/.cursor/mcp.json`) — available in all Cursor projects
-8. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
+8. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are)
+9. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
+
+`setup` re-runs automatically after the binary is updated, when its configuration changed.
 
 ### `graphmind init` (per project)
 
@@ -111,7 +114,7 @@ Registers and indexes a project, then writes MCP config for editors that support
 2. MCP project configs — written automatically:
    - Claude Code: `~/.claude.json` under `projects.<path>.mcpServers` (local scope)
    - VS Code: `<project>/.vscode/mcp.json`
-3. Git hooks (auto-rebuild on commit, impact check on push)
+3. Git hooks (rebuild after commit, merge, rebase and branch switch — new worktrees included; impact check on push)
 4. Builds the code graph
 
 ```bash
@@ -254,6 +257,13 @@ graphmind sync --all          # updates CLAUDE.md for all registered projects
 ```bash
 graphmind install hook-git
 ```
+
+Installs, in the repo's own git dir (shared by all its worktrees):
+- **post-commit**, **post-merge**, **post-rewrite** — rebuild the graph in the background after a commit, a pull/merge, a rebase or an amend
+- **post-checkout** — reindex the files that changed on a branch switch; on `git worktree add`, register the new worktree and seed its graph
+- **pre-push** — print `graphmind diff-impact`
+
+Existing hook scripts are kept (graphmind appends its lines, after a backup). With husky or a `core.hooksPath` outside the repo's git dir, nothing is modified: graphmind prints the lines to add yourself.
 
 </details>
 
@@ -563,7 +573,7 @@ graphmind session history [slug]    # recent sessions
 ### Install / Uninstall
 ```bash
 graphmind install hook-claude     # Claude Code search hook
-graphmind install hook-git        # git hooks (post-commit + pre-push)
+graphmind install hook-git        # git hooks (rebuild on commit/merge/rebase/checkout, diff-impact on push)
 graphmind install skill           # Claude Code skill
 graphmind uninstall hook-claude   # remove Claude Code hook
 graphmind uninstall hook-git      # remove git hooks
