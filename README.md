@@ -95,25 +95,24 @@ That's it. Claude Code, Claude Desktop, Cursor, and VS Code will use graphmind a
 ### `graphmind setup` (once, global)
 
 Configures your machine so all AI tools can use graphmind:
-1. Shell PATH (`~/.zshenv`, `~/.zshrc`, `~/.bashrc`)
-2. Claude Code hooks (rewrites grep/find, injects session context, pre-fetches on prompts)
+1. Shell PATH: when graphmind isn't on PATH yet, one marked line in the profile your shell reads (`~/.zshenv` for zsh, `~/.bashrc` for bash, `~/.profile` otherwise). On Windows, `~/.graphmind/bin` goes on the user PATH and into your PowerShell profile instead
+2. Claude Code hooks (session context, prompt pre-fetch, and a once-per-session nudge from grep/find searches and Explore agents to graphmind)
 3. Claude Code skill (`/gm` + 19 sub-skills)
-4. Claude Desktop MCP (`~/Library/Application Support/Claude/claude_desktop_config.json`)
-5. Claude Code MCP (`~/.claude/settings.json`)
+4. Claude Desktop MCP (`claude_desktop_config.json`; the location per OS is under [Manual setup](#manual-setup-if-you-prefer-granular-control))
+5. Claude Code MCP, user scope (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set)
 6. OpenCode MCP (`~/.config/opencode/opencode.jsonc`)
 7. Cursor global MCP (`~/.cursor/mcp.json`) — available in all Cursor projects
-8. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are)
-9. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
+8. Project MCP entries — once the user-scope entry is in place, removes the per-project Claude Code entries (`projects.<path>.mcpServers.graphmind` in `~/.claude.json`) that older versions wrote, and updates the entry in `.vscode/mcp.json` of registered projects that already have one
+9. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are)
+10. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
 
 `setup` re-runs automatically after the binary is updated, when its configuration changed.
 
 ### `graphmind init` (per project)
 
-Registers and indexes a project, then writes MCP config for editors that support project-level config:
+Registers and indexes a project:
 1. Registers current directory in the graphmind registry
-2. MCP project configs — written automatically:
-   - Claude Code: `~/.claude.json` under `projects.<path>.mcpServers` (local scope)
-   - VS Code: `<project>/.vscode/mcp.json`
+2. VS Code MCP config (`<project>/.vscode/mcp.json`), only in projects that already have a `.vscode/` folder. Claude Code needs nothing per project: `setup` registers graphmind at user scope.
 3. Git hooks (rebuild after commit, merge, rebase and branch switch — new worktrees included; impact check on push)
 4. Builds the code graph
 
@@ -130,56 +129,41 @@ Both commands are idempotent — safe to re-run.
 <details>
 <summary>Click to expand</summary>
 
-#### MCP server for Claude Code (global)
+#### MCP server for Claude Code
+
+`graphmind setup` registers graphmind at user scope, so it is available in every project. By hand:
 
 ```bash
-claude mcp add graphmind -- graphmind mcp
+claude mcp remove -s user graphmind   # only to replace an existing entry: `claude mcp add` refuses a name that exists
+claude mcp add -s user graphmind -- "$(command -v graphmind)" mcp
 ```
 
-Or manually in `~/.claude/settings.json`:
+which writes this to `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set):
 ```json
 {
   "mcpServers": {
     "graphmind": {
-      "command": "/home/user/.graphmind/bin/graphmind",
+      "type": "stdio",
+      "command": "/home/user/.local/bin/graphmind",
       "args": ["mcp"],
-      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+      "env": {}
     }
   }
 }
 ```
 
-#### MCP server for Claude Code (per project)
-
-`graphmind init` writes this automatically to `~/.claude.json`:
-```json
-{
-  "projects": {
-    "/absolute/path/to/project": {
-      "mcpServers": {
-        "graphmind": {
-          "type": "stdio",
-          "command": "/home/user/.graphmind/bin/graphmind",
-          "args": ["mcp"],
-          "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
-        }
-      }
-    }
-  }
-}
-```
+The command is the absolute path of your binary. `command -v graphmind` finds it on PATH (`~/.local/bin/graphmind` for the install script, `$(brew --prefix)/bin/graphmind` for Homebrew). `graphmind setup` uses `~/.graphmind/bin/graphmind` instead whenever that file exists (older installs), even when another `graphmind` is first on PATH: pass that path to match it. The empty `env` is fine, but an `env.PATH` there replaces the environment the server inherits, so don't add one.
 
 #### MCP server for Claude Desktop
 
-Claude Desktop does not inherit your shell PATH. Use the full path:
+Claude Desktop does not inherit your shell PATH, so use the full path:
 
 ```json
 {
   "mcpServers": {
     "graphmind": {
-      "command": "/opt/homebrew/bin/graphmind",
-      "args": ["mcp"],
-      "env": { "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" }
+      "command": "/home/user/.local/bin/graphmind",
+      "args": ["mcp"]
     }
   }
 }
@@ -188,8 +172,9 @@ Claude Desktop does not inherit your shell PATH. Use the full path:
 Config file location:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/claude/claude_desktop_config.json`
 
-> **Tip**: Run `which graphmind` to find the correct path on your system.
+> **Tip**: Run `command -v graphmind` to find the correct path on your system.
 
 #### MCP server for Cursor (global)
 
@@ -198,9 +183,8 @@ Config file location:
 {
   "mcpServers": {
     "graphmind": {
-      "command": "/home/user/.graphmind/bin/graphmind",
-      "args": ["mcp"],
-      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+      "command": "/home/user/.local/bin/graphmind",
+      "args": ["mcp"]
     }
   }
 }
@@ -208,15 +192,14 @@ Config file location:
 
 #### MCP server for VS Code (per project)
 
-`graphmind init` writes this automatically to `<project>/.vscode/mcp.json`:
+`graphmind init` writes this automatically to `<project>/.vscode/mcp.json`, in projects that already have a `.vscode/` folder:
 ```json
 {
   "servers": {
     "graphmind": {
       "type": "stdio",
-      "command": "/home/user/.graphmind/bin/graphmind",
-      "args": ["mcp"],
-      "env": { "PATH": "/home/user/.graphmind/bin:/usr/local/bin:/usr/bin:/bin" }
+      "command": "/home/user/.local/bin/graphmind",
+      "args": ["mcp"]
     }
   }
 }
