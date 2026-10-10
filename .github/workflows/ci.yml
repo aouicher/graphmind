@@ -6,10 +6,22 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  # Manual release from main: same jobs as a tag push, and the release job
+  # creates the tag on the commit it built.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version to release from main, e.g. v0.3.0 (must match Cargo.toml)"
+        required: true
+        type: string
 
 concurrency:
-  group: ci-${{ startsWith(github.ref, 'refs/tags/') && 'release' || github.ref }}
+  group: ci-${{ (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && 'release' || github.ref }}
   cancel-in-progress: true
+
+env:
+  # The release being built: the pushed tag, or the one requested manually.
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -76,7 +88,9 @@ jobs:
           wait $PID1 && wait $PID2
 
   verify-tag-on-main:
-    if: startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push'
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && github.ref_type == 'tag' && github.event_name == 'push')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
       on_main: ${{ steps.check.outputs.on_main }}
@@ -91,8 +105,24 @@ jobs:
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "on_main=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Tag $GITHUB_REF_NAME does not point to a commit on main — skipping release builds." >&2
+            echo "Tag $RELEASE_TAG does not point to a commit on main — skipping release builds." >&2
             echo "on_main=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+      - name: Check the requested version (manual release)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9.]*)?$ ]]; then
+            echo "Tag must look like v1.2.3 or v1.2.3-rc1, got '$RELEASE_TAG'." >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            echo "Tag $RELEASE_TAG already exists." >&2
+            exit 1
+          fi
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$CARGO_VERSION" != "${RELEASE_TAG%%-rc*}" ]; then
+            echo "Cargo.toml says $CARGO_VERSION; bump it on main before releasing $RELEASE_TAG." >&2
             exit 1
           fi
 
@@ -127,13 +157,13 @@ jobs:
       - name: Inject version from tag (unix)
         if: runner.os != 'Windows'
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
       - name: Inject version from tag (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $version = $env:RELEASE_TAG -replace '^v', ''
           (Get-Content Cargo.toml) -replace '^version = "[^"]*"', "version = `"$version`"" | Set-Content Cargo.toml
       - name: Build release binary (unix)
         if: runner.os != 'Windows'
@@ -193,7 +223,7 @@ jobs:
         run: npm ci
       - name: Inject version from tag
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           perl -i -pe "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" Cargo.toml
           perl -i -pe "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" crates/graphmind-desktop/src-tauri/tauri.conf.json
       - name: Install Apple certificate
@@ -244,7 +274,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.create.outputs.released }}
-      tag: ${{ github.ref_name }}
+      tag: ${{ env.RELEASE_TAG }}
       prerelease: ${{ steps.create.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
@@ -252,14 +282,14 @@ jobs:
         id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           PRERELEASE="false"
           if [[ "$TAG" == *"-rc"* ]]; then
             PRERELEASE="true"
-            gh release create "$TAG" --generate-notes --title "$TAG" --prerelease
+            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes --title "$TAG" --prerelease
           else
-            gh release create "$TAG" --generate-notes --title "$TAG"
+            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes --title "$TAG"
           fi
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
