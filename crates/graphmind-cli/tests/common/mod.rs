@@ -42,6 +42,8 @@ impl CliTestEnv {
             .args(args)
             .env("HOME", self.home.path())
             .env("GRAPHMIND_SKIP_NOTICES", "1")
+            // A background build outliving the command would race the test's assertions.
+            .env("GRAPHMIND_NO_AUTO_BUILD", "1")
             .output()
             .expect("failed to run graphmind")
     }
@@ -55,6 +57,8 @@ impl CliTestEnv {
             .current_dir(dir)
             .env("HOME", self.home.path())
             .env("GRAPHMIND_SKIP_NOTICES", "1")
+            // A background build outliving the command would race the test's assertions.
+            .env("GRAPHMIND_NO_AUTO_BUILD", "1")
             .output()
             .expect("failed to run graphmind")
     }
@@ -223,6 +227,8 @@ impl QueryTestEnv {
             .args(args)
             .env("HOME", self.home.path())
             .env("GRAPHMIND_SKIP_NOTICES", "1")
+            // A background build outliving the command would race the test's assertions.
+            .env("GRAPHMIND_NO_AUTO_BUILD", "1")
             .output()
             .expect("failed to run graphmind")
     }

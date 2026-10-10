@@ -97,3 +97,38 @@ fn second_build_waits_for_the_first() {
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("Waiting for another build"));
 }
+
+#[test]
+fn worktree_add_registers_and_seeds_the_new_worktree() {
+    let env = CliTestEnv::new();
+    let repo = new_repo(&env, "app");
+    env.run_ok(&["register", repo.to_str().unwrap(), "--slug", "app"]);
+    env.run_ok(&["install", "hook-git", "app"]);
+    env.run_ok(&["build", "app"]);
+
+    // post-checkout runs `graphmind build` in the background from the new checkout.
+    let wt = env.home.path().join("app-feature");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()])
+        .env("HOME", env.home.path())
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let meta = env.home.path().join(".graphmind/graphs/app-feature/meta.json");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !meta.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta).expect("worktree was not built")).unwrap();
+    assert_eq!(
+        meta["build_result"]["files_processed"], 0,
+        "seeded from app's graph, nothing to re-parse: {meta}"
+    );
+    let list = env.run_ok(&["list"]);
+    assert!(list.contains("worktree of app"), "got: {list}");
+}
