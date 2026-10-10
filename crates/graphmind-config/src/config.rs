@@ -180,6 +180,22 @@ impl EmbeddingConfig {
     }
 }
 
+/// Memory settings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryConfig {
+    /// Promote an entry to priority once it has been recalled this many times by explicit
+    /// searches (`memory search`, `gm_memory_search`). Default 3; 0 turns auto-promotion off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_promote_min_recalls: Option<u32>,
+}
+
+impl MemoryConfig {
+    /// Recall count that triggers auto-promotion, or `None` when it is off.
+    pub fn auto_promote_threshold(&self) -> Option<std::num::NonZeroU32> {
+        std::num::NonZeroU32::new(self.auto_promote_min_recalls.unwrap_or(3))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub version: String,
@@ -197,6 +213,8 @@ pub struct GlobalConfig {
     pub launch_at_login: bool,
     #[serde(default)]
     pub build_all_on_startup: bool,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 impl Default for GlobalConfig {
@@ -212,6 +230,7 @@ impl Default for GlobalConfig {
             license: LicenseConfig::default(),
             launch_at_login: false,
             build_all_on_startup: false,
+            memory: MemoryConfig::default(),
         }
     }
 }

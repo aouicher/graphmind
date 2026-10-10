@@ -234,8 +234,10 @@ if [ -n "$SEARCH_TERMS" ]; then
     done < <(tail -50 "$CACHE_FILE")
   fi
   if [ "$CACHED" -eq 0 ]; then
-    # Memory recall — leave out entries already shown as priority (matched by id)
-    MEMORY=$(graphmind memory search "$SEARCH_TERMS" --limit 5 --max-chars 300 2>/dev/null | grep -v "^>>" | grep -v "^$" | grep -v "^!" | drop_shown "$SHOWN" | head -5)
+    # Memory recall — leave out entries already shown as priority (matched by id). --no-recall:
+    # an automatic search on every prompt is not a sign the entry matters; counting it promoted
+    # most memories to priority (issue #112).
+    MEMORY=$(graphmind memory search "$SEARCH_TERMS" --limit 5 --max-chars 300 --no-recall 2>/dev/null | grep -v "^>>" | grep -v "^$" | grep -v "^!" | drop_shown "$SHOWN" | head -5)
 
     # Code pre-fetch — for exploration OR implementation prompts mentioning code entities
     if echo "$PROMPT" | grep -qiE 'comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|add.*to|modify|change.*in|fix.*in|debug|implémente|créer|create'; then

@@ -1,4 +1,5 @@
-use graphmind_memory::store::{AddOptions, MemoryError, MemoryStore};
+use graphmind_memory::consolidate::{consolidate, Policy};
+use graphmind_memory::store::{AddOptions, MemoryEntry, MemoryError, MemoryStore, Priority};
 use graphmind_memory::cross_links::{CrossLinkStore, LinkType, NewCrossLink};
 use std::io::Write;
 
@@ -259,7 +260,7 @@ fn rewrites_keep_lines_this_version_cannot_parse() {
     let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
     writeln!(f, "{future}").unwrap();
 
-    store.increment_recall(&kept.id, None);
+    store.record_recalls(&[kept.id.as_str()], None);
     let doomed = store.list(None).into_iter().find(|e| e.content == "delete me").unwrap();
     assert!(store.delete_entry(&doomed.id, None).is_ok());
     store.update_file(&path, |_| ((), true)).unwrap();
@@ -314,7 +315,7 @@ fn failed_write_leaves_the_file_intact() {
         std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         return;
     }
-    store.increment_recall(&entry.id, None);
+    store.record_recalls(&[entry.id.as_str()], None);
     std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
@@ -367,8 +368,8 @@ fn update_keeps_id_created_recall_and_expiry() {
     use graphmind_memory::store::{MemoryType, MemoryUpdate};
     let (store, _dir) = make_store();
     let e = store.add("old wording", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
-    store.increment_recall(&e.id, None);
-    store.increment_recall(&e.id, None);
+    store.record_recalls(&[e.id.as_str()], None);
+    store.record_recalls(&[e.id.as_str()], None);
     let before = store.list(None).into_iter().find(|x| x.id == e.id).unwrap();
 
     let after = store
@@ -391,9 +392,9 @@ fn update_toggles_priority_and_type_lifetime() {
     let (store, _dir) = make_store();
     let e = store.add("fact", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
-    assert!(u.priority);
+    assert!(u.is_priority());
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
-    assert!(!u.priority);
+    assert!(!u.is_priority());
     // bug -> decision: decisions don't expire.
     let u = store.update(&e.id, None, MemoryUpdate { entry_type: Some(MemoryType::Decision), ..Default::default() }).unwrap();
     assert!(u.expires_at.is_none() && u.ttl_days.is_none());
@@ -452,10 +453,10 @@ fn demotion_resets_recall_count() {
     let (store, _dir) = make_store();
     let e = store.add("promoted by recalls", AddOptions { priority: true, ..AddOptions::default() });
     for _ in 0..5 {
-        store.increment_recall(&e.id, None);
+        store.record_recalls(&[e.id.as_str()], None);
     }
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
-    assert!(!u.priority);
+    assert!(!u.is_priority());
     assert_eq!(u.recall_count, 0, "a recall count left at 5 would re-promote it on the next consolidate");
 }
 
@@ -465,10 +466,10 @@ fn priority_false_on_a_normal_entry_keeps_its_recall_count() {
     let (store, _dir) = make_store();
     let e = store.add("never promoted", AddOptions::default());
     for _ in 0..2 {
-        store.increment_recall(&e.id, None);
+        store.record_recalls(&[e.id.as_str()], None);
     }
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
-    assert!(!u.priority);
+    assert!(!u.is_priority());
     assert_eq!(u.recall_count, 2, "not a demotion: the count must survive");
 }
 
@@ -531,4 +532,280 @@ fn add_stores_tags_as_given() {
     let e = store.add("make sure fetchInBatches reads src/a.ts", AddOptions { tags: vec!["Cache".into()], ..AddOptions::default() });
     assert_eq!(e.tags, ["Cache"]);
     assert_eq!(store.list(None)[0].tags, ["Cache"]);
+}
+
+// ── recall / promotion (issue #112) ──────────────────────────────────────────
+
+fn promote_after(n: u32) -> Policy {
+    Policy { promote_after: std::num::NonZeroU32::new(n), dry_run: false }
+}
+
+fn by_content(store: &MemoryStore, project: Option<&str>, content: &str) -> MemoryEntry {
+    store.list(project).into_iter().find(|e| e.content == content).unwrap()
+}
+
+#[test]
+fn record_recalls_counts_each_result_once_across_files() {
+    let (store, _dir) = make_store();
+    let global = store.add("global fact", AddOptions { global: true, ..AddOptions::default() });
+    let scoped = store.add("project fact", AddOptions { project: Some("proj".into()), ..AddOptions::default() });
+    let untouched = store.add("other fact", AddOptions { global: true, ..AddOptions::default() });
+
+    store.record_recalls(&[global.id.as_str(), scoped.id.as_str(), "no-such-id"], Some("proj"));
+    store.record_recalls(&[scoped.id.as_str()], Some("proj"));
+
+    assert_eq!(by_content(&store, Some("proj"), "global fact").recall_count, 1);
+    assert_eq!(by_content(&store, Some("proj"), "project fact").recall_count, 2);
+    assert_eq!(by_content(&store, None, &untouched.content).recall_count, 0);
+}
+
+#[test]
+fn priority_list_puts_pinned_entries_before_promoted_ones() {
+    let (store, _dir) = make_store();
+    store.add("pinned old", AddOptions { priority: true, ..AddOptions::default() });
+    let rarely = store.add("auto rarely", AddOptions::default());
+    let often = store.add("auto often", AddOptions::default());
+    store.add("pinned new", AddOptions { priority: true, ..AddOptions::default() });
+    for _ in 0..3 {
+        store.record_recalls(&[rarely.id.as_str(), often.id.as_str()], None);
+    }
+    store.record_recalls(&[often.id.as_str()], None);
+
+    let report = consolidate(&store, None, &promote_after(3));
+    assert_eq!(report.promoted, 2);
+
+    let order: Vec<String> = store.list_priority(None).into_iter().map(|e| e.content).collect();
+    assert_eq!(order[2..], ["auto often", "auto rarely"]);
+    assert!(order[..2].contains(&"pinned new".to_string()) && order[..2].contains(&"pinned old".to_string()));
+    assert_eq!(by_content(&store, None, "auto often").priority(), Priority::Promoted);
+    assert_eq!(by_content(&store, None, "pinned old").priority(), Priority::Pinned);
+}
+
+/// A demotion sticks: a demoted entry isn't promoted again, however often deliberate searches
+/// recall it afterwards. Unpinning an entry that isn't priority changes nothing, and a pinned
+/// entry is never turned into a promoted one.
+#[test]
+fn demotion_sticks_and_pins_stay_pinned() {
+    let (store, _dir) = make_store();
+    let entry = store.add("often searched", AddOptions::default());
+    let normal = store.add("searched twice", AddOptions::default());
+    let recall = |id: &str, times: usize| (0..times).for_each(|_| store.record_recalls(&[id], None));
+    let edit = |id: &str, f: fn(&mut MemoryEntry) -> bool| {
+        store
+            .update_file(&store.global_path(), |entries| {
+                let changed = entries.iter_mut().find(|e| e.id == id).map(f).unwrap_or(false);
+                (changed, changed)
+            })
+            .unwrap()
+    };
+    recall(&entry.id, 3);
+    consolidate(&store, None, &promote_after(3));
+    assert_eq!(by_content(&store, None, "often searched").priority(), Priority::Promoted);
+
+    assert!(edit(&entry.id, MemoryEntry::unpin));
+    let demoted = by_content(&store, None, "often searched");
+    assert_eq!((demoted.priority(), demoted.recall_count), (Priority::Demoted, 0));
+    recall(&entry.id, 5);
+    assert_eq!(consolidate(&store, None, &promote_after(3)).promoted, 0);
+    let demoted = by_content(&store, None, "often searched");
+    assert_eq!((demoted.priority(), demoted.recall_count), (Priority::Demoted, 5));
+
+    recall(&normal.id, 2);
+    assert!(!edit(&normal.id, MemoryEntry::unpin), "not priority: nothing to remove");
+    let normal_now = by_content(&store, None, "searched twice");
+    assert_eq!((normal_now.priority(), normal_now.recall_count), (Priority::Normal, 2));
+
+    store.update_file(&store.global_path(), |entries| {
+        entries.iter_mut().filter(|e| e.id == entry.id).for_each(MemoryEntry::pin);
+        ((), true)
+    });
+    recall(&entry.id, 3);
+    consolidate(&store, None, &promote_after(3));
+    assert_eq!(by_content(&store, None, "often searched").priority(), Priority::Pinned);
+}
+
+fn raw_entry(id: &str, priority: bool, promoted: bool, recall_count: u32, updated: &str) -> String {
+    serde_json::json!({
+        "id": id, "created": "2026-01-01T00:00:00+00:00", "updated": updated,
+        "project": null, "global": true, "type": "decision", "content": format!("fact {id}"),
+        "tags": [], "session": "2026-01-01", "priority": priority, "promoted": promoted,
+        "recall_count": recall_count,
+    })
+    .to_string()
+}
+
+/// Installs upgraded from a version without the `promoted` flag: consolidate marks entries that
+/// version promoted (priority, 3+ recalls, `updated` moved by the promotion) in every file.
+#[test]
+fn consolidate_marks_entries_promoted_by_earlier_versions() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, dir) = make_store();
+    let created = "2026-01-01T00:00:00+00:00";
+    let promoted_at = "2026-02-01T00:00:00+00:00";
+    let global = [
+        raw_entry("auto-promoted", true, false, 5, promoted_at),
+        raw_entry("saved-as-priority", true, false, 7, created),
+        raw_entry("few-recalls", true, false, 2, promoted_at),
+        raw_entry("hand-edited", false, true, 9, promoted_at),
+    ];
+    std::fs::write(store.global_path(), global.join("\n") + "\n").unwrap();
+    std::fs::write(store.project_path("proj"), raw_entry("auto-in-project", true, false, 3, promoted_at) + "\n").unwrap();
+    let state = |id: &str| by_content(&store, Some("proj"), &format!("fact {id}")).priority();
+    let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
+
+    let dry = consolidate(&store, Some("other"), &Policy { promote_after: None, dry_run: true });
+    assert_eq!(dry.legacy_marked, 2);
+    assert_eq!(state("auto-promoted"), Priority::Pinned, "a dry run writes nothing");
+    assert!(!stamp.exists(), "a dry run doesn't record the cutoff");
+    assert_eq!(state("hand-edited"), Priority::Normal, "promoted without priority is not priority");
+
+    // Scoped to another project, the marking still covers every memory file.
+    let report = consolidate(&store, Some("other"), &promote_after(3));
+    assert_eq!(report.legacy_marked, 2);
+    assert_eq!(state("auto-promoted"), Priority::Promoted);
+    assert_eq!(state("auto-in-project"), Priority::Promoted);
+    assert_eq!(state("saved-as-priority"), Priority::Pinned);
+    assert_eq!(state("few-recalls"), Priority::Pinned);
+    let cutoff = std::fs::read_to_string(&stamp).unwrap();
+    assert!(chrono::DateTime::parse_from_rfc3339(cutoff.trim()).is_ok(), "the stamp records the cutoff: {cutoff:?}");
+
+    // Pinned afterwards through an edit (which moves `updated`): never reclassified.
+    store.update("auto-promoted", None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 0);
+    assert_eq!(state("auto-promoted"), Priority::Pinned);
+}
+
+/// What a process still running an earlier version does to a file it rewrites (a recall count,
+/// a delete): its struct has no `promoted` or `demoted`, so both are dropped.
+fn rewrite_like_an_earlier_version(path: &std::path::Path) {
+    let raw = std::fs::read_to_string(path).unwrap();
+    let lines: Vec<String> = raw
+        .lines()
+        .map(|line| {
+            let mut entry: serde_json::Value = serde_json::from_str(line).unwrap();
+            let fields = entry.as_object_mut().unwrap();
+            fields.remove("promoted");
+            fields.remove("demoted");
+            entry.to_string()
+        })
+        .collect();
+    std::fs::write(path, lines.join("\n") + "\n").unwrap();
+}
+
+/// An MCP server started before the upgrade (or another session's clean on the old binary)
+/// rewrites the file and drops the marks; the next consolidate marks those entries again.
+#[test]
+fn legacy_marks_dropped_by_an_earlier_version_are_restored() {
+    let (store, _dir) = make_store();
+    let path = store.global_path();
+    std::fs::write(&path, raw_entry("auto-promoted", true, false, 5, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
+    let state = || by_content(&store, None, "fact auto-promoted").priority();
+
+    assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 1);
+    assert_eq!(state(), Priority::Promoted);
+
+    rewrite_like_an_earlier_version(&path);
+    assert_eq!(state(), Priority::Pinned, "precondition: the earlier version dropped the mark");
+    assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 1);
+    assert_eq!(state(), Priority::Promoted);
+}
+
+/// When the cutoff can be neither read nor recorded (here a dangling symlink in place of the
+/// stamp), nothing is marked: any cutoff made up on the spot would mark later pins as promoted.
+#[cfg(unix)]
+#[test]
+fn without_a_cutoff_nothing_is_marked() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, dir) = make_store();
+    let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
+    std::os::unix::fs::symlink(dir.path().join("nowhere"), &stamp).unwrap();
+    std::fs::write(store.global_path(), raw_entry("auto-promoted", true, false, 5, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
+    let pinned = store.add("pinned through update", AddOptions::default());
+    (0..3).for_each(|_| store.record_recalls(&[pinned.id.as_str()], None));
+    store.update(&pinned.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
+
+    for _ in 0..2 {
+        assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 0);
+        assert_eq!(by_content(&store, None, "pinned through update").priority(), Priority::Pinned);
+        assert_eq!(by_content(&store, None, "fact auto-promoted").priority(), Priority::Pinned, "left as it is");
+    }
+}
+
+/// `memory update` moves `updated`, which is what the legacy rule looks for; a deliberate pin
+/// with 3+ recalls must still never be marked as promoted, before or after the first
+/// consolidate, and even after an earlier version rewrote the file. An edit to an entry an
+/// earlier version promoted marks it before moving `updated`.
+#[test]
+fn entries_pinned_through_update_are_never_marked_promoted() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, _dir) = make_store();
+    let pin = || MemoryUpdate { priority: Some(true), ..Default::default() };
+    std::fs::write(store.global_path(), raw_entry("auto-promoted", true, false, 4, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
+    let recalled = |content: &str| {
+        let e = store.add(content, AddOptions::default());
+        (0..3).for_each(|_| store.record_recalls(&[e.id.as_str()], None));
+        e
+    };
+
+    // Before any consolidate has run.
+    let early = recalled("pinned before the first consolidate");
+    store.update(&early.id, None, pin()).unwrap();
+    let edited = store.update("auto-promoted", None, MemoryUpdate { tags: Some(vec!["edited".into()]), ..Default::default() });
+    assert_eq!(edited.unwrap().priority(), Priority::Promoted, "the edit marks it before moving `updated`");
+    assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 0);
+
+    // After it.
+    let late = recalled("pinned after the first consolidate");
+    store.update(&late.id, None, pin()).unwrap();
+    rewrite_like_an_earlier_version(&store.global_path());
+    consolidate(&store, None, &promote_after(3));
+
+    for content in ["pinned before the first consolidate", "pinned after the first consolidate"] {
+        let entry = by_content(&store, None, content);
+        assert_ne!(entry.updated, entry.created, "precondition: the pin moved `updated`");
+        assert_eq!(entry.priority(), Priority::Pinned, "{content}");
+    }
+}
+
+/// Near-duplicates: a demoted entry (recall count reset to 0) or a pinned one wins over a copy
+/// that was searched more often, so the demotion or pin isn't lost and the survivor isn't
+/// promoted.
+#[test]
+fn dedup_keeps_a_demoted_or_pinned_copy() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, _dir) = make_store();
+    let demoted = store.add("retries use exponential backoff with three attempts", AddOptions { priority: true, ..AddOptions::default() });
+    store.update(&demoted.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
+    let pinned = store.add("builds run on arm64 runners first", AddOptions { priority: true, ..AddOptions::default() });
+    for content in ["retries use exponential backoff with three attempts", "builds run on arm64 runners first"] {
+        let copy = store.add(content, AddOptions::default());
+        (0..5).for_each(|_| store.record_recalls(&[copy.id.as_str()], None));
+    }
+
+    let report = consolidate(&store, None, &promote_after(3));
+    assert_eq!((report.duplicates, report.promoted), (2, 0));
+    let left: Vec<(String, Priority)> = store.list(None).into_iter().map(|e| (e.id.clone(), e.priority())).collect();
+    assert_eq!(left.len(), 2);
+    assert!(left.contains(&(demoted.id, Priority::Demoted)), "{left:?}");
+    assert!(left.contains(&(pinned.id, Priority::Pinned)), "{left:?}");
+}
+
+/// A stamp without a time in it (empty, or cut short) keeps the time it was written as the
+/// cutoff, so pins made after it stay pins; it isn't replaced.
+#[test]
+fn a_stamp_without_a_time_uses_when_it_was_written() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, dir) = make_store();
+    std::fs::write(store.global_path(), raw_entry("auto-promoted", true, false, 5, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
+    let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
+    std::fs::write(&stamp, "").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let pinned = store.add("pinned after the stamp", AddOptions::default());
+    (0..3).for_each(|_| store.record_recalls(&[pinned.id.as_str()], None));
+    store.update(&pinned.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
+
+    assert_eq!(consolidate(&store, None, &promote_after(3)).legacy_marked, 1);
+    assert_eq!(by_content(&store, None, "fact auto-promoted").priority(), Priority::Promoted);
+    assert_eq!(by_content(&store, None, "pinned after the stamp").priority(), Priority::Pinned);
+    assert_eq!(std::fs::read_to_string(&stamp).unwrap(), "");
 }

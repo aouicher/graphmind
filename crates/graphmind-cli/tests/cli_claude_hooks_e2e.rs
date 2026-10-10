@@ -271,3 +271,32 @@ fn memory_show_works_in_a_worktree() {
     let shown = env.run_ok_in(&wt, &["memory", "show", &id]);
     assert!(shown.contains("worktree memory fact"), "got: {shown}");
 }
+
+/// The prompt hook's automatic memory search doesn't count as a recall (`--no-recall`), so it
+/// can't push entries to auto-promotion (issue #112).
+#[test]
+fn prompt_hook_searches_do_not_count_recalls() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return; // the hooks need jq
+    }
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    let project = env.fixture_path();
+    env.run_ok(&["install", "hook-claude"]);
+    env.run_ok(&["memory", "add", "the zeppelin cache keeps entries for an hour", "--slug", "hooks-test"]);
+
+    let input = json!({"session_id": "s1", "prompt": "how long does the zeppelin cache keep entries"});
+    let prompt = run_hook(&env, "graphmind-prompt.sh", &project, &input);
+    assert!(prompt.contains("zeppelin cache keeps"), "precondition: the hook found the entry: {prompt}");
+
+    let memory_dir = env.home.path().join(".graphmind/memory");
+    let entry: Value = std::fs::read_dir(&memory_dir)
+        .unwrap()
+        .flatten()
+        .filter(|f| f.path().extension().is_some_and(|e| e == "jsonl"))
+        .flat_map(|f| std::fs::read_to_string(f.path()).unwrap().lines().map(String::from).collect::<Vec<_>>())
+        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+        .find(|e| e["content"].as_str().is_some_and(|c| c.contains("zeppelin")))
+        .unwrap();
+    assert_eq!(entry["recall_count"], 0, "{entry}");
+}

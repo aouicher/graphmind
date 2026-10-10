@@ -1,5 +1,6 @@
 use graphmind_config::{paths, resolve_project_slug, Registry};
 use colored::Colorize;
+use graphmind_memory::consolidate::{self, Policy, Report};
 use graphmind_memory::search::search as memory_search;
 use graphmind_memory::store::{AddOptions, MemoryError, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
 
@@ -65,7 +66,9 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
     );
 }
 
-pub fn search(query: &str, slug: Option<&str>, limit: usize, max_chars: Option<usize>) {
+/// `no_recall`: don't count this as a recall. Automatic searches (the prompt hook) pass it, so
+/// only deliberate searches feed auto-promotion.
+pub fn search(query: &str, slug: Option<&str>, limit: usize, max_chars: Option<usize>, no_recall: bool) {
     let store = get_store();
     let project = resolve_memory_project(slug);
     let entries = store.list(project.as_deref());
@@ -98,7 +101,10 @@ pub fn search(query: &str, slug: Option<&str>, limit: usize, max_chars: Option<u
             display_content(&e.content, max_chars),
             tags
         );
-        store.increment_recall(&e.id, project.as_deref());
+    }
+    if !no_recall {
+        let ids: Vec<&str> = results.iter().map(|e| e.id.as_str()).collect();
+        store.record_recalls(&ids, project.as_deref());
     }
 }
 
@@ -107,8 +113,8 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
     let project = resolve_memory_project(slug);
 
     if run_clean {
-        let summary = consolidate_steps_abcd(&store, project.as_deref(), false);
-        println!("{}", summary.dimmed());
+        let report = run_consolidate(slug, false);
+        println!("{}", summary(&report, false).dimmed());
         println!();
     }
 
@@ -137,7 +143,7 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
     );
 
     for e in shown {
-        let prio_marker = if e.priority { "\u{2605} " } else { "" };
+        let prio_marker = if e.is_priority() { "\u{2605} " } else { "" };
         println!(
             "  {}{} [{}] {}",
             prio_marker,
@@ -206,7 +212,7 @@ pub fn show(id: &str, slug: Option<&str>) {
     let project = resolve_memory_project(slug);
     match store.get(id, project.as_deref()) {
         Ok(e) => {
-            let prio = if e.priority { " \u{2605}priority" } else { "" };
+            let prio = if e.is_priority() { " \u{2605}priority" } else { "" };
             println!("{} [{}{}]", e.id.dimmed(), e.entry_type.to_string().yellow(), prio);
             println!("{}", e.content);
             if !e.tags.is_empty() {
@@ -244,168 +250,50 @@ pub fn delete(id: &str, slug: Option<&str>) {
     }
 }
 
-/// Daily background clean from `notices::memory_auto_clean`: same steps as `clean`, but prints
-/// nothing — it runs inside other commands, whose stdout hooks capture.
-pub fn clean_quiet() {
+/// Runs consolidate (expire, purge noise, dedup, auto-promote) with the configured promotion
+/// policy and returns what it did. `clean`, `consolidate`, `list --clean` and the daily background
+/// clean (`notices::memory_auto_clean`, which prints nothing: it runs inside other commands whose
+/// stdout hooks capture) differ only in how they print the report.
+pub fn run_consolidate(slug: Option<&str>, dry_run: bool) -> Report {
     let store = get_store();
-    let project = resolve_memory_project(None);
-    consolidate_steps_abcd(&store, project.as_deref(), false);
+    let project = resolve_memory_project(slug);
+    let policy = Policy {
+        promote_after: graphmind_config::config::load_config().memory.auto_promote_threshold(),
+        dry_run,
+    };
+    consolidate::consolidate(&store, project.as_deref(), &policy)
 }
 
 /// `graphmind memory clean` — steps A+B+C+D, no external API.
 pub fn clean(slug: Option<&str>) {
-    let store = get_store();
-    let project = resolve_memory_project(slug);
-    let summary = consolidate_steps_abcd(&store, project.as_deref(), false);
-    println!("{} {}", "OK".green().bold(), summary);
+    let report = run_consolidate(slug, false);
+    println!("{} {}", "OK".green().bold(), summary(&report, false));
 }
 
 /// `graphmind memory consolidate` — expire, purge noise, dedup, auto-promote.
 /// LLM extraction is left to the agent (`gm_session_analyze`, which the prompt hook suggests
 /// every 10 prompts) — no external API needed.
 pub fn consolidate(slug: Option<&str>, dry_run: bool) {
-    let store = get_store();
-    let project = resolve_memory_project(slug);
-    let summary = consolidate_steps_abcd(&store, project.as_deref(), dry_run);
+    let report = run_consolidate(slug, dry_run);
     println!("{} Consolidate complete:", "OK".green().bold());
-    println!("  {}", summary);
+    println!("  {}", summary(&report, dry_run));
 }
 
-// ---------------------------------------------------------------------------
-// Internal implementation
-// ---------------------------------------------------------------------------
-
-/// Steps A (expire), B (commit purge), C (semantic dedup), D (auto-promote).
-fn consolidate_steps_abcd(store: &MemoryStore, project: Option<&str>, dry_run: bool) -> String {
-    let now = chrono::Utc::now();
-
-    let mut file_paths = vec![store.global_path()];
-    if let Some(proj) = project {
-        file_paths.push(store.project_path(proj));
-    } else {
-        // No specific project — consolidate all project files
-        if let Ok(entries) = std::fs::read_dir(&store.memory_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
-                    && path != store.global_path()
-                {
-                    file_paths.push(path);
-                }
-            }
-        }
+fn summary(report: &Report, dry_run: bool) -> String {
+    let mut line = format!(
+        "{} expired removed, {} [commit] entries removed, {} duplicates merged, {} auto-promoted",
+        report.expired, report.commits, report.duplicates, report.promoted
+    );
+    if report.legacy_marked > 0 {
+        line.push_str(&format!(
+            ", {} earlier auto-promotions marked as such (shown after pinned entries)",
+            report.legacy_marked
+        ));
     }
-
-    let mut total_expired = 0usize;
-    let mut total_commit = 0usize;
-    let mut total_dedup = 0usize;
-    let mut total_promoted = 0usize;
-
-    for file_path in &file_paths {
-        if !file_path.exists() {
-            continue;
-        }
-        let counts = store.update_file(file_path, |entries| {
-            let before = entries.len();
-
-            // Step A — purge expired entries
-            entries.retain(|e| {
-                if let Some(ref exp) = e.expires_at {
-                    if let Ok(exp_dt) = chrono::DateTime::parse_from_rfc3339(exp) {
-                        return exp_dt.with_timezone(&chrono::Utc) > now;
-                    }
-                }
-                true
-            });
-            let after_a = entries.len();
-
-            // Step B — purge [commit] entries
-            entries.retain(|e| !e.content.starts_with("[commit]"));
-            let after_b = entries.len();
-
-            // Step C — content-based dedup (Jaccard > 0.85)
-            let dedup_ids = find_dedup_ids(entries);
-            let dedup_count = dedup_ids.len();
-            if !dedup_ids.is_empty() {
-                entries.retain(|e| !dedup_ids.contains(&e.id));
-            }
-
-            // Step D — auto-promote entries with recall_count >= 3
-            let mut promoted_in_file = 0usize;
-            for entry in entries.iter_mut() {
-                if entry.recall_count >= 3 && !entry.priority {
-                    entry.priority = true;
-                    entry.updated = now.to_rfc3339();
-                    promoted_in_file += 1;
-                }
-            }
-
-            let counts = (before - after_a, after_a - after_b, dedup_count, promoted_in_file);
-            let changed = !dry_run && counts != (0, 0, 0, 0);
-            (counts, changed)
-        });
-        // None: the file couldn't be read or written, and was left as it is.
-        let Some((expired, commit_purged, dedup, promoted)) = counts else { continue };
-        total_expired += expired;
-        total_commit += commit_purged;
-        total_dedup += dedup;
-        total_promoted += promoted;
+    if dry_run {
+        line.push_str(" (dry-run)");
     }
-
-    format!(
-        "{} expired removed, {} [commit] entries removed, {} duplicates merged, {} auto-promoted{}",
-        total_expired,
-        total_commit,
-        total_dedup,
-        total_promoted,
-        if dry_run { " (dry-run)" } else { "" }
-    )
-}
-
-/// Identify IDs to remove for near-duplicate entries (Jaccard > 0.85).
-/// Keeps the entry with higher recall_count, tie-breaking by most recent created.
-fn find_dedup_ids(entries: &[graphmind_memory::store::MemoryEntry]) -> std::collections::HashSet<String> {
-    let mut to_remove: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for i in 0..entries.len() {
-        if to_remove.contains(&entries[i].id) {
-            continue;
-        }
-        for j in (i + 1)..entries.len() {
-            if to_remove.contains(&entries[j].id) {
-                continue;
-            }
-            let sim = content_jaccard(&entries[i].content, &entries[j].content);
-            if sim > 0.85 {
-                let keep_i = entries[i].recall_count > entries[j].recall_count
-                    || (entries[i].recall_count == entries[j].recall_count
-                        && entries[i].created >= entries[j].created);
-                if keep_i {
-                    to_remove.insert(entries[j].id.clone());
-                } else {
-                    to_remove.insert(entries[i].id.clone());
-                    break;
-                }
-            }
-        }
-    }
-    to_remove
-}
-
-/// Token-level Jaccard similarity between two content strings.
-fn content_jaccard(a: &str, b: &str) -> f64 {
-    use std::collections::HashSet;
-    let tokens_a: HashSet<&str> = a.split_whitespace().collect();
-    let tokens_b: HashSet<&str> = b.split_whitespace().collect();
-    if tokens_a.is_empty() && tokens_b.is_empty() {
-        return 1.0;
-    }
-    let intersection = tokens_a.intersection(&tokens_b).count();
-    let union_count = tokens_a.union(&tokens_b).count();
-    if union_count == 0 {
-        return 0.0;
-    }
-    intersection as f64 / union_count as f64
+    line
 }
 
 #[cfg(test)]

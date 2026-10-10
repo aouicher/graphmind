@@ -95,9 +95,10 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
         let preview: String = r.content.lines().next().unwrap_or("").chars().take(100).collect();
         let r_type = r.entry_type.to_string();
         lines.push(format!("  [{r_type}] {preview}"));
-        // Increment recall count so high-signal entries get auto-promoted
-        store.increment_recall(&r.id, project_slug);
     }
+    // A deliberate search: count the recalls, so high-signal entries get auto-promoted
+    let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+    store.record_recalls(&ids, project_slug);
     text_content(&lines.join("\n"))
 }
 

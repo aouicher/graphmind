@@ -328,6 +328,10 @@ enum MemoryAction {
         /// Print each entry on one line, tags included, its text cut to N characters (full text: `memory show <id>`)
         #[arg(long)]
         max_chars: Option<usize>,
+        /// Don't count this search as a recall (for automatic searches such as hooks). Hidden:
+        /// installed prompt hooks pass it, so it stays even if a hook-specific command replaces it.
+        #[arg(long, hide = true)]
+        no_recall: bool,
     },
     /// List memories
     List {
@@ -707,8 +711,8 @@ fn main() {
             } => {
                 commands::memory::add(&content, slug.as_deref(), global, &tags, &r#type, priority);
             }
-            MemoryAction::Search { query, slug, limit, max_chars } => {
-                commands::memory::search(&query, slug.as_deref(), limit, max_chars);
+            MemoryAction::Search { query, slug, limit, max_chars, no_recall } => {
+                commands::memory::search(&query, slug.as_deref(), limit, max_chars, no_recall);
             }
             MemoryAction::List { slug, limit, priority, clean, max_chars } => {
                 commands::memory::list(slug.as_deref(), limit, priority, clean, max_chars);

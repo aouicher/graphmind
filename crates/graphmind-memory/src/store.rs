@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+mod legacy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -54,9 +57,9 @@ impl MemoryUpdate {
 
     /// Apply the changes to `entry`. It keeps its id, `created`, session and source; `updated` is
     /// set to `now`. The expiry is kept unless the new type has a different lifetime (bug ->
-    /// decision clears it, decision -> bug starts it from now). A demotion (priority -> not) also
-    /// resets the recall count, so the next consolidate doesn't promote the entry straight back;
-    /// `priority: false` on an entry that isn't priority keeps its count.
+    /// decision clears it, decision -> bug starts it from now). `priority: Some(true)` pins the
+    /// entry and `Some(false)` unpins it (see `MemoryEntry::unpin`: a demotion sticks and resets
+    /// the recall count; on an entry that isn't priority it changes nothing, count included).
     pub fn apply_to(self, entry: &mut MemoryEntry, now: chrono::DateTime<chrono::Utc>) {
         if let Some(content) = self.content {
             entry.content = content;
@@ -72,11 +75,12 @@ impl MemoryUpdate {
             }
             entry.entry_type = new_type;
         }
-        if let Some(priority) = self.priority {
-            if entry.priority && !priority {
-                entry.recall_count = 0;
+        match self.priority {
+            Some(true) => entry.pin(),
+            Some(false) => {
+                entry.unpin();
             }
-            entry.priority = priority;
+            None => {}
         }
         entry.updated = now.to_rfc3339();
     }
@@ -140,8 +144,11 @@ pub struct MemoryEntry {
     pub content: String,
     pub tags: Vec<String>,
     pub session: String,
+    /// On disk as flags (`priority`, `promoted`, `demoted`) for compatibility with existing
+    /// files; read and change them through `priority()`, `pin()`, `promote()` and `unpin()`, which
+    /// keep them in the four valid states (`promoted` without `priority` reads as not priority).
     #[serde(default)]
-    pub priority: bool,
+    priority: bool,
     #[serde(default)]
     pub ttl_days: Option<u32>,
     #[serde(default)]
@@ -152,6 +159,75 @@ pub struct MemoryEntry {
     pub source: MemorySource,
     #[serde(default)]
     pub expires_at: Option<String>,
+    /// Priority set by auto-promotion (recall count), not by the person or agent that saved it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    promoted: bool,
+    /// Priority removed by hand: auto-promotion leaves the entry alone from then on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    demoted: bool,
+}
+
+/// Whether an entry is injected into every session, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// Found through search only.
+    Normal,
+    /// Made priority by whoever saved or edited it.
+    Pinned,
+    /// Made priority by consolidate, because deliberate searches kept recalling it.
+    Promoted,
+    /// Not priority because someone removed it; consolidate never promotes it again (pinning
+    /// still works). There is no way back to `Normal`: pinning and then unpinning a demoted
+    /// entry lands here again.
+    Demoted,
+}
+
+impl MemoryEntry {
+    pub fn priority(&self) -> Priority {
+        match (self.priority, self.promoted, self.demoted) {
+            (true, false, _) => Priority::Pinned,
+            (true, true, _) => Priority::Promoted,
+            (false, _, true) => Priority::Demoted,
+            (false, _, false) => Priority::Normal,
+        }
+    }
+
+    /// Pinned or auto-promoted: injected into every session.
+    pub fn is_priority(&self) -> bool {
+        self.priority
+    }
+
+    /// Make the entry priority deliberately; an auto-promoted or demoted entry becomes pinned.
+    pub fn pin(&mut self) {
+        self.priority = true;
+        self.promoted = false;
+        self.demoted = false;
+    }
+
+    /// Auto-promote a normal entry. Returns false (and changes nothing) for any other state: a
+    /// pin stays a pin, and a demotion sticks however often the entry is recalled afterwards.
+    pub fn promote(&mut self) -> bool {
+        if self.priority() != Priority::Normal {
+            return false;
+        }
+        self.priority = true;
+        self.promoted = true;
+        true
+    }
+
+    /// Remove priority from a pinned or auto-promoted entry: it becomes demoted, so consolidate
+    /// doesn't promote it again, and its recall count restarts at zero. Returns false (and
+    /// changes nothing, recall count included) if the entry isn't priority.
+    pub fn unpin(&mut self) -> bool {
+        if !self.priority {
+            return false;
+        }
+        self.priority = false;
+        self.promoted = false;
+        self.demoted = true;
+        self.recall_count = 0;
+        true
+    }
 }
 
 fn default_confidence() -> f32 {
@@ -231,6 +307,8 @@ impl MemoryStore {
             confidence: options.confidence,
             source: options.source,
             expires_at,
+            promoted: false,
+            demoted: false,
         };
 
         let file_path = if entry.global {
@@ -267,19 +345,44 @@ impl MemoryStore {
         entries
     }
 
+    /// Priority entries: pinned ones first (newest first), then auto-promoted ones by recall
+    /// count, so a growing set of promoted entries can't push pinned facts out of a capped list.
     pub fn list_priority(&self, project: Option<&str>) -> Vec<MemoryEntry> {
-        self.list(project)
+        let mut entries: Vec<_> = self
+            .list(project)
             .into_iter()
-            .filter(|e| e.priority)
-            .collect()
+            .filter(MemoryEntry::is_priority)
+            .collect();
+        // Stable sort: `list` already orders by date, newest first.
+        entries.sort_by_key(|e| match e.priority() {
+            Priority::Promoted => (1, std::cmp::Reverse(e.recall_count)),
+            _ => (0, std::cmp::Reverse(0)),
+        });
+        entries
     }
 
     /// The memory files `project` reads: the global file, then the project's.
-    fn files(&self, project: Option<&str>) -> Vec<PathBuf> {
+    pub(crate) fn files(&self, project: Option<&str>) -> Vec<PathBuf> {
         let mut paths = vec![self.global_path()];
         if let Some(proj) = project {
             paths.push(self.project_path(proj));
         }
+        paths
+    }
+
+    /// Every memory file: the global file, then each project's.
+    pub(crate) fn all_files(&self) -> Vec<PathBuf> {
+        let global = self.global_path();
+        let mut projects: Vec<PathBuf> = fs::read_dir(&self.memory_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("jsonl") && *path != global)
+            .collect();
+        projects.sort();
+        let mut paths = vec![global];
+        paths.append(&mut projects);
         paths
     }
 
@@ -319,15 +422,21 @@ impl MemoryStore {
     }
 
     /// Edit an entry in place (see `MemoryUpdate::apply_to`). `id` may be the 8-character prefix
-    /// that listings print.
+    /// that listings print. The edit moves `updated` past the legacy cutoff, so an entry an
+    /// earlier version auto-promoted is marked first; the edit's own pin or unpin then wins.
     pub fn update(&self, id: &str, project: Option<&str>, edit: MemoryUpdate) -> Result<MemoryEntry, MemoryError> {
         if edit.is_empty() {
             return Err(MemoryError::NothingToChange);
         }
         let (path, full_id) = self.find(id, project)?;
+        let now = chrono::Utc::now();
+        let cutoff = self.record_legacy_cutoff(now);
         self.update_file(&path, |entries| match entries.iter_mut().find(|e| e.id == full_id) {
             Some(entry) => {
-                edit.apply_to(entry, chrono::Utc::now());
+                if let Some(cutoff) = cutoff {
+                    entry.mark_legacy_promotion(cutoff);
+                }
+                edit.apply_to(entry, now);
                 (Ok(entry.clone()), true)
             }
             None => (Err(MemoryError::NotFound), false),
@@ -350,19 +459,27 @@ impl MemoryStore {
         .unwrap_or(Err(MemoryError::NotWritten))
     }
 
-    /// Increment the recall_count for the entry with the given id.
-    pub fn increment_recall(&self, id: &str, project: Option<&str>) {
-        for path in self.files(project).iter().filter(|p| p.exists()) {
-            let found = self.update_file(path, |entries| match entries.iter_mut().find(|e| e.id == id) {
-                Some(entry) => {
-                    entry.recall_count += 1;
-                    (true, true)
-                }
-                None => (false, false),
-            });
-            if found == Some(true) {
-                return;
+    /// Count one recall for each entry in `ids` (the results of a deliberate search): one
+    /// read-modify-write per memory file, not one per entry. Unknown ids are ignored.
+    pub fn record_recalls(&self, ids: &[&str], project: Option<&str>) {
+        let mut pending: HashSet<&str> = ids.iter().copied().collect();
+        for path in self.files(project) {
+            if pending.is_empty() {
+                break;
             }
+            if !path.exists() {
+                continue;
+            }
+            self.update_file(&path, |entries| {
+                let mut changed = false;
+                for entry in entries.iter_mut() {
+                    if pending.remove(entry.id.as_str()) {
+                        entry.recall_count = entry.recall_count.saturating_add(1);
+                        changed = true;
+                    }
+                }
+                ((), changed)
+            });
         }
     }
 
@@ -444,7 +561,7 @@ impl MemoryStore {
 
     /// Runs `f` while holding an exclusive lock on `<file_path>.lock`,
     /// serializing read-modify-write sequences against a given JSONL file
-    /// across processes — e.g. `increment_recall` from one MCP server and
+    /// across processes — e.g. `record_recalls` from one MCP server and
     /// `delete`/`consolidate` from another CLI invocation, both targeting
     /// the same shared repo_id-keyed memory file. `add` takes it too: an
     /// append is atomic on its own, but one that lands between another

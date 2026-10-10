@@ -378,7 +378,7 @@ pub fn memory_auto_clean() {
     if graphmind_config::write_atomic(&stamp, now.to_string().as_bytes()).is_err() {
         return;
     }
-    super::memory::clean_quiet();
+    super::memory::run_consolidate(None, false);
 }
 
 fn version_cmp(a: &str, b: &str) -> i32 {
