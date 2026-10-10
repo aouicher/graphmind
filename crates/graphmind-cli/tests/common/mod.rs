@@ -6,6 +6,38 @@ use std::sync::{Mutex, OnceLock};
 
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// For suites that call setup functions in-process: create a fresh temp HOME, point `HOME` at it,
+/// run `f`, then drop. PATH holds the system directories plus `<home>/bin` (empty unless a test
+/// puts a fake CLI there), so the `claude` and `opencode` installed on the machine running the
+/// tests are never used.
+pub fn with_home<F: FnOnce(&std::path::Path)>(f: F) {
+    let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::env::join_paths([dir.path().join("bin"), "/usr/bin".into(), "/bin".into()]).unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+        std::env::set_var("PATH", path);
+        // Claude Code's config would move there, out of the temp HOME.
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
+    f(dir.path());
+    // dir dropped here — content cleaned up, HOME still points at it but that's harmless.
+}
+
+/// `.bak` files next to `file`.
+pub fn backups_of(file: &std::path::Path) -> usize {
+    let name = file.file_name().unwrap().to_string_lossy().to_string();
+    let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).to_string();
+    std::fs::read_dir(file.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().to_string();
+            n.starts_with(&stem) && n.ends_with(".bak")
+        })
+        .count()
+}
+
 pub struct CliTestEnv {
     pub home: tempfile::TempDir,
     pub binary: PathBuf,
