@@ -398,9 +398,18 @@ impl GraphBuilder {
                     }).collect(),
                 }
             } else {
+                // A file the parser refuses is skipped and named like an unreadable one. Its outgoing
+                // edges are already gone (above), so keeping its old symbols would leave half a file.
                 match parse_single(file.full_path.to_str().unwrap_or(""), &content, &file.language) {
                     Ok(p) => p,
-                    Err(_) => continue,
+                    Err(e) => {
+                        eprintln!("Skipped {}: {}", rel_path, e);
+                        if self.forget_if_indexed(&rel_path, &mut errors) {
+                            deleted += 1;
+                        }
+                        skipped += 1;
+                        continue;
+                    }
                 }
             };
 
@@ -808,4 +817,21 @@ fn pathdiff(full_path: &str, base: &str) -> String {
     full.strip_prefix(base)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| full_path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every language a file extension maps to has a parser: a mapped language without one would
+    /// make the build skip each file of it ("Unsupported language"). Markdown has its own parser.
+    #[test]
+    fn every_mapped_language_has_a_parser() {
+        for (ext, language) in LANGUAGE_MAP.iter().filter(|(_, l)| *l != "markdown") {
+            assert!(
+                parse_single("probe", "", language).is_ok(),
+                "{ext} maps to {language}, which the parser doesn't support"
+            );
+        }
+    }
 }
