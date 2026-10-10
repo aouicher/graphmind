@@ -74,6 +74,24 @@ fn setup_shell_path_removes_dead_legacy_line() {
     });
 }
 
+/// Older desktop app versions also wrote the dead `~/.graphmind/bin` line to `.bash_profile`:
+/// setup removes it there too, after a backup, when `~/.graphmind/bin` holds no binary.
+#[test]
+fn setup_shell_path_removes_dead_legacy_line_from_bash_profile() {
+    with_home(|home| {
+        let legacy = format!("export PATH=\"{}:$PATH\"", home.join(".graphmind/bin").display());
+        let bash_profile = home.join(".bash_profile");
+        fs::write(&bash_profile, format!("export EDITOR=vim\n{legacy}\n")).unwrap();
+
+        let bin_dir = home.join(".local").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/bash");
+
+        assert_eq!(fs::read_to_string(&bash_profile).unwrap(), "export EDITOR=vim\n");
+        assert_eq!(backups_of(&bash_profile), 1, "backed up before the rewrite");
+    });
+}
+
 
 // ---------------------------------------------------------------------------
 // 2. Claude Desktop MCP — written
