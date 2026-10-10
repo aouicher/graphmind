@@ -77,7 +77,7 @@ fn fetch_latest_version() -> Option<String> {
     let failed = UpdateCache { fetched_at: now, latest_version: String::new() };
     write_cache(&path, &failed);
 
-    let use_rtk = which::which("rtk").is_ok();
+    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
     let timeout_str = FETCH_TIMEOUT_SECS.to_string();
     let output = if use_rtk {
         std::process::Command::new("rtk")

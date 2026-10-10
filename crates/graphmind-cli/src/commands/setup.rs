@@ -12,9 +12,7 @@ mod shell_path;
 pub use shell_path::{already_on_path, install_shell_path, install_shell_path_for, uninstall_shell_path};
 
 #[doc(hidden)]
-pub fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Cannot determine home directory")
-}
+pub use graphmind_config::paths::home_dir;
 
 /// Global one-time setup: hooks, MCP configs, skill, CLAUDE.md instruction
 pub fn setup() {
@@ -605,29 +603,5 @@ pub fn install_claude_md_block() -> Outcome {
             Outcome::Written
         }
         Err(e) => left_alone(format!("failed to write {} ({e}); left unchanged", claude_md.display())),
-    }
-}
-
-#[cfg(test)]
-mod write_tests {
-    /// Setup writes config files people often manage with dotfile tools: a symlink stays a link,
-    /// the target's permissions are kept, and no temp file is left behind.
-    #[cfg(unix)]
-    #[test]
-    fn config_writes_keep_symlink_and_mode() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let real = dir.path().join("dotfiles-claude.json");
-        std::fs::write(&real, "old").unwrap();
-        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let link = dir.path().join(".claude.json");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-
-        graphmind_config::write_atomic(&link, b"new").unwrap();
-
-        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
-        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
-        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2, "temp file left behind");
     }
 }

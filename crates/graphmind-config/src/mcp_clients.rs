@@ -13,14 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::paths::{find_on_path, home_dir};
+
 const SERVER_NAME: &str = "graphmind";
 
 /// How long a `claude mcp ...` call may take before graphmind gives up on it and writes the file.
 const CLI_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Cannot determine home directory")
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpClient {
@@ -71,7 +69,7 @@ impl McpClient {
             McpClient::ClaudeCodeUser => true,
             // The OpenCode folder may not exist until its first run, so the CLI counts too.
             McpClient::OpenCode => {
-                home_dir().join(".config/opencode").is_dir() || which::which("opencode").is_ok()
+                home_dir().join(".config/opencode").is_dir() || find_on_path("opencode").is_some()
             }
             McpClient::ClaudeDesktop | McpClient::Cursor | McpClient::VsCode(_) => {
                 self.config_path().parent().is_some_and(Path::is_dir)
@@ -122,7 +120,7 @@ pub enum ConfigRead {
 }
 
 /// Read a JSON config that graphmind may update. An empty file reads as `{}`.
-pub fn read_config(path: &Path, allow_comments: bool) -> ConfigRead {
+pub fn read_json_config(path: &Path, allow_comments: bool) -> ConfigRead {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ConfigRead::Missing,
@@ -189,7 +187,7 @@ pub fn upsert(client: &McpClient, bin: &str, on_cli_fallback: &mut dyn FnMut(&st
     }
     let wanted = client.entry(bin);
     if *client == McpClient::ClaudeCodeUser {
-        if let Ok(claude) = which::which("claude") {
+        if let Some(claude) = find_on_path("claude") {
             if let Some(outcome) = upsert_with_claude_cli(client, &claude, bin, &wanted, on_cli_fallback) {
                 return outcome;
             }
@@ -202,7 +200,7 @@ pub fn upsert(client: &McpClient, bin: &str, on_cli_fallback: &mut dyn FnMut(&st
 /// through `claude mcp remove -s user` when the CLI is on PATH, like [`upsert`].
 pub fn remove(client: &McpClient, on_cli_fallback: &mut dyn FnMut(&str)) -> Outcome {
     if *client == McpClient::ClaudeCodeUser {
-        if let Ok(claude) = which::which("claude") {
+        if let Some(claude) = find_on_path("claude") {
             if let Some(outcome) = remove_with_claude_cli(client, &claude, on_cli_fallback) {
                 return outcome;
             }
@@ -277,7 +275,7 @@ fn remove_with_claude_cli(
 fn upsert_file(client: &McpClient, wanted: &Value) -> Outcome {
     let path = client.config_path();
     let key = client.servers_key();
-    let (mut config, has_comments) = match read_config(&path, client.allows_comments()) {
+    let (mut config, has_comments) = match read_json_config(&path, client.allows_comments()) {
         ConfigRead::Missing => (json!({}), false),
         ConfigRead::Parsed { value, has_comments } => (value, has_comments),
         ConfigRead::Unparseable(reason) => return Outcome::LeftAlone(reason),
@@ -307,7 +305,7 @@ fn upsert_file(client: &McpClient, wanted: &Value) -> Outcome {
 fn remove_file(client: &McpClient) -> Outcome {
     let path = client.config_path();
     let key = client.servers_key();
-    let (mut config, has_comments) = match read_config(&path, client.allows_comments()) {
+    let (mut config, has_comments) = match read_json_config(&path, client.allows_comments()) {
         ConfigRead::Missing => return Outcome::Unchanged,
         ConfigRead::Parsed { value, has_comments } => (value, has_comments),
         ConfigRead::Unparseable(reason) => return Outcome::LeftAlone(reason),
@@ -335,7 +333,7 @@ fn remove_file(client: &McpClient) -> Outcome {
 /// Returns how many were removed.
 pub fn remove_claude_project_entries(project: Option<&str>) -> Result<usize, String> {
     let path = McpClient::ClaudeCodeUser.config_path();
-    let mut config = match read_config(&path, false) {
+    let mut config = match read_json_config(&path, false) {
         ConfigRead::Missing => return Ok(0),
         ConfigRead::Parsed { value, .. } => value,
         ConfigRead::Unparseable(reason) => return Err(reason),
@@ -387,26 +385,15 @@ pub fn graphmind_binary() -> String {
     if local_path.exists() {
         return local_path.to_string_lossy().to_string();
     }
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    if let Ok(output) = Command::new(which_cmd).arg("graphmind").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !path.is_empty() {
-                return path;
-            }
-        }
+    if let Some(path) = find_on_path("graphmind") {
+        return path.to_string_lossy().to_string();
     }
     local_path.to_string_lossy().to_string()
 }
 
 /// The graphmind entry `client`'s config holds now. `Err` when the file can't be read or parsed.
 fn current_entry(client: &McpClient) -> Result<Option<Value>, String> {
-    match read_config(&client.config_path(), client.allows_comments()) {
+    match read_json_config(&client.config_path(), client.allows_comments()) {
         ConfigRead::Missing => Ok(None),
         ConfigRead::Parsed { value, .. } => Ok(server_entry(&value, client.servers_key()).cloned()),
         ConfigRead::Unparseable(reason) => Err(reason),

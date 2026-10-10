@@ -2,13 +2,9 @@
 //! `graphmind setup` and the desktop app. Nothing here prints: callers report the result.
 
 use serde_json::{json, Value};
-use std::path::PathBuf;
 
-use crate::mcp_clients::{read_config, write_config, ConfigRead};
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Cannot determine home directory")
-}
+use crate::mcp_clients::{read_json_config, write_config, ConfigRead};
+use crate::paths::home_dir;
 
 /// What [`repair_claude_settings`] changed.
 #[derive(Debug, PartialEq)]
@@ -58,7 +54,7 @@ pub enum PathRepair {
 pub fn repair_claude_settings(remove_legacy_entry: bool) -> Result<SettingsRepair, String> {
     let settings_path = home_dir().join(".claude").join("settings.json");
     let unchanged = SettingsRepair { path: PathRepair::NotNeeded, legacy_entry_removed: false };
-    let mut config = match read_config(&settings_path, false) {
+    let mut config = match read_json_config(&settings_path, false) {
         ConfigRead::Missing => return Ok(unchanged),
         ConfigRead::Parsed { value, .. } => value,
         ConfigRead::Unparseable(reason) => return Err(reason),

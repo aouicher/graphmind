@@ -13,7 +13,7 @@ fn current_version() -> &'static str {
 }
 
 fn get_latest_version() -> Result<String, String> {
-    let use_rtk = which::which("rtk").is_ok();
+    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let output = if use_rtk {
         Command::new("rtk")

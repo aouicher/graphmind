@@ -47,8 +47,7 @@ pub fn set_project_excludes(slug: String, excludes: Vec<String>) {
 }
 
 fn hooks_dir() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not find home directory")
+    paths::home_dir()
         .join(".claude")
         .join("hooks")
 }

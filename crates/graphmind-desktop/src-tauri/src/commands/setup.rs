@@ -1,11 +1,8 @@
 use crate::types::CliStatus;
+use graphmind_config::paths::home_dir;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Cannot determine home directory")
-}
 
 fn local_bin_path() -> PathBuf {
     home_dir().join(".graphmind").join("bin").join("graphmind")

@@ -299,11 +299,10 @@ pub fn load_config() -> GlobalConfig {
     })
 }
 
-/// Writes `config` atomically (temp file + rename on the same filesystem),
-/// so a concurrent reader always sees either the old or the new complete
-/// file, never a truncated/corrupt one. Refuses while config.json exists but
-/// can't be read: `config` would then be the defaults `load_config` fell back
-/// to, and saving them would unregister every project.
+/// Writes `config` with [`crate::write_atomic`], so a concurrent reader always sees either the
+/// old or the new complete file, never a truncated/corrupt one. Refuses while config.json exists
+/// but can't be read: `config` would then be the defaults `load_config` fell back to, and saving
+/// them would unregister every project.
 pub fn save_config(config: &GlobalConfig) {
     if let Err(e) = read_config() {
         eprintln!("Error: not saving the config: {e}. Fix or remove the file first.");
@@ -311,19 +310,7 @@ pub fn save_config(config: &GlobalConfig) {
     }
     ensure_dirs();
     let json = serde_json::to_string_pretty(config).unwrap_or_default();
-    let path = paths::config_path();
-    let tmp_path = path.with_extension(format!(
-        "tmp.{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    if let Err(e) = fs::write(&tmp_path, json) {
-        eprintln!("Warning: Failed to write config: {e}");
-        return;
-    }
-    if let Err(e) = fs::rename(&tmp_path, &path) {
+    if let Err(e) = crate::write_atomic(&paths::config_path(), json.as_bytes()) {
         eprintln!("Warning: Failed to write config: {e}");
     }
 }
@@ -793,5 +780,38 @@ mod parse_config_tests {
         let raw = valid_json();
         assert!(parse_config(&raw[..raw.len() / 2]).is_err());
         assert!(parse_config("not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod save_config_tests {
+    use super::*;
+
+    /// config.json kept in a dotfiles repo stays a symlink, keeps its mode and gets the new
+    /// content; a config that doesn't parse is still never saved over.
+    #[cfg(unix)]
+    #[test]
+    fn save_keeps_symlinked_config_and_refuses_unreadable_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let _home = super::TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("HOME", dir.path()) };
+        ensure_dirs();
+        let real = dir.path().join("dotfiles-config.json");
+        fs::write(&real, serde_json::to_string(&GlobalConfig::default()).unwrap()).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&real, paths::config_path()).unwrap();
+
+        let config = GlobalConfig { setup_version: 42, ..GlobalConfig::default() };
+        save_config(&config);
+
+        let link = fs::symlink_metadata(paths::config_path()).unwrap();
+        assert!(link.file_type().is_symlink(), "config.json replaced by a regular file");
+        assert_eq!(fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(read_config().unwrap().setup_version, 42);
+
+        fs::write(&real, "not json").unwrap();
+        save_config(&GlobalConfig::default());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "not json");
     }
 }

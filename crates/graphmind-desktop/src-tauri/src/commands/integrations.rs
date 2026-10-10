@@ -5,11 +5,7 @@
 use crate::types::AiClient;
 use graphmind_config::claude_settings;
 use graphmind_config::mcp_clients::{self, McpClient, Outcome};
-use std::path::PathBuf;
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().expect("Cannot determine home directory")
-}
+use graphmind_config::paths::{find_on_path, home_dir};
 
 /// The client behind a card id.
 fn client_for(client_id: &str) -> Result<McpClient, String> {
@@ -25,11 +21,7 @@ fn client_for(client_id: &str) -> Result<McpClient, String> {
 /// Claude Code counts as installed for configuration (graphmind's hooks target it), so the card
 /// shows whether it is actually on this machine.
 fn is_claude_detected() -> bool {
-    home_dir().join(".claude").is_dir()
-        || std::process::Command::new("which")
-            .arg("claude")
-            .output()
-            .is_ok_and(|o| o.status.success())
+    home_dir().join(".claude").is_dir() || find_on_path("claude").is_some()
 }
 
 fn client_card(id: &str, icon: &str, client: McpClient) -> AiClient {

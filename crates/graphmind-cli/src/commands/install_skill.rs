@@ -1,4 +1,5 @@
 use colored::Colorize;
+use graphmind_config::paths::home_dir;
 use std::fs;
 
 const SKILL_CONTENT: &str = r#"---
@@ -98,8 +99,7 @@ const SUB_SKILLS: &[(&str, &str)] = &[
 ];
 
 pub fn install_skill() {
-    let skills_base = dirs::home_dir()
-        .expect("Could not find home directory")
+    let skills_base = home_dir()
         .join(".claude")
         .join("skills");
 
@@ -146,8 +146,7 @@ pub fn install_skill() {
 /// Only touches `~/.claude/skills/graphmind` and the exact sub-skill dirs
 /// from `SUB_SKILLS` — leaves any other directory under `~/.claude/skills/` untouched.
 pub fn uninstall_skill() {
-    let skills_base = dirs::home_dir()
-        .expect("Could not find home directory")
+    let skills_base = home_dir()
         .join(".claude")
         .join("skills");
 

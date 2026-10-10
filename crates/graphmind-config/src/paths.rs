@@ -1,7 +1,13 @@
 use std::path::PathBuf;
 
-fn home_dir() -> PathBuf {
+/// The user's home directory (`$HOME` on Unix, so tests can point it at a temp dir).
+pub fn home_dir() -> PathBuf {
     dirs::home_dir().expect("Cannot determine home directory")
+}
+
+/// The first executable called `name` on PATH, as the shell would find it.
+pub fn find_on_path(name: &str) -> Option<PathBuf> {
+    which::which(name).ok()
 }
 
 pub fn graphmind_dir() -> PathBuf {

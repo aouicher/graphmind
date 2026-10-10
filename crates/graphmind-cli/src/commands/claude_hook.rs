@@ -1,4 +1,5 @@
 use colored::Colorize;
+use graphmind_config::paths::home_dir;
 use std::fs;
 use std::path::PathBuf;
 
@@ -313,15 +314,13 @@ fn all_hook_files() -> impl Iterator<Item = &'static str> {
 }
 
 fn hooks_dir() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not find home directory")
+    home_dir()
         .join(".claude")
         .join("hooks")
 }
 
 fn settings_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not find home directory")
+    home_dir()
         .join(".claude")
         .join("settings.json")
 }
