@@ -28,7 +28,7 @@ pub fn check_setup_status() -> SetupStatus {
 
 #[tauri::command]
 pub async fn run_setup() -> Result<String, String> {
-    let cli_path = super::setup::get_cli_path();
+    let cli_path = super::setup::get_cli_path()?;
     let output = std::process::Command::new(&cli_path)
         .arg("setup")
         .output()

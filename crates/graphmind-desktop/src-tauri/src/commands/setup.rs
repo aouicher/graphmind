@@ -6,12 +6,11 @@ use std::path::Path;
 
 #[tauri::command]
 pub fn check_cli_installed() -> CliStatus {
-    let path = super::updater::find_graphmind_binary();
-    if path != "graphmind" {
+    if let Some(path) = super::updater::find_graphmind_binary() {
         let version = get_version(&path);
         return CliStatus {
             installed: true,
-            path: Some(path),
+            path: Some(path.to_string_lossy().into_owned()),
             version,
         };
     }
@@ -67,7 +66,7 @@ pub async fn install_cli() -> Result<CliStatus, String> {
         .status()
         .ok();
 
-    let version = get_version(&bin_path.to_string_lossy());
+    let version = get_version(&bin_path);
     Ok(CliStatus {
         installed: true,
         path: Some(bin_path.to_string_lossy().to_string()),
@@ -108,8 +107,8 @@ fn download_cli(url: &str, bin_path: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_cli_path() -> String {
-    super::updater::find_graphmind_binary()
+pub fn get_cli_path() -> Result<String, String> {
+    super::updater::require_graphmind_binary().map(|path| path.to_string_lossy().into_owned())
 }
 
 #[derive(serde::Serialize)]
@@ -121,8 +120,9 @@ pub struct UpdateInfo {
 
 #[tauri::command]
 pub async fn check_cli_update() -> Result<UpdateInfo, String> {
-    let cli_path = super::updater::find_graphmind_binary();
-    let current = get_version(&cli_path).unwrap_or_else(|| "0.0.0".to_string());
+    let current = super::updater::find_graphmind_binary()
+        .and_then(|path| get_version(&path))
+        .unwrap_or_else(|| "0.0.0".to_string());
 
     let output = std::process::Command::new("curl")
         .args([
@@ -157,11 +157,10 @@ pub async fn check_cli_update() -> Result<UpdateInfo, String> {
 
 #[tauri::command]
 pub async fn update_cli() -> Result<CliStatus, String> {
-    let cli_path = super::updater::find_graphmind_binary();
-    if cli_path == "graphmind" {
+    let Some(cli_path) = super::updater::find_graphmind_binary() else {
         // CLI not installed yet — do a fresh install
         return install_cli().await;
-    }
+    };
 
     // Delegate to the CLI's own update logic (handles Homebrew symlinks correctly)
     let status = std::process::Command::new(&cli_path)
@@ -177,12 +176,12 @@ pub async fn update_cli() -> Result<CliStatus, String> {
     let version = get_version(&cli_path);
     Ok(CliStatus {
         installed: true,
-        path: Some(cli_path),
+        path: Some(cli_path.to_string_lossy().into_owned()),
         version,
     })
 }
 
-fn get_version(path: &str) -> Option<String> {
+fn get_version(path: &Path) -> Option<String> {
     std::process::Command::new(path)
         .arg("--version")
         .output()
@@ -216,7 +215,7 @@ mod tests {
 
         download_cli(&fake_release(dir.path()), &bin).unwrap();
 
-        assert_eq!(get_version(&bin.to_string_lossy()).as_deref(), Some("9.9.9"));
+        assert_eq!(get_version(&bin).as_deref(), Some("9.9.9"));
         assert!(!bin.with_extension("tmp").exists());
     }
 

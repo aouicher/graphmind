@@ -25,6 +25,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 - **`CLAUDE_CONFIG_DIR` reaches the desktop app.** Apps started from the Finder don't inherit it, so the desktop's Claude Code card looked at `~/.claude.json` while Claude Code used `$CLAUDE_CONFIG_DIR/.claude.json`. `graphmind setup` run with the variable records the folder in `~/.graphmind/config.json` (`claude_config_dir`), and processes without the variable use it while the folder exists; `CLAUDE_CONFIG_DIR= graphmind setup` goes back to `~/.claude.json`. Thanks @KennethWKZ.
 - **Uninstall also cleans `.bash_profile`.** Desktop app versions 0.2.56 to 0.2.87 could add the `~/.graphmind/bin` PATH line to `.bash_profile` as well; `graphmind uninstall all` now removes it there too, and setup drops it when that folder holds no graphmind binary. Thanks @KennethWKZ.
 - **The desktop app installs graphmind where the install script does.** When it finds no graphmind, it installs one to `~/.local/bin` instead of `~/.graphmind/bin`, and a failed download no longer leaves `graphmind.tmp` behind. A graphmind it finds, Homebrew's included, is left alone; updates still go through `graphmind update`. Thanks @KennethWKZ.
+- **The desktop app says when it can't find graphmind.** Its hook, skill, setup and uninstall actions failed with "No such file or directory" when no graphmind was installed; they now say the CLI wasn't found and to install it with Update CLI in Settings. Thanks @KennethWKZ.
 
 ### Changed
 
