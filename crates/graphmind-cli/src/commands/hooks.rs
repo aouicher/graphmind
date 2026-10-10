@@ -151,6 +151,39 @@ fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
     true
 }
 
+/// Adds the hooks introduced since graphmind's hooks were installed in each registered
+/// repo (post-checkout, post-merge, post-rewrite). Run by `setup`, which re-runs after
+/// an upgrade. Only repos whose own git dir already has graphmind's post-commit hook:
+/// this completes an install people chose, it never starts one. Returns the number of
+/// repos updated.
+pub fn refresh_installed() -> usize {
+    let mut seen = std::collections::HashSet::new();
+    let mut updated = 0;
+    for project in Registry::list() {
+        let Some(HooksLocation::GitDir(dir)) = locate_hooks(Path::new(&project.path)) else {
+            continue;
+        };
+        // Worktrees of one repo share its hooks.
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
+        let ours = |name: &str| fs::read_to_string(dir.join(name)).is_ok_and(|b| b.contains("graphmind"));
+        if !ours("post-commit") {
+            continue;
+        }
+        let mut added = false;
+        for (name, content) in HOOKS {
+            if !ours(name) {
+                added |= install_hook(&dir, name, content);
+            }
+        }
+        if added {
+            updated += 1;
+        }
+    }
+    updated
+}
+
 pub fn install(slug: Option<&str>) {
     let slug = match resolve_project_slug(&[slug]) {
         Some(s) => s,

@@ -15,31 +15,37 @@ pub fn setup() {
         "⚡".bold()
     );
 
-    print_step(1, 9, "Shell PATH configuration");
+    print_step(1, 10, "Shell PATH configuration");
     install_shell_path();
 
-    print_step(2, 9, "Claude Code hooks");
+    print_step(2, 10, "Claude Code hooks");
     super::claude_hook::install_hook();
 
-    print_step(3, 9, "Claude Code skills");
+    print_step(3, 10, "Claude Code skills");
     super::install_skill::install_skill();
 
-    print_step(4, 9, "Claude Desktop MCP config");
+    print_step(4, 10, "Claude Desktop MCP config");
     install_claude_desktop_mcp();
 
-    print_step(5, 9, "Claude Code MCP server");
+    print_step(5, 10, "Claude Code MCP server");
     register_mcp_in_claude_code();
 
-    print_step(6, 9, "OpenCode MCP config");
+    print_step(6, 10, "OpenCode MCP config");
     install_opencode_mcp();
 
-    print_step(7, 9, "Cursor global MCP config");
+    print_step(7, 10, "Cursor global MCP config");
     install_cursor_global_mcp();
 
-    print_step(8, 9, "Repair legacy env.PATH (issue #105)");
+    print_step(8, 10, "Repair legacy env.PATH (issue #105)");
     repair_project_mcp_env();
 
-    print_step(9, 9, "CLAUDE.md instruction");
+    print_step(9, 10, "Git hooks of registered projects");
+    match super::hooks::refresh_installed() {
+        0 => println!("    {} up to date", "✓".green()),
+        n => println!("    {} added new hooks in {n} repo(s)", "✓".green()),
+    }
+
+    print_step(10, 10, "CLAUDE.md instruction");
     install_claude_md_block();
 
     // Stamp setup version so CLI/desktop can detect outdated config
@@ -1288,31 +1294,31 @@ pub fn uninstall_all(purge: bool, yes: bool) {
         "⚡".bold()
     );
 
-    print_step(1, 9, "Claude Code hooks");
+    print_step(1, 10, "Claude Code hooks");
     super::claude_hook::uninstall_hook();
 
-    print_step(2, 9, "Claude Code skills");
+    print_step(2, 10, "Claude Code skills");
     super::install_skill::uninstall_skill();
 
-    print_step(3, 9, "Claude Desktop MCP config");
+    print_step(3, 10, "Claude Desktop MCP config");
     uninstall_claude_desktop_mcp();
 
-    print_step(4, 9, "Claude Code MCP server");
+    print_step(4, 10, "Claude Code MCP server");
     unregister_mcp_in_claude_code();
 
-    print_step(5, 9, "OpenCode MCP config");
+    print_step(5, 10, "OpenCode MCP config");
     uninstall_opencode_mcp();
 
-    print_step(6, 9, "Cursor global MCP config");
+    print_step(6, 10, "Cursor global MCP config");
     uninstall_cursor_global_mcp();
 
-    print_step(7, 9, "CLAUDE.md instruction");
+    print_step(7, 10, "CLAUDE.md instruction");
     uninstall_claude_md_block();
 
-    print_step(8, 9, "Shell PATH configuration");
+    print_step(8, 10, "Shell PATH configuration");
     uninstall_shell_path();
 
-    print_step(9, 9, "Per-project git hooks + MCP configs");
+    print_step(9, 10, "Per-project git hooks + MCP configs");
     let projects = graphmind_config::Registry::list();
     for project in &projects {
         super::hooks::uninstall(Some(&project.slug));

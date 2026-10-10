@@ -47,7 +47,10 @@ pub struct LicenseConfig {
 /// v3 — issue #105: MCP entries no longer carry an `env.PATH` block, and the
 /// global `env.PATH` in ~/.claude/settings.json is removed. Bumping this makes
 /// `auto_setup_if_outdated()` run the repair for already-installed users.
-pub const SETUP_VERSION: u32 = 3;
+///
+/// v4 — git worktree support: setup adds the post-checkout / post-merge /
+/// post-rewrite git hooks to repos that already have graphmind's hooks.
+pub const SETUP_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {

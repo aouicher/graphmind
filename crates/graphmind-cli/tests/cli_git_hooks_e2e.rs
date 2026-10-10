@@ -132,3 +132,27 @@ fn worktree_add_registers_and_seeds_the_new_worktree() {
     let list = env.run_ok(&["list"]);
     assert!(list.contains("worktree of app"), "got: {list}");
 }
+
+#[test]
+fn setup_completes_hooks_installed_by_an_older_version() {
+    let env = CliTestEnv::new();
+    let old = new_repo(&env, "old");
+    let never = new_repo(&env, "never");
+    env.run_ok(&["register", old.to_str().unwrap(), "--slug", "old"]);
+    env.run_ok(&["register", never.to_str().unwrap(), "--slug", "never"]);
+
+    // What graphmind <= 0.2.215 installed: post-commit and pre-push only.
+    let hooks = old.join(".git/hooks");
+    std::fs::write(hooks.join("post-commit"), "#!/bin/sh\n# graphmind: auto-rebuild\ngraphmind build 2>/dev/null &\n").unwrap();
+    std::fs::write(hooks.join("pre-push"), "#!/bin/sh\n# graphmind: diff-impact\ngraphmind diff-impact 2>/dev/null\n").unwrap();
+
+    env.run_ok(&["setup"]);
+
+    for name in ["post-checkout", "post-merge", "post-rewrite"] {
+        let body = std::fs::read_to_string(hooks.join(name)).unwrap_or_default();
+        assert!(body.contains("graphmind"), "{name} should be added");
+    }
+    for name in HOOK_NAMES {
+        assert!(!never.join(".git/hooks").join(name).exists(), "{name} must not be installed unasked");
+    }
+}
