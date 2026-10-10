@@ -3,9 +3,10 @@
 //! agree on where each client's entry lives and never replace a config they can't parse.
 
 use crate::types::AiClient;
+use graphmind_config::claude_home::{self, ClaudeHome};
 use graphmind_config::claude_settings;
 use graphmind_config::mcp_clients::{self, McpClient, Outcome};
-use graphmind_config::paths::{find_on_path, home_dir};
+use graphmind_config::paths::find_on_path;
 
 /// The client behind a card id.
 fn client_for(client_id: &str) -> Result<McpClient, String> {
@@ -19,9 +20,11 @@ fn client_for(client_id: &str) -> Result<McpClient, String> {
 }
 
 /// Claude Code counts as installed for configuration (graphmind's hooks target it), so the card
-/// shows whether it is actually on this machine.
+/// shows whether it is actually on this machine: its folder (the one the card configures, or
+/// ~/.claude) or its CLI.
 fn is_claude_detected() -> bool {
-    home_dir().join(".claude").is_dir() || find_on_path("claude").is_some()
+    [ClaudeHome::current(), ClaudeHome::default_home()].iter().any(|home| home.dir().is_dir())
+        || find_on_path("claude").is_some()
 }
 
 fn client_card(id: &str, icon: &str, client: McpClient) -> AiClient {
@@ -92,7 +95,7 @@ fn uninstall(client: &McpClient) -> Result<(), String> {
     };
     // Every file is tried; the first failure is reported.
     let mut result = Ok(());
-    for file in mcp_clients::claude_code_files() {
+    for file in claude_home::claude_code_files() {
         result = result.and(into_result(&file, mcp_clients::remove(&file, &mut log_cli_fallback)));
     }
     result.and(remove_claude_code_leftovers())
@@ -100,7 +103,7 @@ fn uninstall(client: &McpClient) -> Result<(), String> {
 
 fn remove_claude_code_leftovers() -> Result<(), String> {
     let mut result = claude_settings::repair_claude_settings(true).map(drop);
-    for file in mcp_clients::claude_code_files() {
+    for file in claude_home::claude_code_files() {
         result = result.and(mcp_clients::remove_claude_project_entries(&file, None).map(drop));
     }
     result

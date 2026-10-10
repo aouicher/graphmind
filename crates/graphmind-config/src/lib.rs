@@ -1,7 +1,9 @@
 pub mod atomic;
 pub mod breaking;
+pub mod claude_home;
 pub mod claude_settings;
 pub mod config;
+pub mod fnv;
 pub mod git_identity;
 pub mod mcp_clients;
 pub mod paths;
@@ -15,5 +17,6 @@ pub use config::{
     EmbeddingConfig, EmbeddingMode, Feature, GlobalConfig, LicenseConfig, McpConfig, ProjectConfig,
     Registry, Tier, SETUP_VERSION,
 };
+pub use fnv::fnv1a;
 pub use resolve::{resolve_path, resolve_project_slug};
 pub use seed::{lock_build, on_worktree_linked, seed_graph, spawn_background_build};

@@ -8,6 +8,7 @@
 use common::with_home;
 use graphmind_cli::commands::claude_hook::{install_hook, installed_hooks_outdated};
 use graphmind_cli::commands::setup::setup;
+use graphmind_config::claude_home::ClaudeHome;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,14 +74,14 @@ fn lost_hook_registrations_trigger_auto_setup_after_a_completed_setup() {
     with_home(|home| {
         setup();
         assert_eq!(graphmind_config::read_config().unwrap().setup_version, graphmind_config::SETUP_VERSION);
-        assert!(!installed_hooks_outdated(), "a fresh install is current");
+        assert!(!installed_hooks_outdated(&ClaudeHome::current()), "a fresh install is current");
 
         fs::write(settings_json(home), r#"{"permissions": {}}"#).unwrap();
-        assert!(installed_hooks_outdated(), "lost registrations must start auto-setup");
+        assert!(installed_hooks_outdated(&ClaudeHome::current()), "lost registrations must start auto-setup");
 
         setup();
         assert!(hooks_registered(home));
-        assert!(!installed_hooks_outdated());
+        assert!(!installed_hooks_outdated(&ClaudeHome::current()));
     });
 }
 
@@ -99,14 +100,14 @@ fn hooks_left_unregistered_by_a_broken_settings_json_are_retried_once_it_is_fixe
         setup();
         assert_eq!(fs::read_to_string(&settings).unwrap(), r#"{"permissions": {},}"#);
         assert_eq!(graphmind_config::read_config().unwrap().setup_version, graphmind_config::SETUP_VERSION);
-        assert!(!installed_hooks_outdated(), "nothing to retry while settings.json doesn't parse");
+        assert!(!installed_hooks_outdated(&ClaudeHome::current()), "nothing to retry while settings.json doesn't parse");
 
         fs::write(&settings, r#"{"permissions": {}}"#).unwrap();
-        assert!(installed_hooks_outdated(), "a fixed settings.json without the hooks must start auto-setup");
+        assert!(installed_hooks_outdated(&ClaudeHome::current()), "a fixed settings.json without the hooks must start auto-setup");
 
         setup();
         assert!(hooks_registered(home));
-        assert!(!installed_hooks_outdated());
+        assert!(!installed_hooks_outdated(&ClaudeHome::current()));
     });
 }
 
@@ -123,7 +124,7 @@ fn hooks_setup_cant_register_keep_the_trigger_on_but_not_the_outdated_notice() {
         setup();
         assert_eq!(fs::read_to_string(&settings).unwrap(), r#"{"hooks": []}"#);
         assert_eq!(graphmind_config::read_config().unwrap().setup_version, graphmind_config::SETUP_VERSION);
-        assert!(installed_hooks_outdated());
+        assert!(installed_hooks_outdated(&ClaudeHome::current()));
     });
 }
 
@@ -136,13 +137,31 @@ fn a_hook_install_stopped_by_a_script_it_cant_write_is_retried() {
         let blocker = hooks.join("graphmind-session.sh");
         fs::create_dir_all(&blocker).unwrap();
 
-        assert!(install_hook().is_err());
+        assert!(install_hook(&ClaudeHome::current()).is_err());
         assert!(hooks.join("graphmind-search.sh").is_file(), "scripts before the blocked one are written");
-        assert!(installed_hooks_outdated(), "a half-done install must start auto-setup");
+        assert!(installed_hooks_outdated(&ClaudeHome::current()), "a half-done install must start auto-setup");
 
         fs::remove_dir(&blocker).unwrap();
         setup();
         assert!(hooks_registered(home));
-        assert!(!installed_hooks_outdated());
+        assert!(!installed_hooks_outdated(&ClaudeHome::current()));
+    });
+}
+
+/// The registration check reads the folder's own settings.json and hooks/: a CLAUDE_CONFIG_DIR
+/// folder that lost its registrations starts auto-setup there, while ~/.claude, without any
+/// graphmind hooks, doesn't count.
+#[test]
+fn lost_hook_registrations_are_checked_per_claude_folder() {
+    with_home(|home| {
+        let work = home.join("profiles").join("work");
+        fs::create_dir_all(&work).unwrap();
+        let outdated = |dir: Option<&Path>| common::in_config_dir(dir, || installed_hooks_outdated(&ClaudeHome::current()));
+        common::in_config_dir(Some(&work), setup);
+        assert!(!outdated(Some(&work)), "a fresh install is current");
+
+        fs::write(work.join("settings.json"), r#"{"permissions": {}}"#).unwrap();
+        assert!(outdated(Some(&work)), "lost registrations must start auto-setup in their folder");
+        assert!(!outdated(None), "~/.claude has no graphmind hooks to retry");
     });
 }

@@ -1,6 +1,8 @@
+use graphmind_config::claude_home::ClaudeHome;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const ANNOUNCEMENTS_URL: &str =
     "https://github.com/aouicher/graphmind/releases/latest/download/announcements.json";
@@ -133,6 +135,10 @@ fn now_secs() -> u64 {
 /// Auto-reinstall hooks/skills/CLAUDE.md in background when binary version is newer than installed setup.
 /// Runs at most once per day (stamp file). Triggered by brew upgrade or any binary replacement.
 ///
+/// Per Claude Code folder ([`ClaudeHome::current`]): a hook or MCP server inherits its session's
+/// `CLAUDE_CONFIG_DIR`, so a session in a folder that isn't set up, or set up by an older
+/// version, sets up that folder, whatever the state of the others.
+///
 /// `setup` runs as a detached, silent child process: a thread would die with the command that
 /// started it (usually a few milliseconds later), and its output must not reach that command's
 /// stdout (hooks capture it). The stamp is written before spawning, so the many commands hooks
@@ -140,9 +146,32 @@ fn now_secs() -> u64 {
 pub fn auto_setup_if_outdated() {
     // An unreadable config.json would read as setup_version 0: not a user who is out of date.
     let Ok(config) = graphmind_config::read_config() else { return };
+    auto_setup_home_if_outdated(&config, &ClaudeHome::current());
+}
+
+/// `graphmind mcp`'s auto-setup: a session in a `CLAUDE_CONFIG_DIR` folder that isn't set up, or
+/// set up by an older version, gets that folder set up once setup has completed for any folder,
+/// even when graphmind's hooks aren't there to start auto-setup themselves. ~/.claude is left to
+/// its hooks and to `graphmind setup`, so the MCP servers Cursor, OpenCode or Claude Desktop
+/// start, which have no `CLAUDE_CONFIG_DIR`, never set up Claude Code; nor does any server for
+/// someone who has never run setup.
+pub fn auto_setup_for_claude_config_dir() {
+    let home = ClaudeHome::current();
+    if home.is_default() {
+        return;
+    }
+    let Ok(config) = graphmind_config::read_config() else { return };
+    if config.set_up_anywhere() {
+        auto_setup_home_if_outdated(&config, &home);
+    }
+}
+
+fn auto_setup_home_if_outdated(config: &graphmind_config::GlobalConfig, home: &ClaudeHome) {
     // Installed Claude Code hook scripts that differ from this binary's also need a setup, so a
     // hook change doesn't depend on a SETUP_VERSION bump.
-    if config.setup_version >= graphmind_config::SETUP_VERSION && !super::claude_hook::installed_hooks_outdated() {
+    if home.setup_version(config) >= graphmind_config::SETUP_VERSION
+        && !super::claude_hook::installed_hooks_outdated(home)
+    {
         return;
     }
 
@@ -152,7 +181,7 @@ pub fn auto_setup_if_outdated() {
     const ONE_DAY: u64 = 86_400;
     let expected = graphmind_config::SETUP_VERSION;
     let hooks = super::claude_hook::hooks_fingerprint();
-    let stamp = graphmind_config::paths::graphmind_dir().join("auto-setup.stamp");
+    let stamp = auto_setup_stamp(home.config_dir());
     let now = now_secs();
     if let Ok(raw) = fs::read_to_string(&stamp) {
         let mut parts = raw.split_whitespace();
@@ -172,6 +201,7 @@ pub fn auto_setup_if_outdated() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
+    // The child inherits CLAUDE_CONFIG_DIR, so it sets up `home`.
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("setup")
         .env("GRAPHMIND_SKIP_NOTICES", "1")
@@ -187,14 +217,47 @@ pub fn auto_setup_if_outdated() {
     let _ = cmd.spawn();
 }
 
+/// Auto-setup's throttle stamp for a Claude Code folder (`None`: ~/.claude, which keeps the name
+/// older versions use): one per folder, so one folder's stamp never delays another's setup.
+fn auto_setup_stamp(config_dir: Option<&Path>) -> PathBuf {
+    let dir = graphmind_config::paths::graphmind_dir();
+    match config_dir {
+        None => dir.join("auto-setup.stamp"),
+        Some(config_dir) => {
+            let id = graphmind_config::fnv1a(config_dir.to_string_lossy().bytes());
+            dir.join(format!("auto-setup-{id:016x}.stamp"))
+        }
+    }
+}
+
+/// Remove the auto-setup stamp of a `CLAUDE_CONFIG_DIR` folder whose setup state is gone
+/// (uninstalled, or the folder deleted), so stamps don't pile up in ~/.graphmind. ~/.claude's
+/// single stamp stays.
+pub(crate) fn remove_auto_setup_stamp(config_dir: &Path) {
+    fs::remove_file(auto_setup_stamp(Some(config_dir))).ok();
+}
+
+/// What setup and the interactive notice say about a relative `CLAUDE_CONFIG_DIR`.
+pub(crate) fn relative_claude_config_dir_warning(value: &OsStr) -> String {
+    format!(
+        "CLAUDE_CONFIG_DIR={} is relative, ignored: set it to an absolute path; setting up ~/.claude",
+        value.to_string_lossy()
+    )
+}
+
 pub fn check_setup_version() {
     // "Run graphmind setup" is the wrong advice when config.json can't be read.
     let Ok(config) = graphmind_config::read_config() else { return };
-    let local = config.setup_version;
+    let home = ClaudeHome::current();
+    if let Some(value) = home.ignored() {
+        eprintln!("\x1b[33m[graphmind]\x1b[0m {}", relative_claude_config_dir_warning(value));
+    }
+    let local = home.setup_version(&config);
     let expected = graphmind_config::SETUP_VERSION;
     if local < expected {
+        let place = home.config_dir().map(|dir| format!(" in {}", dir.display())).unwrap_or_default();
         eprintln!(
-            "\x1b[33m[graphmind]\x1b[0m Hooks/skills outdated (v{} → v{}). Run `graphmind setup` to update.",
+            "\x1b[33m[graphmind]\x1b[0m Hooks/skills outdated{place} (v{} → v{}). Run `graphmind setup` to update.",
             local, expected
         );
     }

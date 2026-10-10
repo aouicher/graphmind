@@ -1,3 +1,4 @@
+use graphmind_config::claude_home::ClaudeHome;
 use graphmind_config::{load_config, SETUP_VERSION};
 use serde::Serialize;
 
@@ -16,12 +17,14 @@ pub struct Announcement {
     pub url: Option<String>,
 }
 
+/// The setup state of the Claude Code folder the setup this app runs installs into
+/// ([`ClaudeHome::current`]: the app sets `CLAUDE_CONFIG_DIR` from the recorded folder at startup).
 #[tauri::command]
 pub fn check_setup_status() -> SetupStatus {
-    let config = load_config();
+    let local_version = ClaudeHome::current().setup_version(&load_config());
     SetupStatus {
-        outdated: config.setup_version < SETUP_VERSION,
-        local_version: config.setup_version,
+        outdated: local_version < SETUP_VERSION,
+        local_version,
         expected_version: SETUP_VERSION,
     }
 }

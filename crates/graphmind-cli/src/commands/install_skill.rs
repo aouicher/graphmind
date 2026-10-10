@@ -1,9 +1,9 @@
 use colored::Colorize;
-use graphmind_config::paths::home_dir;
+use graphmind_config::claude_home::ClaudeHome;
 use std::fs;
 
-/// The main skill. It lives in `~/.claude/skills/graphmind/` (older installs, uninstall and the
-/// desktop look there), so `name: gm` is what makes Claude Code list it as `/gm`; a skill's name
+/// The main skill. It lives in the Claude Code folder's `skills/graphmind/` (older installs,
+/// uninstall and the desktop look there), so `name: gm` is what makes Claude Code list it as `/gm`; a skill's name
 /// otherwise defaults to its directory name, which would make it `/graphmind`.
 const SKILL_CONTENT: &str = r#"---
 name: gm
@@ -107,12 +107,10 @@ pub fn sub_skill_count() -> usize {
     SUB_SKILLS.len()
 }
 
-/// Install the /gm skill and its sub-skills in ~/.claude/skills. `Ok` when all of them were
+/// Install the /gm skill and its sub-skills in `home`'s skills/. `Ok` when all of them were
 /// written; `Err` with the reason otherwise (the sub-skills are skipped when /gm fails).
-pub fn install_skill() -> Result<(), String> {
-    let skills_base = home_dir()
-        .join(".claude")
-        .join("skills");
+pub fn install_skill(home: &ClaudeHome) -> Result<(), String> {
+    let skills_base = home.skills_dir();
 
     // Main skill. Written atomically: Claude Code reads skills while it runs.
     let skill_dir = skills_base.join("graphmind");
@@ -155,13 +153,11 @@ pub fn install_skill() -> Result<(), String> {
     Err(format!("{} of {} sub-skills not written", failed.len(), SUB_SKILLS.len()))
 }
 
-/// Remove the /gm skill and all sub-skills installed by `install_skill()`.
-/// Only touches `~/.claude/skills/graphmind` and the exact sub-skill dirs
-/// from `SUB_SKILLS` — leaves any other directory under `~/.claude/skills/` untouched.
-pub fn uninstall_skill() {
-    let skills_base = home_dir()
-        .join(".claude")
-        .join("skills");
+/// Remove the /gm skill and all sub-skills installed by `install_skill()` from `home`. Only
+/// touches `skills/graphmind` and the exact sub-skill dirs from `SUB_SKILLS`: any other directory
+/// under `skills/` is left untouched.
+pub fn uninstall_skill(home: &ClaudeHome) {
+    let skills_base = home.skills_dir();
 
     let mut removed = 0;
 

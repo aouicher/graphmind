@@ -108,6 +108,8 @@ Configures your machine so all AI tools can use graphmind:
 
 `setup` re-runs automatically after the binary is updated, when its configuration changed.
 
+With `CLAUDE_CONFIG_DIR` set to an absolute path (one Claude Code folder per account profile, for example), the Claude Code parts (hooks, skills, CLAUDE.md block, MCP entry) go to that folder instead of `~/.claude` and `~/.claude.json`, and each folder is set up on its own. To set up a new folder, run `CLAUDE_CONFIG_DIR=<folder> graphmind setup`, or start a Claude Code session there once graphmind's MCP server is configured for it: the server sets the folder up in the background. A relative value is ignored (setup says so). `graphmind uninstall all` removes graphmind from every folder it set up.
+
 ### `graphmind init` (per project)
 
 Registers and indexes a project:
@@ -559,9 +561,9 @@ graphmind session history [slug]    # recent sessions
 graphmind install hook-claude     # Claude Code search hook
 graphmind install hook-git        # git hooks (rebuild on commit/merge/rebase/checkout, diff-impact on push)
 graphmind install skill           # Claude Code skill
-graphmind uninstall hook-claude   # remove Claude Code hook
+graphmind uninstall hook-claude   # remove Claude Code hooks from the current Claude Code folder
 graphmind uninstall hook-git      # remove git hooks
-graphmind uninstall all [--purge] [--yes]  # remove ALL integrations (reverse of setup+init); --purge also deletes ~/.graphmind data
+graphmind uninstall all [--purge] [--yes]  # remove ALL integrations (reverse of setup+init), in every Claude Code folder; --purge also deletes ~/.graphmind data
 graphmind sync [slug]             # inject graph context into CLAUDE.md
 graphmind sync --all              # update CLAUDE.md for all projects
 ```

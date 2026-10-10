@@ -1,8 +1,8 @@
 use colored::Colorize;
+use graphmind_config::claude_home::ClaudeHome;
 use graphmind_config::mcp_clients::{read_json_config, ConfigRead};
-use graphmind_config::paths::home_dir;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 // Hook scripts. Claude Code replaces hook output above 10,000 characters with a short
 // preview, so the context-injecting hooks cut their message to MAX_CHARS (9,000). Hooks run
@@ -287,7 +287,8 @@ jq -n --arg msg "$MSG" '{
 }'
 "#;
 
-/// A hook script graphmind installs in `~/.claude/hooks` and registers in settings.json.
+/// A hook script graphmind installs in the Claude Code folder's `hooks/` and registers in its
+/// settings.json.
 struct Hook {
     file: &'static str,
     script: &'static str,
@@ -318,18 +319,6 @@ fn all_hook_files() -> impl Iterator<Item = &'static str> {
     HOOKS.iter().map(|h| h.file).chain(RETIRED.iter().copied())
 }
 
-fn hooks_dir() -> PathBuf {
-    home_dir()
-        .join(".claude")
-        .join("hooks")
-}
-
-fn settings_path() -> PathBuf {
-    home_dir()
-        .join(".claude")
-        .join("settings.json")
-}
-
 /// FNV-1a of everything `HOOKS` says about the hooks this binary installs (file, event, timeout,
 /// matchers and script): stable across builds and Rust versions, unlike `DefaultHasher`. Auto-setup's
 /// stamp records it, so a new hook version isn't throttled by a stamp left for the old one.
@@ -338,22 +327,17 @@ pub fn hooks_fingerprint() -> u64 {
 }
 
 fn fingerprint_of(hooks: &[Hook]) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for hook in hooks {
-        let fields = format!("{}\0{}\0{}\0{}\0{}", hook.file, hook.event, hook.timeout, hook.matchers.join(","), hook.script);
-        for byte in fields.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-    }
-    hash
+    graphmind_config::fnv1a(hooks.iter().flat_map(|hook| {
+        format!("{}\0{}\0{}\0{}\0{}", hook.file, hook.event, hook.timeout, hook.matchers.join(","), hook.script)
+            .into_bytes()
+    }))
 }
 
 /// One registration in settings.json: (event, matcher, hook entry as JSON text).
 type Registration = (String, String, String);
 
 /// The registrations this binary wants, the ones register_in_settings writes.
-fn expected_registrations(dir: &std::path::Path) -> Vec<Registration> {
+fn expected_registrations(dir: &Path) -> Vec<Registration> {
     let mut out = Vec::new();
     for hook in HOOKS {
         let cmd = dir.join(hook.file).to_string_lossy().into_owned();
@@ -385,21 +369,21 @@ fn installed_registrations(settings: &serde_json::Value) -> Vec<Registration> {
     out
 }
 
-/// True when this binary's hooks aren't the ones installed, so a hook change reaches existing
-/// installs through auto-setup without a SETUP_VERSION bump. That is an installed script that
+/// True when this binary's hooks aren't the ones installed in `home`, so a hook change reaches
+/// existing installs through auto-setup without a SETUP_VERSION bump. That is an installed script that
 /// differs from the one this binary writes, or a registration in settings.json that differs from
 /// `HOOKS` (an event, matcher or timeout added, removed or changed, or a registration lost).
 /// Hooks that aren't installed don't count: setup never adds hooks nobody asked for. A settings.json
 /// that doesn't parse is left to setup, which reports it.
-pub fn installed_hooks_outdated() -> bool {
-    let dir = hooks_dir();
+pub fn installed_hooks_outdated(home: &ClaudeHome) -> bool {
+    let dir = home.hooks_dir();
     if HOOKS.iter().any(|hook| fs::read_to_string(dir.join(hook.file)).is_ok_and(|installed| installed != hook.script)) {
         return true;
     }
     if !HOOKS.iter().any(|hook| dir.join(hook.file).exists()) {
         return false;
     }
-    let Ok(content) = fs::read_to_string(settings_path()) else {
+    let Ok(content) = fs::read_to_string(home.settings_path()) else {
         return true;
     };
     let Ok(settings) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -413,12 +397,12 @@ pub fn hook_events() -> Vec<&'static str> {
     HOOKS.iter().map(|hook| hook.event).collect()
 }
 
-/// Write the hook scripts and register them in ~/.claude/settings.json, then remove retired
-/// scripts. `Ok` once all is done; `Err` with the reason when a script can't be written (nothing
-/// is registered then) or settings.json is left alone (retired scripts are kept then, since its
-/// entries still point at them).
-pub fn install_hook() -> Result<(), String> {
-    let dir = hooks_dir();
+/// Write the hook scripts to `home`'s hooks/ and register them in its settings.json, then remove
+/// retired scripts. `Ok` once all is done; `Err` with the reason when a script can't be written
+/// (nothing is registered then) or settings.json is left alone (retired scripts are kept then,
+/// since its entries still point at them).
+pub fn install_hook(home: &ClaudeHome) -> Result<(), String> {
+    let dir = home.hooks_dir();
     if let Err(e) = fs::create_dir_all(&dir) {
         eprintln!("{} Failed to create hooks directory: {}", "Error:".red().bold(), e);
         return Err(format!("can't create {} ({e})", dir.display()));
@@ -444,7 +428,7 @@ pub fn install_hook() -> Result<(), String> {
     }
 
     // Register hooks in Claude Code settings.json
-    match register_in_settings() {
+    match register_in_settings(home) {
         Ok(()) => {
             // Only now: registration also dropped their entries. A settings.json left alone still
             // points at them, and Claude Code would run a missing script on every event.
@@ -454,19 +438,24 @@ pub fn install_hook() -> Result<(), String> {
                     fs::remove_file(&path).ok();
                 }
             }
-            println!("{} All hooks registered in Claude Code settings", "OK".green().bold());
+            println!("{} All hooks registered in {}", "OK".green().bold(), home.settings_path().display());
             Ok(())
         }
         Err(e) => {
             eprintln!("{} Hooks installed but not registered in settings: {}", "Warning:".yellow().bold(), e);
-            println!("  Fix ~/.claude/settings.json and run `graphmind setup` again, or add the hooks yourself");
+            println!(
+                "  Fix {} and run `graphmind setup` again, or add the hooks yourself",
+                home.settings_path().display()
+            );
             Err(e)
         }
     }
 }
 
-pub fn uninstall_hook() {
-    let dir = hooks_dir();
+/// Remove graphmind's hook scripts and settings.json entries from `home` only: `uninstall all`
+/// goes through every folder graphmind set up.
+pub fn uninstall_hook(home: &ClaudeHome) {
+    let dir = home.hooks_dir();
     for file in all_hook_files() {
         let path = dir.join(file);
         if path.exists() {
@@ -474,13 +463,13 @@ pub fn uninstall_hook() {
         }
     }
 
-    if let Err(e) = unregister_from_settings() {
-        eprintln!("{} Failed to unregister from settings: {}", "Warning:".yellow().bold(), e);
-    } else {
-        println!("{} All hooks unregistered from Claude Code settings", "OK".green().bold());
+    match unregister_from_settings(home) {
+        Ok(false) => {}
+        Ok(true) => println!("{} Hooks unregistered from {}", "OK".green().bold(), home.settings_path().display()),
+        Err(e) => eprintln!("{} Failed to unregister from settings: {}", "Warning:".yellow().bold(), e),
     }
 
-    println!("{} Hooks uninstalled", "OK".green().bold());
+    println!("{} Hooks uninstalled from {}", "OK".green().bold(), dir.display());
 }
 
 /// A hook command installed by graphmind (current or retired script).
@@ -522,8 +511,8 @@ fn hook_entry(cmd: &str, timeout_secs: u64) -> serde_json::Value {
 ///
 /// A missing (or empty) settings.json is created. One that can't be read or parsed is left
 /// alone and the reason returned: writing would replace the person's settings with the hooks.
-fn register_in_settings() -> Result<(), String> {
-    let path = settings_path();
+fn register_in_settings(home: &ClaudeHome) -> Result<(), String> {
+    let path = home.settings_path();
     let mut settings = match read_json_config(&path, false) {
         ConfigRead::Missing => serde_json::json!({}),
         ConfigRead::Parsed { value, .. } => value,
@@ -540,7 +529,7 @@ fn register_in_settings() -> Result<(), String> {
         .ok_or_else(|| format!("\"hooks\" in {} isn't an object; left unchanged", path.display()))?;
     strip_graphmind_hooks(hooks_obj);
 
-    let dir = hooks_dir();
+    let dir = home.hooks_dir();
     for hook in HOOKS {
         let cmd = dir.join(hook.file).to_string_lossy().into_owned();
         let list = hooks_obj.entry(hook.event).or_insert_with(|| serde_json::json!([]));
@@ -564,24 +553,30 @@ fn register_in_settings() -> Result<(), String> {
     write_settings(&path, &settings)
 }
 
-fn unregister_from_settings() -> Result<(), String> {
-    let path = settings_path();
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read settings.json: {}", e))?;
-
-    let mut settings: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse settings.json: {}", e))?;
-
-    if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-        strip_graphmind_hooks(hooks);
+/// Remove graphmind's hooks from `home`'s settings.json. `Ok(true)` when it held some. A missing
+/// file has none; one that can't be read or parsed is left alone and the reason returned.
+fn unregister_from_settings(home: &ClaudeHome) -> Result<bool, String> {
+    let path = home.settings_path();
+    let mut settings = match read_json_config(&path, false) {
+        ConfigRead::Missing => return Ok(false),
+        ConfigRead::Parsed { value, .. } => value,
+        ConfigRead::Unparseable(reason) => return Err(reason),
+    };
+    let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(false);
+    };
+    let before = hooks.clone();
+    strip_graphmind_hooks(hooks);
+    if *hooks == before {
+        // Nothing of graphmind's: the file isn't rewritten (or reformatted).
+        return Ok(false);
     }
-
-    write_settings(&path, &settings)
+    write_settings(&path, &settings).map(|()| true)
 }
 
 /// Write settings.json atomically, so a crash or a concurrent writer never leaves Claude Code
 /// with a truncated settings file, and a dotfile-managed symlink stays a link.
-fn write_settings(path: &std::path::Path, settings: &serde_json::Value) -> Result<(), String> {
+fn write_settings(path: &Path, settings: &serde_json::Value) -> Result<(), String> {
     let output = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     graphmind_config::write_atomic(path, output.as_bytes()).map_err(|e| format!("Failed to write settings.json: {}", e))

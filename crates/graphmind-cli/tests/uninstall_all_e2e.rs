@@ -16,6 +16,7 @@ use graphmind_cli::commands::setup::{
     uninstall_project_mcp_configs, uninstall_shell_path, unregister_mcp_in_claude_code, McpClient,
     Outcome,
 };
+use graphmind_config::claude_home::ClaudeHome;
 use serde_json::{json, Value};
 use std::fs;
 use std::sync::Mutex;
@@ -442,7 +443,7 @@ fn uninstall_claude_md_block_preserves_surrounding_content() {
         let content = "# Before content\nsome unrelated notes\n\n<!-- GM:START -->\nblock content\n<!-- GM:END -->\n\n# After content\nmore unrelated notes\n";
         fs::write(&claude_md, content).unwrap();
 
-        uninstall_claude_md_block();
+        uninstall_claude_md_block(&ClaudeHome::current());
 
         let final_content = fs::read_to_string(&claude_md).unwrap();
         assert!(
@@ -486,7 +487,7 @@ fn uninstall_claude_md_block_noop_when_absent() {
         let content = "# My notes\nno graphmind block here\n";
         fs::write(&claude_md, content).unwrap();
 
-        uninstall_claude_md_block();
+        uninstall_claude_md_block(&ClaudeHome::current());
 
         let final_content = fs::read_to_string(&claude_md).unwrap();
         assert_eq!(final_content, content, "file without GM block should be untouched");
@@ -516,7 +517,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
         fs::create_dir_all(&other_skill).unwrap();
         fs::write(other_skill.join("SKILL.md"), "unrelated skill content").unwrap();
 
-        install_skill().unwrap();
+        install_skill(&ClaudeHome::current()).unwrap();
 
         // Sanity: graphmind + all 19 sub-skills exist.
         assert!(skills_base.join("graphmind").exists());
@@ -531,7 +532,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
             assert!(skills_base.join(name).exists(), "{name} should exist before uninstall");
         }
 
-        uninstall_skill();
+        uninstall_skill(&ClaudeHome::current());
 
         assert!(!skills_base.join("graphmind").exists(), "graphmind skill dir should be removed");
         for name in &sub_skill_names {
@@ -633,8 +634,8 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         });
         fs::write(&settings_path, serde_json::to_string_pretty(&canary_settings).unwrap()).unwrap();
 
-        install_hook().unwrap();
-        uninstall_hook();
+        install_hook(&ClaudeHome::current()).unwrap();
+        uninstall_hook(&ClaudeHome::current());
 
         let content = fs::read_to_string(&settings_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -696,8 +697,8 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         let canary_md = "# Canary heading\nCanary paragraph that must survive.\n";
         fs::write(&claude_md, canary_md).unwrap();
 
-        install_claude_md_block();
-        uninstall_claude_md_block();
+        install_claude_md_block(&ClaudeHome::current());
+        uninstall_claude_md_block(&ClaudeHome::current());
 
         let final_md = fs::read_to_string(&claude_md).unwrap();
         assert!(
@@ -708,5 +709,94 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
             !final_md.contains("<!-- GM:START -->"),
             "GM block should be gone after round-trip, got:\n{final_md}"
         );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// One setup per Claude Code folder: uninstall all covers every folder, a targeted uninstall one
+// ---------------------------------------------------------------------------
+
+/// Auto-setup's throttle stamp for a CLAUDE_CONFIG_DIR folder.
+fn stamp_of(home: &std::path::Path, dir: &std::path::Path) -> std::path::PathBuf {
+    let id = graphmind_config::fnv1a(dir.to_string_lossy().bytes());
+    home.join(format!(".graphmind/auto-setup-{id:016x}.stamp"))
+}
+
+/// `uninstall all` in one CLAUDE_CONFIG_DIR folder removes graphmind from every folder it set up:
+/// that one, ~/.claude (Claude Code uses it whenever it runs without the variable) and any other,
+/// and resets their setup state, stamps included.
+#[test]
+fn uninstall_all_covers_every_claude_folder() {
+    with_home(|home| {
+        let work = home.join("profiles").join("work");
+        let other = home.join("profiles").join("other");
+        fs::create_dir_all(&work).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        for dir in [None, Some(&other), Some(&work)] {
+            common::in_config_dir(dir.map(|d| d.as_path()), graphmind_cli::commands::setup::setup);
+        }
+        for dir in [&work, &other] {
+            fs::write(stamp_of(home, dir), "0 0 0").unwrap();
+        }
+
+        common::in_config_dir(Some(&work), || graphmind_cli::commands::setup::uninstall_all(false, true));
+
+        for dir in [work.clone(), other.clone(), home.join(".claude")] {
+            assert!(!dir.join("hooks/graphmind-session.sh").exists(), "{}: hook script left", dir.display());
+            let settings = fs::read_to_string(dir.join("settings.json")).unwrap();
+            assert!(!settings.contains("graphmind-"), "{}: hooks still registered: {settings}", dir.display());
+            assert!(!dir.join("skills/graphmind").exists(), "{}: skill left", dir.display());
+            assert!(!fs::read_to_string(dir.join("CLAUDE.md")).unwrap().contains("GM:START"), "{}: block left", dir.display());
+        }
+        for claude_json in [work.join(".claude.json"), other.join(".claude.json"), home.join(".claude.json")] {
+            let json: Value = serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+            assert!(json["mcpServers"]["graphmind"].is_null(), "{}: {json}", claude_json.display());
+        }
+        let config = graphmind_config::read_config().unwrap();
+        assert_eq!(config.setup_version, 0);
+        assert!(config.setup_versions.is_empty(), "{:?}", config.setup_versions);
+        for dir in [&work, &other] {
+            assert!(!stamp_of(home, dir).exists(), "{}: auto-setup stamp left", dir.display());
+        }
+    });
+}
+
+/// `uninstall hook-claude` removes the hooks from the current folder only: ~/.claude and other
+/// folders keep theirs.
+#[test]
+fn uninstall_hook_covers_the_current_folder_only() {
+    with_home(|home| {
+        let work = home.join("profiles").join("work");
+        fs::create_dir_all(&work).unwrap();
+        install_hook(&ClaudeHome::current()).unwrap();
+        common::in_config_dir(Some(&work), || install_hook(&ClaudeHome::current())).unwrap();
+
+        common::in_config_dir(Some(&work), || uninstall_hook(&ClaudeHome::current()));
+
+        assert!(!work.join("hooks/graphmind-session.sh").exists());
+        assert!(!fs::read_to_string(work.join("settings.json")).unwrap().contains("graphmind-"));
+        assert!(home.join(".claude/hooks/graphmind-session.sh").exists(), "~/.claude's hooks removed");
+        assert!(fs::read_to_string(home.join(".claude/settings.json")).unwrap().contains("graphmind-session.sh"));
+    });
+}
+
+/// Uninstall leaves a settings.json without graphmind hooks byte for byte, and a missing one
+/// missing, without a warning: `uninstall all` goes through folders that may have neither.
+#[test]
+fn uninstall_hook_leaves_a_settings_json_without_graphmind_hooks_unchanged() {
+    with_home(|home| {
+        let exe = std::path::Path::new(env!("CARGO_BIN_EXE_graphmind"));
+        let out = common::graphmind_in(exe, home, "/bin/zsh").args(["uninstall", "hook-claude"]).output().unwrap();
+        assert!(out.status.success());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("Failed"), "a missing settings.json reported as an error: {stderr}");
+        assert!(!home.join(".claude/settings.json").exists(), "settings.json created");
+
+        let settings = home.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let content = "{\"hooks\": {\"Stop\": [{\"matcher\": \"*\", \"hooks\": [{\"type\": \"command\", \"command\": \"/h/mine.sh\"}]}]}}";
+        fs::write(&settings, content).unwrap();
+        uninstall_hook(&ClaudeHome::current());
+        assert_eq!(fs::read_to_string(&settings).unwrap(), content);
     });
 }

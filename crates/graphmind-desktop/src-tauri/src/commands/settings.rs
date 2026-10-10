@@ -1,6 +1,6 @@
+use graphmind_config::claude_home::ClaudeHome;
 use graphmind_config::{load_config, paths, save_config, Registry};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[tauri::command]
 pub fn get_app_version() -> String {
@@ -46,17 +46,14 @@ pub fn set_project_excludes(slug: String, excludes: Vec<String>) {
     });
 }
 
-fn hooks_dir() -> PathBuf {
-    paths::home_dir()
-        .join(".claude")
-        .join("hooks")
-}
-
+/// Whether graphmind's hooks are in the Claude Code folder this app's commands set up
+/// ([`ClaudeHome::current`]: the app sets `CLAUDE_CONFIG_DIR` from the recorded folder at
+/// startup).
 #[tauri::command]
 pub fn get_hook_status() -> bool {
     // All current hooks must be present. Same file names as `HOOKS` in the CLI's
     // claude_hook.rs (the desktop app can't link the CLI crate).
-    let dir = hooks_dir();
+    let dir = ClaudeHome::current().hooks_dir();
     ["graphmind-search.sh", "graphmind-session.sh", "graphmind-prompt.sh"]
         .iter()
         .all(|f| dir.join(f).exists())
@@ -153,21 +150,17 @@ pub fn install_skill() -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the /gm skill is in the Claude Code folder this app's commands set up.
 #[tauri::command]
 pub fn get_skill_status() -> bool {
-    let skill_path = dirs::home_dir()
-        .map(|h| h.join(".claude/skills/graphmind/SKILL.md"));
-    skill_path.map(|p| p.exists()).unwrap_or(false)
+    ClaudeHome::current().skills_dir().join("graphmind/SKILL.md").exists()
 }
 
+/// Whether the CLAUDE.md block is in the Claude Code folder this app's commands set up.
 #[tauri::command]
 pub fn get_claude_md_status() -> bool {
-    let claude_md_path = dirs::home_dir()
-        .map(|h| h.join(".claude/CLAUDE.md"));
-    claude_md_path
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|s| s.contains("<!-- GM:START -->"))
-        .unwrap_or(false)
+    std::fs::read_to_string(ClaudeHome::current().claude_md_path())
+        .is_ok_and(|s| s.contains("<!-- GM:START -->"))
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +347,7 @@ mod startup_settings_tests {
     // each other's tempdir mid-test.
     static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-    fn with_temp_home(f: impl FnOnce()) {
+    pub(super) fn with_temp_home(f: impl FnOnce()) {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("HOME", dir.path()); }
@@ -391,6 +384,49 @@ mod startup_settings_tests {
             let cfg = graphmind_config::load_config();
             assert!(cfg.build_all_on_startup);
             assert!(!cfg.launch_at_login); // unrelated field untouched
+        });
+    }
+}
+
+#[cfg(test)]
+mod claude_home_tests {
+    use super::startup_settings_tests::with_temp_home;
+    use super::*;
+    use std::fs;
+
+    /// Started from the Finder, the app has no CLAUDE_CONFIG_DIR and takes the recorded folder at
+    /// startup: its status checks then read that folder, the one the setup it runs installs
+    /// into, not ~/.claude.
+    #[test]
+    fn status_checks_read_the_recorded_claude_folder() {
+        with_temp_home(|| {
+            unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+            let work = paths::home_dir().join("profiles/work");
+            fs::create_dir_all(work.join("hooks")).unwrap();
+            for script in ["graphmind-search.sh", "graphmind-session.sh", "graphmind-prompt.sh"] {
+                fs::write(work.join("hooks").join(script), "#!/bin/sh\n").unwrap();
+            }
+            fs::create_dir_all(work.join("skills/graphmind")).unwrap();
+            fs::write(work.join("skills/graphmind/SKILL.md"), "skill").unwrap();
+            fs::write(work.join("CLAUDE.md"), "<!-- GM:START -->\n<!-- GM:END -->\n").unwrap();
+            let mut config = load_config();
+            config.claude_config_dir = Some(work.clone());
+            config.setup_versions.insert(work.to_string_lossy().into_owned(), graphmind_config::SETUP_VERSION);
+            save_config(&config);
+            assert_eq!(graphmind_config::claude_home::inherit_recorded_claude_config_dir(), Some(work.clone()));
+
+            assert!(get_hook_status());
+            assert!(get_skill_status());
+            assert!(get_claude_md_status());
+            let status = crate::commands::notices::check_setup_status();
+            assert!(!status.outdated, "read ~/.claude's version ({})", status.local_version);
+
+            // Without the variable, ~/.claude, which has none of it.
+            unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+            assert!(!get_hook_status());
+            assert!(!get_skill_status());
+            assert!(!get_claude_md_status());
+            assert!(crate::commands::notices::check_setup_status().outdated);
         });
     }
 }

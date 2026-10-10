@@ -6,7 +6,6 @@
 //! gets no backup). Nothing here prints: callers report the returned [`Outcome`].
 
 use serde_json::{json, Map, Value};
-use std::ffi::OsString;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -25,8 +24,11 @@ pub enum McpClient {
     ClaudeDesktop,
     /// User scope in `.claude.json`, where `claude mcp add -s user` puts servers: in the
     /// `CLAUDE_CONFIG_DIR` folder held here, or in HOME for `None` (a folder that is HOME itself
-    /// is `None` too, so one file has one value). [`McpClient::claude_code`] is the one this
-    /// process's environment uses; [`claude_code_files`] lists every one uninstall covers.
+    /// is `None` too, so one file has one value). Built from a
+    /// [`ClaudeHome`](crate::claude_home::ClaudeHome): [`McpClient::claude_code`] is the one this
+    /// process's environment uses, and
+    /// [`claude_code_files`](crate::claude_home::claude_code_files) lists every one uninstall
+    /// covers.
     ClaudeCodeUser(Option<PathBuf>),
     Cursor,
     OpenCode,
@@ -35,20 +37,6 @@ pub enum McpClient {
 }
 
 impl McpClient {
-    /// Claude Code as this process's environment has it: `$CLAUDE_CONFIG_DIR/.claude.json` when
-    /// the variable is an absolute path (`claude mcp add -s user` writes there then), else
-    /// ~/.claude.json (see [`parse_claude_config_dir`]). config.json is never read: the desktop
-    /// app sets the variable itself at startup (see [`inherit_recorded_claude_config_dir`]).
-    pub fn claude_code() -> McpClient {
-        McpClient::claude_code_in(claude_config_dir_env().dir().map(Path::to_path_buf))
-    }
-
-    /// Claude Code with `.claude.json` in `dir`, or in HOME for `None`.
-    fn claude_code_in(dir: Option<PathBuf>) -> McpClient {
-        let home: PathBuf = home_dir().components().collect();
-        McpClient::ClaudeCodeUser(dir.filter(|dir| *dir != home))
-    }
-
     pub fn label(&self) -> &'static str {
         match self {
             McpClient::ClaudeDesktop => "Claude Desktop",
@@ -116,139 +104,6 @@ impl McpClient {
     /// OpenCode (opencode.jsonc) and VS Code (mcp.json) accept `//` comments.
     fn allows_comments(&self) -> bool {
         matches!(self, McpClient::OpenCode | McpClient::VsCode(_))
-    }
-}
-
-/// Every Claude Code `.claude.json` graphmind may have written to, for uninstall and the cleanup
-/// of old project-scope entries: this process's ([`McpClient::claude_code`]), ~/.claude.json
-/// (Claude Code reads it whenever it runs without the variable) and the recorded folder's (the
-/// desktop app's, see [`recorded_claude_config_dir`]). Removal only touches graphmind's own keys,
-/// so going through files that hold none changes nothing.
-pub fn claude_code_files() -> Vec<McpClient> {
-    let candidates = [
-        Some(McpClient::claude_code()),
-        Some(McpClient::claude_code_in(None)),
-        recorded_claude_config_dir().map(|dir| McpClient::claude_code_in(Some(dir))),
-    ];
-    let mut files: Vec<McpClient> = Vec::new();
-    for client in candidates.into_iter().flatten() {
-        if !files.iter().any(|file| file.config_path() == client.config_path()) {
-            files.push(client);
-        }
-    }
-    files
-}
-
-pub const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
-
-/// `CLAUDE_CONFIG_DIR` as a process sees it. See [`parse_claude_config_dir`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigDirEnv {
-    /// Not set.
-    Unset,
-    /// Set but empty: Claude Code's default folder.
-    Default,
-    /// Set to an absolute path (without trailing `/` or `.` segments, so one folder has one value).
-    Dir(PathBuf),
-    /// Set to a relative path, which graphmind ignores: Claude Code would resolve it against the
-    /// directory it starts in, and hooks and the MCP server run in each project's directory.
-    Ignored(OsString),
-}
-
-impl ConfigDirEnv {
-    /// The folder the variable names, for [`ConfigDirEnv::Dir`] only.
-    pub fn dir(&self) -> Option<&Path> {
-        match self {
-            ConfigDirEnv::Dir(dir) => Some(dir),
-            ConfigDirEnv::Unset | ConfigDirEnv::Default | ConfigDirEnv::Ignored(_) => None,
-        }
-    }
-}
-
-/// The one reading of a `CLAUDE_CONFIG_DIR` value: not set, empty (the default folder), an
-/// absolute path (that folder) or a relative one (ignored).
-pub fn parse_claude_config_dir(value: Option<OsString>) -> ConfigDirEnv {
-    match value {
-        None => ConfigDirEnv::Unset,
-        Some(value) if value.is_empty() => ConfigDirEnv::Default,
-        Some(value) if Path::new(&value).is_absolute() => {
-            ConfigDirEnv::Dir(Path::new(&value).components().collect())
-        }
-        Some(value) => ConfigDirEnv::Ignored(value),
-    }
-}
-
-/// `CLAUDE_CONFIG_DIR` as this process sees it.
-pub fn claude_config_dir_env() -> ConfigDirEnv {
-    parse_claude_config_dir(std::env::var_os(CLAUDE_CONFIG_DIR))
-}
-
-/// The `CLAUDE_CONFIG_DIR` setup recorded in config.json for processes that don't inherit it,
-/// while the folder exists.
-pub fn recorded_claude_config_dir() -> Option<PathBuf> {
-    crate::read_config().ok()?.claude_config_dir.filter(|dir| dir.is_dir())
-}
-
-/// For the desktop app, which doesn't inherit `CLAUDE_CONFIG_DIR` when started from the Finder:
-/// when the variable is unset or empty, set it to the folder setup recorded, while that folder
-/// exists. Everything the process does afterwards goes by the variable, like the CLI, and every
-/// graphmind command it starts inherits it. Returns the folder set, if any.
-///
-/// Changing the environment isn't thread-safe: call this before any thread starts.
-pub fn inherit_recorded_claude_config_dir() -> Option<PathBuf> {
-    if !matches!(claude_config_dir_env(), ConfigDirEnv::Unset | ConfigDirEnv::Default) {
-        return None;
-    }
-    let dir = recorded_claude_config_dir()?;
-    std::env::set_var(CLAUDE_CONFIG_DIR, &dir);
-    Some(dir)
-}
-
-/// What [`sync_claude_config_dir`] did with the folder recorded in config.json.
-#[derive(Debug, PartialEq, Eq)]
-pub enum RecordedConfigDir {
-    /// Nothing to change.
-    Unchanged,
-    /// `CLAUDE_CONFIG_DIR` isn't set here, or is relative, so this process configures
-    /// ~/.claude.json, while the desktop app keeps using the recorded folder (it still exists).
-    Kept(PathBuf),
-    Recorded(PathBuf),
-    /// The previously recorded folder, no longer used.
-    Cleared(PathBuf),
-}
-
-/// Record `CLAUDE_CONFIG_DIR` in config.json for the desktop app (see
-/// [`inherit_recorded_claude_config_dir`]). Setup runs this. `Err` when config.json can't be
-/// read: it is left as is, like every other save.
-pub fn sync_claude_config_dir() -> Result<RecordedConfigDir, String> {
-    let env = claude_config_dir_env();
-    crate::config::mutate_config(|config| {
-        let previous = config.claude_config_dir.clone();
-        let wanted = recorded_dir_to_keep(&env, previous.clone());
-        let result = match (&wanted, previous) {
-            (Some(dir), previous) if previous.as_ref() != Some(dir) => RecordedConfigDir::Recorded(dir.clone()),
-            (None, Some(previous)) => RecordedConfigDir::Cleared(previous),
-            (Some(dir), _) if env.dir().is_none() => return (RecordedConfigDir::Kept(dir.clone()), false),
-            _ => return (RecordedConfigDir::Unchanged, false),
-        };
-        config.claude_config_dir = wanted;
-        (result, true)
-    })
-    .map_err(|e| format!("{e}; CLAUDE_CONFIG_DIR not recorded"))
-}
-
-/// The folder to keep recorded, given `CLAUDE_CONFIG_DIR` as this process sees it:
-/// - an absolute path: that path, the folder Claude Code uses in this environment;
-/// - empty: none, Claude Code uses ~/.claude.json (`CLAUDE_CONFIG_DIR= graphmind setup` is how
-///   to drop a recorded folder that still exists);
-/// - not set, or relative (ignored): the recorded folder while it exists. Such a shell says
-///   nothing about the environment Claude Code runs in; a folder that is gone can't be the one
-///   it uses.
-fn recorded_dir_to_keep(env: &ConfigDirEnv, recorded: Option<PathBuf>) -> Option<PathBuf> {
-    match env {
-        ConfigDirEnv::Default => None,
-        ConfigDirEnv::Dir(dir) => Some(dir.clone()),
-        ConfigDirEnv::Unset | ConfigDirEnv::Ignored(_) => recorded.filter(|dir| dir.is_dir()),
     }
 }
 
@@ -470,7 +325,8 @@ fn remove_file(client: &McpClient) -> Outcome {
 
 /// Remove the per-project Claude Code entries (`projects.<path>.mcpServers.graphmind` in
 /// `claude_code`'s .claude.json) that older versions wrote, for one project or, with `None`, for
-/// all of them. Returns how many were removed. Callers go through [`claude_code_files`].
+/// all of them. Returns how many were removed. Callers go through
+/// [`claude_code_files`](crate::claude_home::claude_code_files).
 pub fn remove_claude_project_entries(claude_code: &McpClient, project: Option<&str>) -> Result<usize, String> {
     let path = claude_code.config_path();
     let mut config = match read_json_config(&path, false) {
@@ -555,8 +411,8 @@ fn is_current(existing: &Value, wanted: &Value) -> bool {
 /// Run the `claude` CLI for `client`, killing it after `CLI_TIMEOUT`. The error is its first
 /// stderr line. The CLI gets the folder `client`'s config is in as `CLAUDE_CONFIG_DIR`, so it
 /// writes the file graphmind checks afterwards, also for a file other than this process's (see
-/// [`claude_code_files`]). For ~/.claude.json the variable is removed, so an empty or relative
-/// one doesn't depend on how `claude` reads it.
+/// [`claude_code_files`](crate::claude_home::claude_code_files)). For ~/.claude.json the
+/// variable is removed, so an empty or relative one doesn't depend on how `claude` reads it.
 fn run_claude(claude: &Path, client: &McpClient, args: &[&str]) -> Result<(), String> {
     let mut command = Command::new(claude);
     match client {
@@ -619,74 +475,6 @@ mod tests {
         assert!(is_current(&json!({ "type": "stdio", "command": "/bin/gm", "args": ["mcp"], "env": {} }), &wanted));
         assert!(!is_current(&json!({ "type": "stdio", "command": "/bin/gm", "args": ["mcp"], "env": { "PATH": "/x" } }), &wanted));
         assert!(!is_current(&json!({ "type": "stdio", "command": "/old/gm", "args": ["mcp"] }), &wanted));
-    }
-
-    /// Empty means the default folder, absolute means that folder, relative is ignored; a folder
-    /// is the same value however it is spelled, and a folder that is HOME means ~/.claude.json.
-    #[test]
-    fn claude_config_dir_has_one_reading() {
-        let parse = |value: &str| parse_claude_config_dir(Some(OsString::from(value)));
-        assert_eq!(parse_claude_config_dir(None), ConfigDirEnv::Unset);
-        assert_eq!(parse(""), ConfigDirEnv::Default);
-        assert_eq!(parse("/cfg/claude"), ConfigDirEnv::Dir(PathBuf::from("/cfg/claude")));
-        assert_eq!(parse("/cfg/./claude/"), ConfigDirEnv::Dir(PathBuf::from("/cfg/claude")));
-        assert_eq!(parse("claude-config"), ConfigDirEnv::Ignored(OsString::from("claude-config")));
-        assert_eq!(parse("claude-config").dir(), None);
-        assert_eq!(McpClient::claude_code_in(Some(home_dir())), McpClient::ClaudeCodeUser(None));
-    }
-
-    /// The desktop app takes the recorded folder when it has no `CLAUDE_CONFIG_DIR` of its own
-    /// (unset or empty) and the folder exists; a variable it has is kept.
-    #[test]
-    fn desktop_inherits_the_recorded_config_dir_only_without_its_own() {
-        let _home = crate::config::TEST_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let home = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("HOME", home.path()) };
-        crate::config::ensure_dirs();
-        let recorded = home.path().join("claude-config");
-        fs::create_dir(&recorded).unwrap();
-        let config = crate::GlobalConfig { claude_config_dir: Some(recorded.clone()), ..Default::default() };
-        crate::save_config(&config);
-        let inherit = |env: Option<&str>| {
-            match env {
-                Some(value) => unsafe { std::env::set_var(CLAUDE_CONFIG_DIR, value) },
-                None => unsafe { std::env::remove_var(CLAUDE_CONFIG_DIR) },
-            }
-            let set = inherit_recorded_claude_config_dir();
-            let path = McpClient::claude_code().config_path();
-            unsafe { std::env::remove_var(CLAUDE_CONFIG_DIR) };
-            (set, path)
-        };
-
-        let taken = (Some(recorded.clone()), recorded.join(".claude.json"));
-        assert_eq!(inherit(None), taken);
-        assert_eq!(inherit(Some("")), taken);
-        assert_eq!(inherit(Some("/cfg/claude")), (None, PathBuf::from("/cfg/claude/.claude.json")));
-        assert_eq!(inherit(Some("claude-config")), (None, home.path().join(".claude.json")));
-        fs::remove_dir(&recorded).unwrap();
-        assert_eq!(inherit(None), (None, home.path().join(".claude.json")), "the recorded folder is gone");
-    }
-
-    #[test]
-    fn recorded_dir_is_cleared_only_when_gone_or_explicitly_empty() {
-        let existing = tempfile::tempdir().unwrap();
-        let existing = Some(existing.path().to_path_buf());
-        let gone = Some(PathBuf::from("/nonexistent/claude-config"));
-        let set = |dir: &str| parse_claude_config_dir(Some(OsString::from(dir)));
-        let unset = ConfigDirEnv::Unset;
-
-        assert_eq!(recorded_dir_to_keep(&set("/cfg/new"), existing.clone()), Some(PathBuf::from("/cfg/new")));
-        assert_eq!(recorded_dir_to_keep(&set("/cfg/new"), None), Some(PathBuf::from("/cfg/new")));
-        // Unset: a shell without the variable keeps an existing folder for the desktop app.
-        assert_eq!(recorded_dir_to_keep(&unset, existing.clone()), existing);
-        assert_eq!(recorded_dir_to_keep(&unset, gone.clone()), None);
-        assert_eq!(recorded_dir_to_keep(&unset, None), None);
-        // Set but empty: back to ~/.claude.json.
-        assert_eq!(recorded_dir_to_keep(&set(""), existing.clone()), None);
-        // Relative: ignored, like unset.
-        assert_eq!(recorded_dir_to_keep(&set("claude-config"), existing.clone()), existing);
-        assert_eq!(recorded_dir_to_keep(&set("claude-config"), gone), None);
-        assert_eq!(recorded_dir_to_keep(&set("claude-config"), None), None);
     }
 
     #[test]

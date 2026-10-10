@@ -2,6 +2,7 @@ use clap::Parser;
 use std::io::IsTerminal;
 
 use graphmind_cli::commands;
+use graphmind_config::claude_home::ClaudeHome;
 
 #[derive(Parser)]
 #[command(name = "graphmind", version, about = "Local-first code intelligence CLI")]
@@ -440,19 +441,22 @@ enum SessionAction {
 
 #[derive(clap::Subcommand)]
 enum InstallAction {
-    /// Install the Claude Code hooks (context injection, and a nudge from grep/find searches to graphmind)
+    /// Install the Claude Code hooks (context injection, and a nudge from grep/find searches to
+    /// graphmind) in the current Claude Code folder ($CLAUDE_CONFIG_DIR, else ~/.claude)
     HookClaude,
     /// Install git hooks (rebuild after commit/merge/rebase/checkout, diff-impact before push)
     HookGit {
         slug: Option<String>,
     },
-    /// Install Claude Code skill
+    /// Install the Claude Code skills in the current Claude Code folder ($CLAUDE_CONFIG_DIR, else
+    /// ~/.claude)
     Skill,
 }
 
 #[derive(clap::Subcommand)]
 enum UninstallAction {
-    /// Remove Claude Code search hook
+    /// Remove the Claude Code hooks from the current Claude Code folder ($CLAUDE_CONFIG_DIR, else
+    /// ~/.claude); `uninstall all` removes them from every folder graphmind set up
     HookClaude,
     /// Remove graphmind git hooks
     HookGit {
@@ -505,14 +509,21 @@ enum Background {
     /// Hooks, git hooks, scripts: auto-setup only. Hooks are how an upgrade reaches people who
     /// never run graphmind in a terminal; notices and network checks would only cost them time.
     AutoSetupOnly,
+    /// `graphmind mcp`: auto-setup of its session's `CLAUDE_CONFIG_DIR` folder, when that is not
+    /// set up or out of date (`notices::auto_setup_for_claude_config_dir`). Nothing else: stdout
+    /// is the protocol, and the server must start fast.
+    ConfigDirAutoSetup,
     /// `GRAPHMIND_SKIP_NOTICES` (tests, graphmind's own child processes), and commands that
     /// manage setup themselves or must stay fast and silent.
     Off,
 }
 
 fn background(command: &Commands, skip_notices: bool, interactive: bool) -> Background {
-    if skip_notices || matches!(command, Commands::Setup | Commands::Mcp | Commands::Update { .. } | Commands::Which) {
+    if skip_notices || matches!(command, Commands::Setup | Commands::Update { .. } | Commands::Which) {
         return Background::Off;
+    }
+    if matches!(command, Commands::Mcp) {
+        return Background::ConfigDirAutoSetup;
     }
     if interactive {
         Background::All
@@ -552,6 +563,7 @@ fn main() {
             }
         }
         Background::AutoSetupOnly => commands::notices::auto_setup_if_outdated(),
+        Background::ConfigDirAutoSetup => commands::notices::auto_setup_for_claude_config_dir(),
         Background::Off => {}
     }
 
@@ -667,7 +679,7 @@ fn main() {
         },
         Commands::Install { action } => match action {
             InstallAction::HookClaude => {
-                if commands::claude_hook::install_hook().is_err() {
+                if commands::claude_hook::install_hook(&ClaudeHome::current()).is_err() {
                     std::process::exit(1);
                 }
             }
@@ -675,14 +687,14 @@ fn main() {
                 commands::hooks::install(slug.as_deref());
             }
             InstallAction::Skill => {
-                if commands::install_skill::install_skill().is_err() {
+                if commands::install_skill::install_skill(&ClaudeHome::current()).is_err() {
                     std::process::exit(1);
                 }
             }
         },
         Commands::Uninstall { action } => match action {
             UninstallAction::HookClaude => {
-                commands::claude_hook::uninstall_hook();
+                commands::claude_hook::uninstall_hook(&ClaudeHome::current());
             }
             UninstallAction::HookGit { slug } => {
                 commands::hooks::uninstall(slug.as_deref());
@@ -836,9 +848,13 @@ mod tests {
         // Hooks and scripts: no terminal, no env var needed.
         assert_eq!(background(&status, false, false), Background::AutoSetupOnly);
         assert_eq!(background(&status, true, true), Background::Off);
-        for command in [Commands::Setup, Commands::Mcp, Commands::Update { check: false }, Commands::Which] {
+        for command in [Commands::Setup, Commands::Update { check: false }, Commands::Which] {
             assert_eq!(background(&command, false, true), Background::Off);
             assert_eq!(background(&command, false, false), Background::Off);
         }
+        // The MCP server only sets up its session's CLAUDE_CONFIG_DIR folder, in a terminal or not.
+        assert_eq!(background(&Commands::Mcp, false, true), Background::ConfigDirAutoSetup);
+        assert_eq!(background(&Commands::Mcp, false, false), Background::ConfigDirAutoSetup);
+        assert_eq!(background(&Commands::Mcp, true, false), Background::Off);
     }
 }

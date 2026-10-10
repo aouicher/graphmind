@@ -9,6 +9,7 @@ mod common;
 
 use common::{backups_of, with_home};
 use graphmind_cli::commands::setup::{install_claude_md_block, Outcome};
+use graphmind_config::claude_home::ClaudeHome;
 use std::fs;
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ fn setup_claude_md_block_written() {
         let claude_dir = home.join(".claude");
         fs::create_dir_all(&claude_dir).unwrap();
 
-        assert_eq!(install_claude_md_block(), Outcome::Written);
+        assert_eq!(install_claude_md_block(&ClaudeHome::current()), Outcome::Written);
 
         let claude_md = claude_dir.join("CLAUDE.md");
         assert!(claude_md.exists(), "CLAUDE.md should be created");
@@ -63,7 +64,7 @@ fn setup_claude_md_block_replaces_existing() {
         let old_content = format!("# My notes\n\n{STOCK_BLOCK_0_2_77}\n\nother stuff\n");
         fs::write(&claude_md, &old_content).unwrap();
 
-        assert_eq!(install_claude_md_block(), Outcome::Written);
+        assert_eq!(install_claude_md_block(&ClaudeHome::current()), Outcome::Written);
 
         let content = fs::read_to_string(&claude_md).unwrap();
         let count = content.matches("<!-- GM:START -->").count();
@@ -84,10 +85,10 @@ fn setup_keeps_an_edited_claude_md_block() {
         fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
 
         // First install writes the block with its fingerprint; a second run changes nothing.
-        install_claude_md_block();
+        install_claude_md_block(&ClaudeHome::current());
         let installed = fs::read_to_string(&claude_md).unwrap();
         assert!(installed.contains("<!-- GM:HASH:"));
-        assert_eq!(install_claude_md_block(), Outcome::Unchanged);
+        assert_eq!(install_claude_md_block(&ClaudeHome::current()), Outcome::Unchanged);
         assert_eq!(fs::read_to_string(&claude_md).unwrap(), installed);
 
         // The person rewrites the block in their own words: setup must keep it.
@@ -99,7 +100,7 @@ fn setup_keeps_an_edited_claude_md_block() {
             &installed[end..]
         );
         fs::write(&claude_md, &mine).unwrap();
-        assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));
+        assert!(matches!(install_claude_md_block(&ClaudeHome::current()), Outcome::LeftAlone(_)));
         assert_eq!(fs::read_to_string(&claude_md).unwrap(), mine);
         assert_eq!(backups_of(&claude_md), 0, "no backup when nothing changes");
     });
@@ -118,7 +119,7 @@ fn setup_keeps_an_edited_block_from_before_fingerprints() {
         ] {
             let content = format!("# Mine\n\n{edited}\n");
             fs::write(&claude_md, &content).unwrap();
-            assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));
+            assert!(matches!(install_claude_md_block(&ClaudeHome::current()), Outcome::LeftAlone(_)));
             assert_eq!(fs::read_to_string(&claude_md).unwrap(), content);
         }
     });
@@ -137,7 +138,7 @@ fn setup_leaves_an_unreadable_claude_md_alone() {
             return;
         }
 
-        assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));
+        assert!(matches!(install_claude_md_block(&ClaudeHome::current()), Outcome::LeftAlone(_)));
 
         fs::set_permissions(&claude_md, fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(fs::read_to_string(&claude_md).unwrap(), "# My own instructions\n");
@@ -158,7 +159,7 @@ fn setup_claude_md_block_backup_created() {
 
         fs::write(&claude_md, "# Existing CLAUDE.md content\n").unwrap();
 
-        install_claude_md_block();
+        install_claude_md_block(&ClaudeHome::current());
 
         // A backup file with .bak extension should have been created.
         assert_eq!(backups_of(&claude_md), 1, "a .bak backup file should be created in ~/.claude/");

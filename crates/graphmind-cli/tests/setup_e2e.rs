@@ -13,6 +13,7 @@ use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_mcp_client,
     migrate_project_mcp_entries, repair_claude_settings, McpClient, Outcome,
 };
+use graphmind_config::claude_home::ClaudeHome;
 use serde_json::{json, Value};
 use std::fs;
 
@@ -676,7 +677,7 @@ fn install_hook_leaves_an_unparseable_settings_json_alone() {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         for broken in [r#"{"permissions": {},}"#, "[1, 2]"] {
             fs::write(&settings, broken).unwrap();
-            assert!(install_hook().is_err(), "{broken}");
+            assert!(install_hook(&ClaudeHome::current()).is_err(), "{broken}");
             assert_eq!(fs::read_to_string(&settings).unwrap(), broken);
             assert_eq!(backups_of(&settings), 0);
         }
@@ -692,7 +693,7 @@ fn install_hook_names_the_file_when_hooks_has_the_wrong_type() {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         for broken in [r#"{"hooks": []}"#, r#"{"hooks": {"SessionStart": {}}}"#] {
             fs::write(&settings, broken).unwrap();
-            let Err(reason) = install_hook() else { panic!("{broken} was not left alone") };
+            let Err(reason) = install_hook(&ClaudeHome::current()) else { panic!("{broken} was not left alone") };
             assert!(reason.contains(&*settings.to_string_lossy()), "{reason}");
             assert!(reason.ends_with("left unchanged"), "{reason}");
             assert_eq!(fs::read_to_string(&settings).unwrap(), broken);
@@ -713,7 +714,7 @@ fn install_hook_leaves_an_unreadable_settings_json_alone() {
             return;
         }
 
-        let outcome = install_hook();
+        let outcome = install_hook(&ClaudeHome::current());
 
         fs::set_permissions(&settings, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(outcome.is_err(), "{outcome:?}");
@@ -740,7 +741,7 @@ fn install_hook_keeps_retired_scripts_while_settings_json_is_left_alone() {
         );
         fs::write(&settings, &content).unwrap();
 
-        let outcome = install_hook();
+        let outcome = install_hook(&ClaudeHome::current());
 
         assert!(outcome.is_err(), "{outcome:?}");
         assert_eq!(fs::read(&settings).unwrap(), content, "settings.json changed");
@@ -756,7 +757,7 @@ fn install_hook_creates_a_missing_or_empty_settings_json() {
             if let Some(content) = initial {
                 fs::write(&settings, content).unwrap();
             }
-            assert_eq!(install_hook(), Ok(()), "{initial:?}");
+            assert_eq!(install_hook(&ClaudeHome::current()), Ok(()), "{initial:?}");
             let json: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
             for event in ["PreToolUse", "SessionStart", "UserPromptSubmit"] {
                 assert!(json["hooks"][event].is_array(), "{initial:?}: {json}");

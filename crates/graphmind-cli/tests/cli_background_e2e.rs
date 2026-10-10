@@ -184,3 +184,121 @@ fn auto_setup_runs_without_a_terminal() {
     }
     assert!(env.home.path().join(".claude.json").exists(), "setup didn't register Claude Code in the temp HOME");
 }
+
+// ---------------------------------------------------------------------------
+// One setup per Claude Code folder (CLAUDE_CONFIG_DIR)
+// ---------------------------------------------------------------------------
+
+/// config.json with ~/.claude at `default_version`.
+fn write_config(env: &CliTestEnv, default_version: u32) {
+    let config = graphmind_config::GlobalConfig { setup_version: default_version, ..Default::default() };
+    std::fs::write(env.home.path().join(".graphmind/config.json"), serde_json::to_string(&config).unwrap()).unwrap();
+}
+
+/// `graphmind <args>` without a terminal, as a hook or the MCP server of a Claude Code session in
+/// `config_dir` (`None`: no CLAUDE_CONFIG_DIR) runs it. System directories only on PATH, so the
+/// detached `setup` never runs the machine's own `claude` CLI.
+fn run_in_session(env: &CliTestEnv, config_dir: Option<&Path>, args: &[&str]) -> Output {
+    let mut cmd = Command::new(&env.binary);
+    cmd.args(args)
+        .env("HOME", env.home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("GRAPHMIND_SKIP_NOTICES")
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
+        .stdin(Stdio::null());
+    match config_dir {
+        Some(dir) => cmd.env("CLAUDE_CONFIG_DIR", dir),
+        None => cmd.env_remove("CLAUDE_CONFIG_DIR"),
+    };
+    cmd.output().unwrap()
+}
+
+/// Auto-setup stamps of CLAUDE_CONFIG_DIR folders (~/.claude's is `auto-setup.stamp`).
+fn folder_stamps(env: &CliTestEnv) -> usize {
+    std::fs::read_dir(env.home.path().join(".graphmind"))
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with("auto-setup-") && name.ends_with(".stamp")
+        })
+        .count()
+}
+
+/// Wait for the detached `setup` to mark `dir` set up, so it is done before the temp HOME goes.
+fn wait_for_setup_of(env: &CliTestEnv, dir: &Path) {
+    let config = env.home.path().join(".graphmind/config.json");
+    let key = dir.to_string_lossy().into_owned();
+    let done = || {
+        std::fs::read_to_string(&config)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<graphmind_config::GlobalConfig>(&raw).ok())
+            .is_some_and(|c| c.setup_versions.get(&key) == Some(&graphmind_config::SETUP_VERSION))
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !done() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(done(), "auto-setup didn't set up {key}");
+}
+
+/// A session in a CLAUDE_CONFIG_DIR folder that isn't set up gets its own auto-setup, although
+/// ~/.claude is current and its stamp is fresh: neither the version nor the throttle is shared.
+#[test]
+fn auto_setup_runs_for_an_outdated_claude_folder_while_the_default_is_current() {
+    let env = CliTestEnv::new();
+    write_config(&env, graphmind_config::SETUP_VERSION);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let fingerprint = graphmind_cli::commands::claude_hook::hooks_fingerprint();
+    let default_stamp = env.home.path().join(".graphmind/auto-setup.stamp");
+    let stamp = format!("{now} {} {fingerprint}", graphmind_config::SETUP_VERSION);
+    std::fs::write(&default_stamp, &stamp).unwrap();
+    let work = env.home.path().join("profiles/work");
+    std::fs::create_dir_all(&work).unwrap();
+
+    let out = run_in_session(&env, Some(&work), &["list"]);
+
+    assert!(out.status.success());
+    assert!(out.stderr.is_empty(), "auto-setup wrote to stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(folder_stamps(&env), 1, "no auto-setup for the folder");
+    assert_eq!(std::fs::read_to_string(&default_stamp).unwrap(), stamp, "~/.claude's stamp rewritten");
+    wait_for_setup_of(&env, &work);
+    let settings = std::fs::read_to_string(work.join("settings.json")).unwrap();
+    assert!(settings.contains(&*work.join("hooks/graphmind-session.sh").to_string_lossy()), "{settings}");
+    assert!(!env.home.path().join(".claude/hooks").exists(), "~/.claude set up instead");
+}
+
+/// A folder without graphmind hooks has nothing to start auto-setup but the MCP server, so the
+/// server sets up its session's CLAUDE_CONFIG_DIR folder once setup has run somewhere.
+#[test]
+fn mcp_server_sets_up_a_new_claude_folder() {
+    let env = CliTestEnv::new();
+    write_config(&env, graphmind_config::SETUP_VERSION);
+    let work = env.home.path().join("profiles/work");
+    std::fs::create_dir_all(&work).unwrap();
+
+    let out = run_in_session(&env, Some(&work), &["mcp"]);
+
+    assert!(out.stdout.is_empty(), "auto-setup wrote to the protocol stream: {}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(folder_stamps(&env), 1, "no auto-setup from the MCP server");
+    wait_for_setup_of(&env, &work);
+    assert!(work.join("hooks/graphmind-prompt.sh").exists());
+}
+
+/// The MCP servers Cursor, OpenCode or Claude Desktop start have no CLAUDE_CONFIG_DIR: they never
+/// set up ~/.claude, even an outdated one (its hooks do that). And nobody who never ran setup gets
+/// one from an MCP server.
+#[test]
+fn mcp_server_leaves_the_default_folder_and_first_installs_alone() {
+    let env = CliTestEnv::new();
+    write_config(&env, graphmind_config::SETUP_VERSION - 1);
+    run_in_session(&env, None, &["mcp"]);
+    assert!(!env.home.path().join(".graphmind/auto-setup.stamp").exists(), "MCP server set up ~/.claude");
+
+    write_config(&env, 0);
+    let work = env.home.path().join("profiles/work");
+    std::fs::create_dir_all(&work).unwrap();
+    run_in_session(&env, Some(&work), &["mcp"]);
+    assert_eq!(folder_stamps(&env), 0, "MCP server set up a folder for someone who never ran setup");
+    assert!(!work.join("hooks").exists());
+}

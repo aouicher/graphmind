@@ -86,6 +86,19 @@ pub fn with_home<F: FnOnce(&std::path::Path)>(f: F) {
     // dir dropped here — content cleaned up, HOME still points at it but that's harmless.
 }
 
+/// Run `f` with CLAUDE_CONFIG_DIR set to `dir` (removed with `None`), as a Claude Code session in
+/// that folder, or a shell that exports it, runs graphmind. Removed again afterwards. For suites
+/// that call setup functions in-process, inside [`with_home`].
+pub fn in_config_dir<R>(dir: Option<&Path>, f: impl FnOnce() -> R) -> R {
+    match dir {
+        Some(dir) => unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", dir) },
+        None => unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") },
+    }
+    let result = f();
+    unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+    result
+}
+
 /// `.bak` files next to `file`.
 pub fn backups_of(file: &std::path::Path) -> usize {
     let name = file.file_name().unwrap().to_string_lossy().to_string();

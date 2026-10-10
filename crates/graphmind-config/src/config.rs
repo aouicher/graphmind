@@ -1,7 +1,7 @@
 use crate::{git_identity, paths};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -208,8 +208,15 @@ pub struct GlobalConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub embedding: EmbeddingConfig,
+    /// The setup version of ~/.claude, the default Claude Code folder. Older versions and the
+    /// desktop app read it as the one setup version; other folders are in `setup_versions`.
     #[serde(default)]
     pub setup_version: u32,
+    /// The setup version of each `CLAUDE_CONFIG_DIR` folder setup has completed for, by absolute
+    /// path, so setting up one folder doesn't mark another complete. See
+    /// `claude_home::ClaudeHome::setup_version`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub setup_versions: BTreeMap<String, u32>,
     #[serde(default)]
     pub license: LicenseConfig,
     #[serde(default)]
@@ -220,10 +227,21 @@ pub struct GlobalConfig {
     pub memory: MemoryConfig,
     /// `CLAUDE_CONFIG_DIR` as the last `graphmind setup` that had it set saw it, for the desktop
     /// app, which doesn't inherit the variable when started from Finder: it sets the variable
-    /// from this at startup. The CLI doesn't read it; uninstall cleans this folder's .claude.json
-    /// too and clears it. See `mcp_clients::sync_claude_config_dir`.
+    /// from this at startup. The CLI doesn't read it; uninstall removes graphmind from this
+    /// folder too and clears it. See `claude_home::sync_claude_config_dir`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_config_dir: Option<PathBuf>,
+    /// Fields this version doesn't know, written by a newer one: kept, so loading and saving the
+    /// config doesn't drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl GlobalConfig {
+    /// Whether setup has completed for any Claude Code folder.
+    pub fn set_up_anywhere(&self) -> bool {
+        self.setup_version > 0 || self.setup_versions.values().any(|&v| v > 0)
+    }
 }
 
 impl Default for GlobalConfig {
@@ -236,11 +254,13 @@ impl Default for GlobalConfig {
             mcp: McpConfig::default(),
             embedding: EmbeddingConfig::default(),
             setup_version: 0,
+            setup_versions: BTreeMap::new(),
             license: LicenseConfig::default(),
             launch_at_login: false,
             build_all_on_startup: false,
             memory: MemoryConfig::default(),
             claude_config_dir: None,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -685,6 +705,19 @@ mod startup_config_tests {
         let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
         assert!(!cfg.launch_at_login);
         assert!(!cfg.build_all_on_startup);
+    }
+
+    /// A field a newer version writes survives this version loading and saving the config, so a
+    /// downgrade, or a desktop app older than the CLI, doesn't erase it.
+    #[test]
+    fn unknown_fields_survive_a_round_trip() {
+        let json = r#"{"version":"1","projects":{},"global_exclude":[],"defaults":{"embedding_model":"minilm","watch_debounce":2000,"max_depth":5,"exclude_tests":true},"mcp":{"transport":"stdio","http_port":37378,"restrict_to_projects":null},"setup_versions":{"/cfg/work":4},"from_a_newer_version":{"kept":[1,2]}}"#;
+        let cfg: GlobalConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.setup_versions.get("/cfg/work"), Some(&4));
+        assert!(!cfg.extra.contains_key("setup_versions"), "a known field is not kept twice");
+        let saved: serde_json::Value = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(saved["from_a_newer_version"], serde_json::json!({"kept": [1, 2]}));
+        assert_eq!(saved["setup_versions"], serde_json::json!({"/cfg/work": 4}));
     }
 }
 

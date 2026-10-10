@@ -1,16 +1,16 @@
-//! The graphmind instruction block in ~/.claude/CLAUDE.md for `graphmind setup` and `uninstall`:
-//! install or update it, leave a block the person edited (or a file that can't be read) as is,
-//! and remove exactly the block on uninstall.
+//! The graphmind instruction block in the Claude Code folder's CLAUDE.md (~/.claude/CLAUDE.md by
+//! default) for `graphmind setup` and `uninstall`: install or update it, leave a block the person
+//! edited (or a file that can't be read) as is, and remove exactly the block on uninstall.
 
-use super::{home_dir, Outcome};
+use super::{ClaudeHome, Outcome};
 use colored::Colorize;
 use std::fs;
 
-/// Install or update the graphmind block in ~/.claude/CLAUDE.md. A block the person edited, or
-/// a CLAUDE.md that can't be read, is left as is; a backup is made only when the file changes.
+/// Install or update the graphmind block in `home`'s CLAUDE.md. A block the person edited, or a
+/// CLAUDE.md that can't be read, is left as is; a backup is made only when the file changes.
 #[doc(hidden)]
-pub fn install_claude_md_block() -> Outcome {
-    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+pub fn install_claude_md_block(home: &ClaudeHome) -> Outcome {
+    let claude_md = home.claude_md_path();
     let left_alone = |reason: String| {
         println!("    {} {reason}", "⊘".yellow());
         Outcome::LeftAlone(reason)
@@ -66,9 +66,10 @@ pub fn install_claude_md_block() -> Outcome {
     }
 }
 
+/// Remove the graphmind block from `home`'s CLAUDE.md.
 #[doc(hidden)]
-pub fn uninstall_claude_md_block() {
-    let claude_md = home_dir().join(".claude").join("CLAUDE.md");
+pub fn uninstall_claude_md_block(home: &ClaudeHome) {
+    let claude_md = home.claude_md_path();
     if !claude_md.exists() {
         return;
     }
@@ -93,7 +94,7 @@ pub fn uninstall_claude_md_block() {
     }
 
     match graphmind_config::write_atomic(&claude_md, new_content.as_bytes()) {
-        Ok(()) => println!("    {} instruction block removed", "✓".green()),
+        Ok(()) => println!("    {} instruction block removed from {}", "✓".green(), claude_md.display()),
         Err(e) => println!("    {} failed to write CLAUDE.md: {e}", "✗".red()),
     }
 }
@@ -161,14 +162,9 @@ fn gm_block_body(block: &str) -> String {
         .to_string()
 }
 
-/// FNV-1a: a fingerprint that is stable across Rust versions (DefaultHasher isn't).
+/// A fingerprint that is stable across Rust versions (FNV-1a; DefaultHasher isn't stable).
 fn gm_fingerprint(text: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in text.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
+    format!("{:016x}", graphmind_config::fnv1a(text.bytes()))
 }
 
 /// The GM block as written by this version, with a fingerprint of its text so a later setup can

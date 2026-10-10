@@ -1,13 +1,13 @@
 //! E2E tests for `CLAUDE_CONFIG_DIR`: where Claude Code keeps ~/.claude.json, the folder setup
-//! records for the desktop app (which doesn't inherit the variable), and the `claude` CLI writing
-//! to that folder.
+//! records for the desktop app (which doesn't inherit the variable), the `claude` CLI writing to
+//! that folder, and one setup per Claude Code folder.
 //!
 //! Run with:
 //!   cargo test -p graphmind-cli --test setup_claude_config_dir_e2e -- --test-threads=1
 
-use common::{claude_code_step, fake_claude, graphmind_in, with_home, FAKE_CLAUDE_OK};
+use common::{claude_code_step, fake_claude, graphmind_in, in_config_dir, with_home, FAKE_CLAUDE_OK};
 use graphmind_cli::commands::setup::{install_mcp_client, migrate_project_mcp_entries, setup, McpClient, Outcome};
-use graphmind_config::mcp_clients::{inherit_recorded_claude_config_dir, sync_claude_config_dir, RecordedConfigDir};
+use graphmind_config::claude_home::{inherit_recorded_claude_config_dir, sync_claude_config_dir, ClaudeHome, RecordedConfigDir};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -144,10 +144,13 @@ fn relative_claude_config_dir_is_ignored_and_reported() {
     assert!(out.status.success(), "{stdout}\n{}", String::from_utf8_lossy(&out.stderr));
 
     assert!(stdout.contains("CLAUDE_CONFIG_DIR=relative-claude is relative, ignored"), "{stdout}");
+    assert!(home.join(".claude/settings.json").exists(), "~/.claude not set up");
     assert!(read_json(&home.join(".claude.json"))["mcpServers"]["graphmind"].is_object());
     assert!(!home.join("relative-claude").exists(), "setup wrote into the relative folder");
     let config = read_json(&home.join(".graphmind/config.json"));
     assert!(config["claude_config_dir"].is_null(), "a relative folder is never recorded: {config}");
+    assert!(config["setup_versions"].is_null(), "a relative folder has no setup state: {config}");
+    assert_eq!(config["setup_version"], graphmind_config::SETUP_VERSION, "~/.claude marked set up");
 }
 
 /// Recording the folder goes through the same guard as every config save (#113).
@@ -203,5 +206,98 @@ fn claude_cli_runs_without_an_empty_claude_config_dir() {
         assert_eq!(outcome, Outcome::Written);
         let seen = fs::read_to_string(home.join("claude-env.log")).unwrap();
         assert!(seen.lines().all(|line| line == "unset"), "claude saw CLAUDE_CONFIG_DIR: {seen:?}");
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 16. One setup per Claude Code folder (CLAUDE_CONFIG_DIR)
+// ---------------------------------------------------------------------------
+
+/// The setup version auto-setup sees for `dir` (`None`: ~/.claude).
+fn setup_version_of(dir: Option<&Path>) -> u32 {
+    in_config_dir(dir, || ClaudeHome::current().setup_version(&graphmind_config::read_config().unwrap()))
+}
+
+/// Auto-setup's throttle stamp for a CLAUDE_CONFIG_DIR folder.
+fn stamp_of(home: &Path, dir: &Path) -> std::path::PathBuf {
+    let id = graphmind_config::fnv1a(dir.to_string_lossy().bytes());
+    home.join(format!(".graphmind/auto-setup-{id:016x}.stamp"))
+}
+
+/// Hooks (scripts and registration), skills, the CLAUDE.md block and the MCP entry all go to the
+/// CLAUDE_CONFIG_DIR folder; ~/.claude and ~/.claude.json aren't touched.
+#[test]
+fn setup_installs_into_the_claude_config_dir() {
+    with_home(|home| {
+        let config_dir = home.join("profiles").join("work");
+        fs::create_dir_all(&config_dir).unwrap();
+        in_config_dir(Some(&config_dir), setup);
+
+        let settings = read_json(&config_dir.join("settings.json"));
+        for (event, script) in [
+            ("PreToolUse", "graphmind-search.sh"),
+            ("SessionStart", "graphmind-session.sh"),
+            ("UserPromptSubmit", "graphmind-prompt.sh"),
+        ] {
+            let path = config_dir.join("hooks").join(script);
+            assert!(path.exists(), "{} missing", path.display());
+            let command = &settings["hooks"][event][0]["hooks"][0]["command"];
+            assert_eq!(command.as_str(), Some(&*path.to_string_lossy()), "{event}: {settings}");
+        }
+        assert!(config_dir.join("skills/graphmind/SKILL.md").exists());
+        assert!(config_dir.join("skills/gm-fn/SKILL.md").exists());
+        assert!(fs::read_to_string(config_dir.join("CLAUDE.md")).unwrap().contains("<!-- GM:START -->"));
+        let claude_json = read_json(&config_dir.join(".claude.json"));
+        assert!(claude_json["mcpServers"]["graphmind"]["command"].is_string(), "{claude_json}");
+
+        assert!(!home.join(".claude").exists(), "~/.claude touched");
+        assert!(!home.join(".claude.json").exists(), "~/.claude.json touched");
+    });
+}
+
+/// Each folder is marked set up on its own: setting up one never marks another complete, so
+/// auto-setup still runs for it. ~/.claude keeps the `setup_version` field older versions read,
+/// also when CLAUDE_CONFIG_DIR names it.
+#[test]
+fn setup_versions_are_per_claude_folder() {
+    with_home(|home| {
+        let work = home.join("profiles").join("work");
+        let personal = home.join("profiles").join("personal");
+        fs::create_dir_all(&work).unwrap();
+        fs::create_dir_all(&personal).unwrap();
+
+        in_config_dir(Some(&work), setup);
+        assert_eq!(setup_version_of(Some(&work)), graphmind_config::SETUP_VERSION);
+        assert_eq!(setup_version_of(None), 0, "setting up a CLAUDE_CONFIG_DIR folder marked ~/.claude complete");
+        assert_eq!(setup_version_of(Some(&personal)), 0);
+
+        in_config_dir(Some(&home.join(".claude")), setup);
+        assert_eq!(setup_version_of(None), graphmind_config::SETUP_VERSION, "~/.claude named by the variable");
+        assert_eq!(setup_version_of(Some(&personal)), 0, "setting up ~/.claude marked another folder complete");
+        let config = graphmind_config::read_config().unwrap();
+        assert_eq!(config.setup_versions.len(), 1, "{:?}", config.setup_versions);
+
+        // A trailing slash names the same folder, so the same record.
+        assert_eq!(setup_version_of(Some(&home.join("profiles/work/"))), graphmind_config::SETUP_VERSION);
+    });
+}
+
+/// A folder that is gone loses its setup record, and its auto-setup stamp, at the next setup of
+/// any folder: it is never listed or uninstalled again.
+#[test]
+fn setup_drops_the_state_of_folders_that_are_gone() {
+    with_home(|home| {
+        let gone = home.join("profiles").join("gone");
+        fs::create_dir_all(&gone).unwrap();
+        in_config_dir(Some(&gone), setup);
+        fs::write(stamp_of(home, &gone), "0 0 0").unwrap();
+        assert_eq!(setup_version_of(Some(&gone)), graphmind_config::SETUP_VERSION);
+
+        fs::remove_dir_all(&gone).unwrap();
+        setup();
+
+        let config = graphmind_config::read_config().unwrap();
+        assert!(config.setup_versions.is_empty(), "{:?}", config.setup_versions);
+        assert!(!stamp_of(home, &gone).exists(), "stamp of a deleted folder left in ~/.graphmind");
     });
 }
