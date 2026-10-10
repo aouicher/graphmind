@@ -61,6 +61,26 @@ fn setup_shell_path_removes_dead_legacy_line() {
     });
 }
 
+/// Older desktop app versions also wrote the legacy line to `.bash_profile`: setup removes it
+/// there too, after a backup, when `~/.graphmind/bin` holds no binary.
+#[test]
+fn setup_shell_path_removes_dead_legacy_line_from_bash_profile() {
+    with_home(|home| {
+        let legacy = format!("export PATH=\"{}:$PATH\"", home.join(".graphmind/bin").display());
+        let original = format!("export EDITOR=vim\n{legacy}\n");
+        fs::write(home.join(".bash_profile"), &original).unwrap();
+
+        let bin_dir = home.join(".local").join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/bash");
+
+        assert_eq!(fs::read_to_string(home.join(".bash_profile")).unwrap(), "export EDITOR=vim\n");
+        let backups = profile_backups(home, ".bash_profile");
+        assert_eq!(backups.len(), 1, "{backups:?}");
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
+    });
+}
+
 /// `.bak` files in `dir` whose name starts with `name`.
 fn profile_backups(dir: &std::path::Path, name: &str) -> Vec<std::path::PathBuf> {
     fs::read_dir(dir)

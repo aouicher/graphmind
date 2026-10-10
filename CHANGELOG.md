@@ -23,6 +23,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 - **`graphmind file` only shows indexed files of the project.**
 - **Setup reports what it did, and leaves a broken `settings.json` alone.** The summary said the hooks and skills were installed even when they weren't; it now reports what happened, and a hook or skill that can't be written no longer stops setup halfway. A `~/.claude/settings.json` that can't be read is no longer replaced by one holding only graphmind's hooks: it is left as is and the summary says so (a missing or empty one is still created). `graphmind install hook-claude` and `graphmind install skill` exit with an error when they couldn't finish. Thanks @KennethWKZ.
 - **`CLAUDE_CONFIG_DIR` reaches the desktop app.** Apps started from the Finder don't inherit it, so the desktop's Claude Code card looked at `~/.claude.json` while Claude Code used `$CLAUDE_CONFIG_DIR/.claude.json`. `graphmind setup` run with the variable records the folder in `~/.graphmind/config.json` (`claude_config_dir`), and processes without the variable use it while the folder exists; `CLAUDE_CONFIG_DIR= graphmind setup` goes back to `~/.claude.json`. Thanks @KennethWKZ.
+- **Uninstall also cleans `.bash_profile`.** Desktop app versions 0.2.56 to 0.2.87 could add the `~/.graphmind/bin` PATH line to `.bash_profile` as well; `graphmind uninstall all` now removes it there too, and setup drops it when that folder holds no graphmind binary. Thanks @KennethWKZ.
 
 ### Changed
 
