@@ -254,7 +254,7 @@ pub fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
-        make_tool("gm_file", "Returns the full raw source content of a file from a registered project. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol.", json!({
+        make_tool("gm_file", "Returns the full raw source content of an indexed file of a registered project (path relative to the project root, as other tools report it). Files graphmind doesn't parse, such as JSON, CSS or dotfiles, are not served; read them with your own file tools. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path relative to project root" },

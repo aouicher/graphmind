@@ -7,6 +7,7 @@ use crate::graph_helpers::{
     all_project_slugs, compact_edges, qualify_definitions, query_symbol_filtered,
     resolve_project, with_graph, SymbolQueryOptions,
 };
+use graphmind_db::paths::indexed_project_file;
 
 pub(crate) fn handle_query(args: &Value) -> Value {
     handle_symbol_query(args, false)
@@ -192,8 +193,16 @@ pub(crate) fn handle_file(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: file"),
     };
-    with_graph(args, |_gq, proj| {
-        let path = std::path::Path::new(&proj.path).join(file);
+    with_graph(args, |gq, proj| {
+        let path = match indexed_project_file(std::path::Path::new(&proj.path), file, |p| gq.is_indexed_file(p)) {
+            Ok(path) => path,
+            Err(e) => {
+                // Point the client at the tools that list indexed paths, when that's what was wrong.
+                let rel = file.strip_prefix("./").unwrap_or(file);
+                let hint = if gq.is_indexed_file(rel) { "" } else { " gm_outline and gm_search report indexed paths." };
+                return err_text(&format!("{e}{hint}"));
+            }
+        };
         match std::fs::read_to_string(&path) {
             Ok(content) => text_content(&format!(
                 "# {file} [{slug}]\n\n```\n{content}\n```",
