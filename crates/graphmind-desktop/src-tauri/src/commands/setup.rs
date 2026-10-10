@@ -2,6 +2,7 @@ use crate::types::CliStatus;
 use graphmind_config::paths::home_dir;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 #[tauri::command]
 pub fn check_cli_installed() -> CliStatus {
@@ -22,19 +23,18 @@ pub fn check_cli_installed() -> CliStatus {
     }
 }
 
+/// Installs graphmind when the app finds none, to `~/.local/bin/graphmind`, where the install
+/// script puts it. A graphmind the app finds is returned as it is: replacing it could take a
+/// Homebrew install from brew, or fail on a root-owned one, and updates go through
+/// `graphmind update` (`update_cli`).
 #[tauri::command]
 pub async fn install_cli() -> Result<CliStatus, String> {
-    // Install to existing location, or fall back to ~/.graphmind/bin
-    let existing = super::updater::find_graphmind_binary();
-    let bin_path = if existing != "graphmind" {
-        std::path::PathBuf::from(&existing)
-    } else {
-        let bin_dir = home_dir().join(".graphmind").join("bin");
-        fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
-        bin_dir.join("graphmind")
-    };
+    let found = check_cli_installed();
+    if found.installed {
+        return Ok(found);
+    }
 
-    // Ensure parent dir exists
+    let bin_path = home_dir().join(".local").join("bin").join("graphmind");
     if let Some(parent) = bin_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -49,30 +49,7 @@ pub async fn install_cli() -> Result<CliStatus, String> {
         "https://github.com/aouicher/graphmind/releases/latest/download/{asset}"
     );
 
-    let tmp_path = bin_path.with_extension("tmp");
-
-    let status = std::process::Command::new("curl")
-        .args(["-fsSL", "-o"])
-        .arg(&tmp_path)
-        .arg(&url)
-        .status()
-        .map_err(|e| format!("Download failed: {e}"))?;
-
-    if !status.success() {
-        return Err("Failed to download CLI binary".to_string());
-    }
-
-    fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-
-    // Verify the downloaded binary works before replacing
-    let verify = std::process::Command::new(&tmp_path).arg("--version").output();
-    if !verify.map(|o| o.status.success()).unwrap_or(false) {
-        fs::remove_file(&tmp_path).ok();
-        return Err("Downloaded binary failed verification".to_string());
-    }
-
-    fs::rename(&tmp_path, &bin_path).map_err(|e| e.to_string())?;
+    download_cli(&url, &bin_path)?;
 
     // Re-sign on macOS to avoid Gatekeeper issues
     #[cfg(target_os = "macos")]
@@ -96,6 +73,38 @@ pub async fn install_cli() -> Result<CliStatus, String> {
         path: Some(bin_path.to_string_lossy().to_string()),
         version,
     })
+}
+
+/// Downloads `url` next to `bin_path`, checks that it runs, then moves it into place. The
+/// download is removed on every failure, so no partial binary is left in a folder on PATH.
+fn download_cli(url: &str, bin_path: &Path) -> Result<(), String> {
+    let tmp_path = bin_path.with_extension("tmp");
+    let result = (|| {
+        let status = std::process::Command::new("curl")
+            .args(["-fsSL", "-o"])
+            .arg(&tmp_path)
+            .arg(url)
+            .status()
+            .map_err(|e| format!("Download failed: {e}"))?;
+        if !status.success() {
+            return Err("Failed to download CLI binary".to_string());
+        }
+
+        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+
+        // Verify the downloaded binary works before replacing
+        let verify = std::process::Command::new(&tmp_path).arg("--version").output();
+        if !verify.map(|o| o.status.success()).unwrap_or(false) {
+            return Err("Downloaded binary failed verification".to_string());
+        }
+
+        fs::rename(&tmp_path, bin_path).map_err(|e| e.to_string())
+    })();
+    if result.is_err() {
+        fs::remove_file(&tmp_path).ok();
+    }
+    result
 }
 
 #[tauri::command]
@@ -186,4 +195,50 @@ fn get_version(path: &str) -> Option<String> {
                 None
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stand-in for the release asset in `dir`, as a `file://` URL: a script that answers
+    /// `--version` like graphmind.
+    fn fake_release(dir: &Path) -> String {
+        let release = dir.join("release");
+        fs::write(&release, "#!/bin/sh\necho graphmind 9.9.9\n").unwrap();
+        format!("file://{}", release.display())
+    }
+
+    #[test]
+    fn download_cli_installs_a_binary_that_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("graphmind");
+
+        download_cli(&fake_release(dir.path()), &bin).unwrap();
+
+        assert_eq!(get_version(&bin.to_string_lossy()).as_deref(), Some("9.9.9"));
+        assert!(!bin.with_extension("tmp").exists());
+    }
+
+    /// Every failure removes the download: a download that fails, a binary that doesn't run, and
+    /// a move into place that fails (a folder where the binary goes).
+    #[test]
+    fn download_cli_leaves_no_temp_file_when_it_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("graphmind");
+        let tmp = bin.with_extension("tmp");
+
+        let missing = format!("file://{}", dir.path().join("missing").display());
+        assert!(download_cli(&missing, &bin).is_err());
+        assert!(!tmp.exists(), "after a failed download");
+
+        let not_a_binary = dir.path().join("not-a-binary");
+        fs::write(&not_a_binary, "not a binary").unwrap();
+        assert!(download_cli(&format!("file://{}", not_a_binary.display()), &bin).is_err());
+        assert!(!tmp.exists(), "after a failed verification");
+
+        fs::create_dir_all(bin.join("occupied")).unwrap();
+        assert!(download_cli(&fake_release(dir.path()), &bin).is_err());
+        assert!(!tmp.exists(), "after a failed rename");
+    }
 }

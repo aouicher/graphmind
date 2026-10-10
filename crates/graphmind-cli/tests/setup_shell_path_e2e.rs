@@ -138,6 +138,36 @@ fn setup_keeps_the_profile_from_before_setup_when_it_backs_up_twice() {
     assert!(content.contains("# added by graphmind setup"), "new line missing:\n{content}");
 }
 
+/// Coverage for a desktop install: the app puts graphmind in `~/.local/bin` and runs its setup
+/// from there, graphmind not on PATH. Setup adds `~/.local/bin` (not `~/.graphmind/bin`) to
+/// .zshenv once, and drops the dead `~/.graphmind/bin` line an older setup left in .zshrc.
+#[cfg(unix)]
+#[test]
+fn setup_puts_local_bin_on_path_for_a_desktop_install() {
+    let home = tempfile::tempdir().unwrap();
+    let local_bin = home.path().join(".local").join("bin");
+    fs::create_dir_all(&local_bin).unwrap();
+    let exe = local_bin.join("graphmind");
+    fs::copy(env!("CARGO_BIN_EXE_graphmind"), &exe).unwrap();
+    let legacy = format!("export PATH=\"{}:$PATH\"", home.path().join(".graphmind/bin").display());
+    fs::write(home.path().join(".zshrc"), format!("{legacy}\n")).unwrap();
+
+    let out = run_setup_as(&exe, home.path(), "/bin/zsh");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "setup failed\n{stdout}");
+
+    // Compared canonicalized: the executable's own spelling (macOS keeps /var, Linux resolves).
+    let zshenv = fs::read_to_string(home.path().join(".zshenv")).unwrap_or_default();
+    let added: Vec<_> = zshenv
+        .lines()
+        .filter(|l| l.contains("PATH"))
+        .map(|l| l.strip_prefix("export PATH=\"").and_then(|l| l.strip_suffix(":$PATH\"  # added by graphmind setup")))
+        .map(|dir| dir.and_then(|d| fs::canonicalize(d).ok()))
+        .collect();
+    assert_eq!(added, [fs::canonicalize(&local_bin).ok()], ".zshenv:\n{zshenv}\nstdout:\n{stdout}");
+    assert_eq!(fs::read_to_string(home.path().join(".zshrc")).unwrap(), "", "legacy line kept");
+}
+
 /// A profile that can't be backed up is not rewritten, and the summary names it. The home folder
 /// is read-only once the profile exists, so the backup next to it can't be created.
 #[cfg(unix)]

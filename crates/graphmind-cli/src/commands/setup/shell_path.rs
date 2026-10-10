@@ -26,8 +26,9 @@ fn legacy_export_line() -> String {
     format!("export PATH=\"{}:$PATH\"", dir.to_string_lossy())
 }
 
-/// The directory setup puts on PATH for `exe`: `~/.graphmind/bin` when the binary is there
-/// (install script), otherwise the directory of the executable (Homebrew, `~/.local/bin`, cargo).
+/// The directory setup puts on PATH for `exe`: `~/.graphmind/bin` when a binary is there (where
+/// older versions and older desktop installs put it), otherwise the directory of the executable
+/// (`~/.local/bin` from the install script or the desktop app, Homebrew, cargo).
 fn bin_dir_for(exe: &Path) -> PathBuf {
     let managed = home_dir().join(".graphmind").join("bin");
     if managed.join("graphmind").exists() {
