@@ -3,6 +3,12 @@
 User-facing changes per release. Each entry becomes the release notes on GitHub.
 Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmind/releases).
 
+## [0.3.1] - 2026-10-10
+
+### Fixed
+
+- **Updates via Homebrew (or any binary replacement) now finish configuring graphmind on their own.** After an update, graphmind re-runs its setup automatically, but that run was cut short when the command that started it ended, so it rarely completed — and a recent run by the previous version could postpone it by a day. It now runs as a separate background process, right after the update. In particular, the git hooks introduced in 0.3.0 (rebuild after merge, rebase and branch switch; registration of new worktrees) are now added to existing repos without running `graphmind setup` by hand. Updating with `graphmind update` was not affected.
+
 ## [0.3.0] - 2026-10-10
 
 ### Git worktree support

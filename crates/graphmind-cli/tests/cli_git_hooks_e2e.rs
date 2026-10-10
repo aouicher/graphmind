@@ -171,6 +171,9 @@ fn auto_setup_after_an_upgrade_finishes_after_the_command_exits() {
         serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     cfg["setup_version"] = serde_json::json!(3);
     std::fs::write(&config_path, cfg.to_string()).unwrap();
+    // The previous version's own auto-setup ran a moment ago.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    std::fs::write(env.home.path().join(".graphmind/auto-setup.stamp"), now.to_string()).unwrap();
 
     // Any quick command, notices enabled (as for a real user).
     let out = Command::new(&env.binary)

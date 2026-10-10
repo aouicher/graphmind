@@ -138,17 +138,23 @@ pub fn auto_setup_if_outdated() {
         return;
     }
 
+    // "<unix ts> <setup version>": throttles retries of this version's setup only. A stamp
+    // left by an older version (plain timestamp) must not delay the new one by a day.
     const ONE_DAY: u64 = 86_400;
+    let expected = graphmind_config::SETUP_VERSION;
     let stamp = graphmind_config::paths::graphmind_dir().join("auto-setup.stamp");
     let now = now_secs();
     if let Ok(raw) = fs::read_to_string(&stamp) {
-        if let Ok(ts) = raw.trim().parse::<u64>() {
-            if now.saturating_sub(ts) < ONE_DAY {
+        let mut parts = raw.split_whitespace();
+        let ts = parts.next().and_then(|t| t.parse::<u64>().ok());
+        let version = parts.next().and_then(|v| v.parse::<u32>().ok());
+        if let (Some(ts), Some(version)) = (ts, version) {
+            if version == expected && now.saturating_sub(ts) < ONE_DAY {
                 return;
             }
         }
     }
-    if fs::write(&stamp, now.to_string()).is_err() {
+    if fs::write(&stamp, format!("{now} {expected}")).is_err() {
         return;
     }
 
