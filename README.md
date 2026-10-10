@@ -616,7 +616,7 @@ MCP responses are optimized for LLM consumption — minimal tokens, maximum sign
 
 ## MCP Tools Reference
 
-graphmind exposes 25 tools via MCP (Model Context Protocol):
+graphmind exposes 27 tools via MCP (Model Context Protocol):
 
 | Tool | Description |
 |------|-------------|
@@ -639,6 +639,8 @@ graphmind exposes 25 tools via MCP (Model Context Protocol):
 | `gm_memory_search` | Search stored decisions/patterns |
 | `gm_memory_add` | Store a fact (requires confirmation) |
 | `gm_memory_list` | List memory entries |
+| `gm_memory_update` | Edit a fact in place (keeps its id; a type change can reset the expiry, a demotion the recall count) |
+| `gm_session_analyze` | Save several facts at once, skipping near-duplicates |
 | `gm_cross_query` | Symbol search across all projects |
 | `gm_cross_deps` | Cross-project dependency graph |
 | `gm_cross_links` | List all cross-project links |

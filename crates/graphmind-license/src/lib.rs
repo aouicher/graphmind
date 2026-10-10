@@ -137,7 +137,7 @@ impl LicenseManager {
                     "",
                     "Available features:",
                     "✓ Unlimited local graph",
-                    "✓ 25 MCP tools",
+                    "✓ 27 MCP tools",
                     "✓ Local memory store",
                     "✓ Local embeddings (minilm)",
                     "",

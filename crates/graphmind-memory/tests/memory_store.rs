@@ -1,4 +1,4 @@
-use graphmind_memory::store::{AddOptions, MemoryStore};
+use graphmind_memory::store::{AddOptions, MemoryError, MemoryStore};
 use graphmind_memory::cross_links::{CrossLinkStore, LinkType, NewCrossLink};
 use std::io::Write;
 
@@ -60,7 +60,7 @@ fn memory_delete_by_id() {
     let entry = store.add("to be deleted", AddOptions::default());
     let id = entry.id.clone();
 
-    let deleted = store.delete(&id, None);
+    let deleted = store.delete_entry(&id, None).is_ok();
     assert!(deleted, "delete should return true");
 
     let entries = store.list(None);
@@ -73,7 +73,7 @@ fn memory_delete_by_id() {
 fn memory_delete_nonexistent_ok() {
     let (store, _dir) = make_store();
     // Should not panic
-    let result = store.delete("00000000-0000-0000-0000-000000000000", None);
+    let result = store.delete_entry("00000000-0000-0000-0000-000000000000", None).is_ok();
     assert!(!result, "delete of nonexistent id should return false");
 }
 
@@ -261,7 +261,7 @@ fn rewrites_keep_lines_this_version_cannot_parse() {
 
     store.increment_recall(&kept.id, None);
     let doomed = store.list(None).into_iter().find(|e| e.content == "delete me").unwrap();
-    assert!(store.delete(&doomed.id, None));
+    assert!(store.delete_entry(&doomed.id, None).is_ok());
     store.update_file(&path, |_| ((), true)).unwrap();
 
     let raw = std::fs::read_to_string(&path).unwrap();
@@ -358,4 +358,158 @@ fn update_file_reports_a_failed_write() {
     std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(result.is_none());
     assert_eq!(store.list(None).len(), 1);
+}
+
+// ── update in place ──────────────────────────────────────────────────────────
+
+#[test]
+fn update_keeps_id_created_recall_and_expiry() {
+    use graphmind_memory::store::{MemoryType, MemoryUpdate};
+    let (store, _dir) = make_store();
+    let e = store.add("old wording", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
+    store.increment_recall(&e.id, None);
+    store.increment_recall(&e.id, None);
+    let before = store.list(None).into_iter().find(|x| x.id == e.id).unwrap();
+
+    let after = store
+        .update(&e.id[..8], None, MemoryUpdate { content: Some("new wording".into()), ..Default::default() })
+        .unwrap();
+
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.created, before.created);
+    assert_eq!(after.recall_count, 2);
+    assert_eq!(after.expires_at, before.expires_at, "expiry must not restart");
+    assert_eq!(after.content, "new wording");
+    let stored = store.list(None);
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].content, "new wording");
+}
+
+#[test]
+fn update_toggles_priority_and_type_lifetime() {
+    use graphmind_memory::store::{MemoryType, MemoryUpdate};
+    let (store, _dir) = make_store();
+    let e = store.add("fact", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
+    let u = store.update(&e.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
+    assert!(u.priority);
+    let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
+    assert!(!u.priority);
+    // bug -> decision: decisions don't expire.
+    let u = store.update(&e.id, None, MemoryUpdate { entry_type: Some(MemoryType::Decision), ..Default::default() }).unwrap();
+    assert!(u.expires_at.is_none() && u.ttl_days.is_none());
+}
+
+#[test]
+fn update_reports_missing_and_ambiguous_ids() {
+    use graphmind_memory::store::{MemoryUpdate, MemoryError};
+    let (store, _dir) = make_store();
+    // Any real change: an empty one is rejected before the id is looked up.
+    let edit = || MemoryUpdate { priority: Some(true), ..Default::default() };
+    store.add("a", AddOptions::default());
+    store.add("b", AddOptions::default());
+    assert_eq!(store.update("does-not-exist", None, edit()).unwrap_err(), MemoryError::NotFound);
+    assert_eq!(store.update("", None, edit()).unwrap_err(), MemoryError::TooShort);
+    // Two ids sharing an 8-character prefix: the prefix is ambiguous, each full id still works.
+    let path = store.global_path();
+    store.update_file(&path, |entries| {
+        entries[0].id = "abc11111-0000".into();
+        entries[1].id = "abc11111-1111".into();
+        ((), true)
+    }).unwrap();
+    assert!(matches!(store.update("abc11111", None, edit()), Err(MemoryError::Ambiguous(2))));
+    assert!(store.update("abc11111-0000", None, MemoryUpdate { priority: Some(true), ..Default::default() }).is_ok());
+}
+
+#[test]
+fn delete_accepts_the_short_id_listings_print() {
+    let (store, _dir) = make_store();
+    let keep = store.add("keep", AddOptions::default());
+    let doomed = store.add("doomed", AddOptions::default());
+    assert!(store.delete_entry(&doomed.id[..8], None).is_ok());
+    let left: Vec<String> = store.list(None).into_iter().map(|e| e.id).collect();
+    assert_eq!(left, [keep.id]);
+    assert_eq!(store.delete_entry("", None), Err(MemoryError::TooShort), "an empty id never deletes");
+}
+
+#[test]
+fn update_and_delete_need_eight_id_characters() {
+    use graphmind_memory::store::{MemoryUpdate, MemoryError};
+    let (store, _dir) = make_store();
+    let e = store.add("only entry", AddOptions::default());
+    // A short prefix matching the only entry must not touch it.
+    assert_eq!(store.delete_entry(&e.id[..1], None), Err(MemoryError::TooShort));
+    assert_eq!(
+        store.update(&e.id[..7], None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap_err(),
+        MemoryError::TooShort
+    );
+    assert_eq!(store.list(None).len(), 1);
+    assert!(store.delete_entry(&e.id[..8], None).is_ok());
+}
+
+#[test]
+fn demotion_resets_recall_count() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, _dir) = make_store();
+    let e = store.add("promoted by recalls", AddOptions { priority: true, ..AddOptions::default() });
+    for _ in 0..5 {
+        store.increment_recall(&e.id, None);
+    }
+    let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
+    assert!(!u.priority);
+    assert_eq!(u.recall_count, 0, "a recall count left at 5 would re-promote it on the next consolidate");
+}
+
+#[test]
+fn priority_false_on_a_normal_entry_keeps_its_recall_count() {
+    use graphmind_memory::store::MemoryUpdate;
+    let (store, _dir) = make_store();
+    let e = store.add("never promoted", AddOptions::default());
+    for _ in 0..2 {
+        store.increment_recall(&e.id, None);
+    }
+    let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
+    assert!(!u.priority);
+    assert_eq!(u.recall_count, 2, "not a demotion: the count must survive");
+}
+
+#[test]
+fn memory_type_parse_rejects_unknown_names() {
+    use graphmind_memory::store::MemoryType;
+    for name in MemoryType::NAMES {
+        assert!(name.parse::<MemoryType>().is_ok(), "{name}");
+    }
+    let err = "decisions".parse::<MemoryType>().unwrap_err();
+    assert!(err.contains("decisions") && err.contains("decision, pattern"), "{err}");
+}
+
+#[test]
+fn an_empty_update_is_rejected_and_writes_nothing() {
+    use graphmind_memory::store::{MemoryError, MemoryUpdate};
+    let (store, _dir) = make_store();
+    let e = store.add("fact", AddOptions::default());
+    let before = std::fs::read_to_string(store.global_path()).unwrap();
+    assert_eq!(store.update(&e.id, None, MemoryUpdate::default()).unwrap_err(), MemoryError::NothingToChange);
+    assert_eq!(std::fs::read_to_string(store.global_path()).unwrap(), before);
+}
+
+/// A write that fails is an error, so the CLI doesn't print "updated" and MCP doesn't re-embed.
+#[cfg(unix)]
+#[test]
+fn a_failed_update_write_is_an_error() {
+    use graphmind_memory::store::{MemoryError, MemoryUpdate};
+    use std::os::unix::fs::PermissionsExt;
+    let (store, _dir) = make_store();
+    let e = store.add("fact", AddOptions::default());
+    let mem_dir = store.global_path().parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = mem_dir.join("write-probe");
+    if std::fs::File::create(&probe).is_ok() {
+        std::fs::remove_file(&probe).ok(); // root: directory permissions don't apply
+        std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let result = store.update(&e.id, None, MemoryUpdate { content: Some("new".into()), ..Default::default() });
+    std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(result.unwrap_err(), MemoryError::NotWritten);
+    assert_eq!(store.get(&e.id, None).unwrap().content, "fact");
 }

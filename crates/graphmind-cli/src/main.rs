@@ -331,6 +331,28 @@ enum MemoryAction {
         #[arg(long)]
         clean: bool,
     },
+    /// Edit a memory entry in place (keeps its id and created date; a type change can reset the expiry, a demotion the recall count)
+    Update {
+        /// Entry id, or the 8-character prefix listings print
+        id: String,
+        /// New text
+        #[arg(long)]
+        content: Option<String>,
+        /// Replace the tags
+        #[arg(long, num_args = 1..)]
+        tags: Option<Vec<String>>,
+        /// New type: decision, pattern, convention, bug, context, session
+        #[arg(long)]
+        r#type: Option<String>,
+        /// Make it a priority entry
+        #[arg(long, conflicts_with = "no_priority")]
+        priority: bool,
+        /// Make it a normal entry
+        #[arg(long)]
+        no_priority: bool,
+        #[arg(long, alias = "in")]
+        slug: Option<String>,
+    },
     /// Delete a memory entry
     Delete {
         id: String,
@@ -638,6 +660,10 @@ fn main() {
             }
             MemoryAction::List { slug, limit, priority, clean } => {
                 commands::memory::list(slug.as_deref(), limit, priority, clean);
+            }
+            MemoryAction::Update { id, content, tags, r#type, priority, no_priority, slug } => {
+                let priority = if priority { Some(true) } else if no_priority { Some(false) } else { None };
+                commands::memory::update(&id, slug.as_deref(), content, tags, r#type.as_deref(), priority);
             }
             MemoryAction::Delete { id, slug } => {
                 commands::memory::delete(&id, slug.as_deref());

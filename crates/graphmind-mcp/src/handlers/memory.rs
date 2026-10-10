@@ -1,4 +1,4 @@
-use graphmind_embeddings::store::{EmbeddingStore, NewEmbeddingRow, float32_to_bytes};
+use graphmind_embeddings::search::reindex_memory;
 use graphmind_memory::search::search as memory_search;
 use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
 use serde_json::Value;
@@ -34,6 +34,10 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
 
     // Semantic results (if embedding engine configured)
     let emb_db_path = graphmind_config::paths::memory_embedding_db_path();
+    // A vector whose text no longer matches the entry (edited without re-indexing) is ignored, so a
+    // stale vector degrades to FTS instead of ranking the entry by its old wording.
+    let current: std::collections::HashMap<&str, &str> =
+        all_entries.iter().map(|e| (e.id.as_str(), e.content.as_str())).collect();
     let semantic_ids: Vec<String> = if emb_db_path.exists() {
         if let Some(engine) = load_embed_engine() {
             graphmind_embeddings::search::semantic_search_memory(
@@ -43,6 +47,7 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
                 limit * 3,
             )
             .into_iter()
+            .filter(|r| current.get(r.symbol_name.as_str()) == Some(&r.text.as_str()))
             .map(|r| r.symbol_name) // symbol_name = entry id
             .collect()
         } else {
@@ -96,6 +101,38 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
     text_content(&lines.join("\n"))
 }
 
+pub(crate) fn handle_memory_update(args: &Value) -> Value {
+    let Some(id) = args.get("id").and_then(|v| v.as_str()) else {
+        return err_text("Missing required parameter: id");
+    };
+    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let changes = graphmind_memory::store::MemoryUpdate {
+        content: args.get("content").and_then(|v| v.as_str()).map(String::from),
+        tags: args.get("tags").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+        }),
+        entry_type: match args.get("type").and_then(|v| v.as_str()).map(str::parse::<MemoryType>).transpose() {
+            Ok(t) => t,
+            Err(e) => return err_text(&e),
+        },
+        priority: args.get("priority").and_then(|v| v.as_bool()),
+    };
+    let content_changed = changes.content.is_some();
+    let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
+    match store.update(id, project.as_deref(), changes) {
+        Ok(entry) => {
+            // Keep the semantic index in step with the new text (best-effort).
+            if content_changed {
+                if let Some(engine) = load_embed_engine() {
+                    reindex_memory(&graphmind_config::paths::memory_embedding_db_path(), engine.as_ref(), &entry.id, &entry.content);
+                }
+            }
+            text_content(&format!("Memory updated: {}", entry.id))
+        }
+        Err(e) => err_text(&format!("{e}: {id}")),
+    }
+}
+
 pub(crate) fn handle_memory_add(args: &Value) -> Value {
     let content = match args.get("content").and_then(|v| v.as_str()) {
         Some(c) => c,
@@ -114,13 +151,9 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
         .unwrap_or_default();
 
     let entry_type_str = args.get("type").and_then(|v| v.as_str()).unwrap_or("context");
-    let entry_type = match entry_type_str {
-        "decision" => MemoryType::Decision,
-        "pattern" => MemoryType::Pattern,
-        "convention" => MemoryType::Convention,
-        "bug" => MemoryType::Bug,
-        "session" => MemoryType::Session,
-        _ => MemoryType::Context,
+    let entry_type = match entry_type_str.parse::<MemoryType>() {
+        Ok(t) => t,
+        Err(e) => return err_text(&e),
     };
 
     let priority = args.get("priority").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -142,19 +175,8 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
     );
 
     // Vectorize and store embedding for semantic search (best-effort)
-    let emb_db_path = graphmind_config::paths::memory_embedding_db_path();
     if let Some(engine) = load_embed_engine() {
-        if let Ok(emb_store) = EmbeddingStore::open(&emb_db_path) {
-            if let Ok(vec) = engine.embed(content) {
-                let _ = emb_store.insert_batch(&[NewEmbeddingRow {
-                    symbol_name: entry.id.clone(),
-                    symbol_kind: "memory".to_string(),
-                    file: String::new(),
-                    text: content.to_string(),
-                    embedding: float32_to_bytes(&vec),
-                }]);
-            }
-        }
+        reindex_memory(&graphmind_config::paths::memory_embedding_db_path(), engine.as_ref(), &entry.id, content);
     }
 
     let prio_str = if priority { " ★priority" } else { "" };
@@ -174,6 +196,13 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
     };
     let project = memory_project(args.get("project").and_then(|v| v.as_str()));
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // Check every fact's type first, so one typo doesn't leave a batch half-saved.
+    for fact in facts {
+        if let Err(e) = fact.get("type").and_then(|v| v.as_str()).unwrap_or("context").parse::<MemoryType>() {
+            return err_text(&e);
+        }
+    }
 
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
     let existing = store.list(project.as_deref());
@@ -205,14 +234,7 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
         if is_duplicate { skipped += 1; continue; }
 
         let type_str = fact.get("type").and_then(|v| v.as_str()).unwrap_or("context");
-        let entry_type = match type_str {
-            "decision" => MemoryType::Decision,
-            "pattern" => MemoryType::Pattern,
-            "convention" => MemoryType::Convention,
-            "bug" => MemoryType::Bug,
-            "session" => MemoryType::Session,
-            _ => MemoryType::Context,
-        };
+        let Ok(entry_type) = type_str.parse::<MemoryType>() else { continue }; // checked above
         let priority = fact.get("priority").and_then(|v| v.as_bool()).unwrap_or(false);
         let tags: Vec<String> = fact.get("tags").and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
@@ -232,17 +254,7 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
 
         // Vectorize (best-effort)
         if let Some(ref eng) = engine {
-            if let Ok(emb_store) = EmbeddingStore::open(&emb_db_path) {
-                if let Ok(vec) = eng.embed(content) {
-                    let _ = emb_store.insert_batch(&[NewEmbeddingRow {
-                        symbol_name: entry.id.clone(),
-                        symbol_kind: "memory".to_string(),
-                        file: String::new(),
-                        text: content.to_string(),
-                        embedding: float32_to_bytes(&vec),
-                    }]);
-                }
-            }
+            reindex_memory(&emb_db_path, eng.as_ref(), &entry.id, content);
         }
 
         saved_ids.push(format!("{} [{}]", &entry.id[..8], type_str));

@@ -108,6 +108,10 @@ impl EmbeddingStore {
         tx.commit()
     }
 
+    pub fn delete_by_symbol(&self, symbol_name: &str) -> rusqlite::Result<usize> {
+        self.conn.execute("DELETE FROM embeddings WHERE symbol_name = ?1", params![symbol_name])
+    }
+
     pub fn delete_by_file(&self, file: &str) -> rusqlite::Result<usize> {
         self.conn.execute("DELETE FROM embeddings WHERE file = ?1", params![file])
     }

@@ -114,6 +114,18 @@ fn tool_defs() -> Vec<Tool> {
             },
             "required": ["content"]
         })),
+        make_tool("gm_memory_update", "Edit a saved memory fact in place. Use ONLY when the user explicitly asks to change or correct a stored fact; never to tidy, reword or reorganize memory while working on another task. Keeps the fact's id and created date. Changing the type resets the expiry when the new type has a different lifetime; removing priority resets the recall count.", json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Entry id, or its 8-character prefix as shown in search results" },
+                "content": { "type": "string", "description": "New text (optional)" },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Replace the tags (optional)" },
+                "type": { "type": "string", "description": "New type: decision, pattern, convention, bug, context, session (optional)" },
+                "priority": { "type": "boolean", "description": "Set or clear always-inject (optional)" },
+                "project": { "type": "string", "description": "Project slug (optional)" }
+            },
+            "required": ["id"]
+        })),
         make_tool("gm_memory_list", "Lists all memory entries for a project without filtering (paginated). Use to audit what has been saved or when you don't have a specific search keyword. For keyword-based recall, prefer gm_memory_search.", json!({
             "type": "object",
             "properties": {

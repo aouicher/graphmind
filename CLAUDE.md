@@ -31,7 +31,7 @@ graphmind init --skip-build   # per-project without building
 - `crates/graphmind-db/` — SQLite graph (schema, builder, queries, FTS5, cache)
 - `crates/graphmind-memory/` — JSONL memory store + cross-project links
 - `crates/graphmind-embeddings/` — embedding store, cosine search, RRF fusion
-- `crates/graphmind-mcp/` — MCP server (rmcp SDK, 24 tools)
+- `crates/graphmind-mcp/` — MCP server (rmcp SDK, 27 tools)
 - `crates/graphmind-cli/` — CLI (clap, all commands)
 
 ## Installation

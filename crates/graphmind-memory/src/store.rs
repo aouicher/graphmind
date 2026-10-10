@@ -15,6 +15,102 @@ pub enum MemoryType {
     Session,
 }
 
+impl MemoryType {
+    /// The names `--type` and the MCP tools accept, in the order error messages list them.
+    pub const NAMES: [&'static str; 6] = ["decision", "pattern", "convention", "bug", "context", "session"];
+}
+
+/// An unknown name (a typo such as "decisions") is an error listing the valid types; it must not
+/// silently become `context`, which expires after 30 days.
+impl std::str::FromStr for MemoryType {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "decision" => Ok(MemoryType::Decision),
+            "pattern" => Ok(MemoryType::Pattern),
+            "convention" => Ok(MemoryType::Convention),
+            "bug" => Ok(MemoryType::Bug),
+            "context" => Ok(MemoryType::Context),
+            "session" => Ok(MemoryType::Session),
+            other => Err(format!("unknown memory type \"{other}\"; use one of: {}", Self::NAMES.join(", "))),
+        }
+    }
+}
+
+/// Fields to change in `MemoryStore::update`; `None` leaves a field as it is.
+#[derive(Debug, Default)]
+pub struct MemoryUpdate {
+    pub content: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub entry_type: Option<MemoryType>,
+    pub priority: Option<bool>,
+}
+
+impl MemoryUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.content.is_none() && self.tags.is_none() && self.entry_type.is_none() && self.priority.is_none()
+    }
+
+    /// Apply the changes to `entry`. It keeps its id, `created`, session and source; `updated` is
+    /// set to `now`. The expiry is kept unless the new type has a different lifetime (bug ->
+    /// decision clears it, decision -> bug starts it from now). A demotion (priority -> not) also
+    /// resets the recall count, so the next consolidate doesn't promote the entry straight back;
+    /// `priority: false` on an entry that isn't priority keeps its count.
+    pub fn apply_to(self, entry: &mut MemoryEntry, now: chrono::DateTime<chrono::Utc>) {
+        if let Some(content) = self.content {
+            entry.content = content;
+        }
+        if let Some(tags) = self.tags {
+            entry.tags = tags;
+        }
+        if let Some(new_type) = self.entry_type {
+            let new_ttl = default_ttl_for_type(&new_type);
+            if new_ttl != default_ttl_for_type(&entry.entry_type) {
+                entry.ttl_days = new_ttl;
+                entry.expires_at = new_ttl.map(|d| (now + chrono::Duration::days(d as i64)).to_rfc3339());
+            }
+            entry.entry_type = new_type;
+        }
+        if let Some(priority) = self.priority {
+            if entry.priority && !priority {
+                entry.recall_count = 0;
+            }
+            entry.priority = priority;
+        }
+        entry.updated = now.to_rfc3339();
+    }
+}
+
+/// Shortest id prefix accepted by lookups: what listings print. A shorter prefix that happens to
+/// match one entry would otherwise show, change or delete it.
+pub const MIN_ID_PREFIX: usize = 8;
+
+#[derive(Debug, PartialEq)]
+pub enum MemoryError {
+    NotFound,
+    /// The id prefix matches this many entries.
+    Ambiguous(usize),
+    /// The id prefix is shorter than `MIN_ID_PREFIX`.
+    TooShort,
+    /// The update has no fields to change.
+    NothingToChange,
+    /// The memory file couldn't be read or written; it is unchanged.
+    NotWritten,
+}
+
+impl std::fmt::Display for MemoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryError::NotFound => write!(f, "no memory entry with that id"),
+            MemoryError::Ambiguous(n) => write!(f, "{n} memory entries start with that id; use more characters"),
+            MemoryError::TooShort => write!(f, "use at least {MIN_ID_PREFIX} characters of the id (as listings print it)"),
+            MemoryError::NothingToChange => write!(f, "nothing to change"),
+            MemoryError::NotWritten => write!(f, "the memory file could not be updated; it is unchanged"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemorySource {
@@ -179,16 +275,71 @@ impl MemoryStore {
         paths
     }
 
-    pub fn delete(&self, id: &str, project: Option<&str>) -> bool {
-        self.files(project).iter().filter(|p| p.exists()).any(|path| {
-            self.update_file(path, |entries| {
-                let before = entries.len();
-                entries.retain(|e| e.id != id);
-                let deleted = entries.len() != before;
-                (deleted, deleted)
+    /// The memory file and full id of the one entry whose id is `id` or starts with it (listings
+    /// print 8-character prefixes; shorter ones are refused). An exact id always wins over longer
+    /// ids sharing it as a prefix. The one lookup for show, update and delete.
+    pub fn find(&self, id: &str, project: Option<&str>) -> Result<(PathBuf, String), MemoryError> {
+        if id.chars().count() < MIN_ID_PREFIX {
+            return Err(MemoryError::TooShort);
+        }
+        let matches: Vec<(PathBuf, String)> = self
+            .files(project)
+            .into_iter()
+            .filter(|p| p.exists())
+            .flat_map(|p| {
+                self.read_jsonl(&p)
+                    .into_iter()
+                    .filter(|e| e.id.starts_with(id))
+                    .map(|e| (p.clone(), e.id))
+                    .collect::<Vec<_>>()
             })
-            .unwrap_or(false)
+            .collect();
+        if let Some(exact) = matches.iter().find(|(_, full)| full == id) {
+            return Ok(exact.clone());
+        }
+        match matches.as_slice() {
+            [] => Err(MemoryError::NotFound),
+            [one] => Ok(one.clone()),
+            many => Err(MemoryError::Ambiguous(many.len())),
+        }
+    }
+
+    /// The entry `find` resolves `id` to.
+    pub fn get(&self, id: &str, project: Option<&str>) -> Result<MemoryEntry, MemoryError> {
+        let (path, full_id) = self.find(id, project)?;
+        self.read_jsonl(&path).into_iter().find(|e| e.id == full_id).ok_or(MemoryError::NotFound)
+    }
+
+    /// Edit an entry in place (see `MemoryUpdate::apply_to`). `id` may be the 8-character prefix
+    /// that listings print.
+    pub fn update(&self, id: &str, project: Option<&str>, edit: MemoryUpdate) -> Result<MemoryEntry, MemoryError> {
+        if edit.is_empty() {
+            return Err(MemoryError::NothingToChange);
+        }
+        let (path, full_id) = self.find(id, project)?;
+        self.update_file(&path, |entries| match entries.iter_mut().find(|e| e.id == full_id) {
+            Some(entry) => {
+                edit.apply_to(entry, chrono::Utc::now());
+                (Ok(entry.clone()), true)
+            }
+            None => (Err(MemoryError::NotFound), false),
         })
+        .unwrap_or(Err(MemoryError::NotWritten))
+    }
+
+    /// Delete one entry by id or id prefix; returns the full id deleted.
+    pub fn delete_entry(&self, id: &str, project: Option<&str>) -> Result<String, MemoryError> {
+        let (path, full_id) = self.find(id, project)?;
+        self.update_file(&path, |entries| {
+            let before = entries.len();
+            entries.retain(|e| e.id != full_id);
+            if entries.len() == before {
+                (Err(MemoryError::NotFound), false)
+            } else {
+                (Ok(full_id.clone()), true)
+            }
+        })
+        .unwrap_or(Err(MemoryError::NotWritten))
     }
 
     /// Increment the recall_count for the entry with the given id.
@@ -211,7 +362,8 @@ impl MemoryStore {
     /// returns (result, changed); the file is rewritten only when it changed, with the lines this
     /// version can't parse kept after the entries. `None` means the file is unchanged because it
     /// exists but can't be read (then `f` doesn't run: its entries would read as none, and a
-    /// rewrite would empty it) or because the write failed.
+    /// rewrite would empty it) or because the write failed. `f` runs under the file's lock, so it
+    /// must not call back into the store for the same file: the second flock would deadlock.
     pub fn update_file<R>(&self, path: &Path, f: impl FnOnce(&mut Vec<MemoryEntry>) -> (R, bool)) -> Option<R> {
         self.with_file_lock(path, || {
             let raw = match fs::read_to_string(path) {

@@ -1,7 +1,7 @@
 use graphmind_config::{paths, resolve_project_slug, Registry};
 use colored::Colorize;
 use graphmind_memory::search::search as memory_search;
-use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
+use graphmind_memory::store::{AddOptions, MemoryError, MemorySource, MemoryStore, MemoryType, default_ttl_for_type};
 
 fn get_store() -> MemoryStore {
     MemoryStore::new(&paths::memory_dir())
@@ -13,15 +13,12 @@ fn resolve_memory_project(slug: Option<&str>) -> Option<String> {
     resolve_project_slug(&[slug]).map(|s| Registry::memory_key(&s))
 }
 
+/// `--type` value, or exit with the list of valid types.
 fn parse_memory_type(s: &str) -> MemoryType {
-    match s {
-        "decision" => MemoryType::Decision,
-        "pattern" => MemoryType::Pattern,
-        "convention" => MemoryType::Convention,
-        "bug" => MemoryType::Bug,
-        "session" => MemoryType::Session,
-        _ => MemoryType::Context,
-    }
+    s.parse::<MemoryType>().unwrap_or_else(|e| {
+        eprintln!("{} {e}", "Error:".red().bold());
+        std::process::exit(1);
+    })
 }
 
 pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], entry_type: &str, priority: bool) {
@@ -153,14 +150,63 @@ pub fn list(slug: Option<&str>, limit: usize, priority_only: bool, run_clean: bo
     }
 }
 
+/// `graphmind memory update <id>` — edit an entry in place.
+pub fn update(
+    id: &str,
+    slug: Option<&str>,
+    content: Option<String>,
+    tags: Option<Vec<String>>,
+    entry_type: Option<&str>,
+    priority: Option<bool>,
+) {
+    let store = get_store();
+    let project = resolve_memory_project(slug);
+    let changes = graphmind_memory::store::MemoryUpdate {
+        content,
+        tags,
+        entry_type: entry_type.map(parse_memory_type),
+        priority,
+    };
+    let content_changed = changes.content.is_some();
+    match store.update(id, project.as_deref(), changes) {
+        Ok(e) => {
+            if content_changed {
+                reindex(&e.id, &e.content);
+            }
+            println!("{} Memory updated: {}", "OK".green().bold(), e.id.dimmed());
+        }
+        Err(MemoryError::NothingToChange) => {
+            eprintln!("{} Nothing to change: pass --content, --tags, --type or --priority/--no-priority", "Error:".red().bold());
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("{} {}: {}", "Error:".red().bold(), e, id);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Re-embed an edited entry when an embedding engine is configured, so semantic search ranks it by
+/// its new text (best-effort, like the MCP tools).
+fn reindex(id: &str, text: &str) {
+    let config = graphmind_config::load_config();
+    if config.embedding.mode == graphmind_config::EmbeddingMode::Disabled {
+        return;
+    }
+    if let Ok(engine) = graphmind_embeddings::factory::create_engine(&config.embedding) {
+        graphmind_embeddings::search::reindex_memory(&paths::memory_embedding_db_path(), engine.as_ref(), id, text);
+    }
+}
+
 pub fn delete(id: &str, slug: Option<&str>) {
     let store = get_store();
     let project = resolve_memory_project(slug);
-    if store.delete(id, project.as_deref()) {
-        println!("{} Memory deleted: {}", "OK".green().bold(), id.dimmed());
-    } else {
-        eprintln!("{} Memory not found: {}", "Error:".red().bold(), id);
-        std::process::exit(1);
+    match store.delete_entry(id, project.as_deref()) {
+        Ok(full) => println!("{} Memory deleted: {}", "OK".green().bold(), full.dimmed()),
+        Err(e) => {
+            eprintln!("{} {}: {}", "Error:".red().bold(), e, id);
+            std::process::exit(1);
+        }
     }
 }
 

@@ -1,4 +1,5 @@
-use crate::store::{EmbeddingStore, bytes_to_float32};
+use crate::engine::EmbeddingEngine;
+use crate::store::{EmbeddingStore, NewEmbeddingRow, bytes_to_float32, float32_to_bytes};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -88,6 +89,24 @@ pub fn semantic_search_memory(
     semantic_search(db_path, query, embed_fn, limit, Some("memory"))
 }
 
+/// Store the vector of memory entry `id` for `text`, replacing any previous one. Embeds first: a
+/// failed embed leaves the old row (stale, but search ignores rows whose text no longer matches
+/// the entry) rather than none. Returns whether the row was written.
+pub fn reindex_memory(db_path: &Path, engine: &dyn EmbeddingEngine, id: &str, text: &str) -> bool {
+    let Ok(vector) = engine.embed(text) else { return false };
+    let Ok(store) = EmbeddingStore::open(db_path) else { return false };
+    let _ = store.delete_by_symbol(id);
+    store
+        .insert_batch(&[NewEmbeddingRow {
+            symbol_name: id.to_string(),
+            symbol_kind: "memory".to_string(),
+            file: String::new(),
+            text: text.to_string(),
+            embedding: float32_to_bytes(&vector),
+        }])
+        .is_ok()
+}
+
 pub fn semantic_search(
     db_path: &Path,
     query: &str,
@@ -138,4 +157,41 @@ pub fn semantic_search(
     let mut results = rrf_merge(&rankings, 60);
     results.truncate(limit);
     results
+}
+
+#[cfg(test)]
+mod reindex_memory_tests {
+    use super::*;
+    use crate::engine::EmbedError;
+
+    /// Embeds every text as [1.0], or fails every call.
+    struct Fake(bool);
+    impl EmbeddingEngine for Fake {
+        fn embed(&self, _: &str) -> Result<Vec<f32>, EmbedError> {
+            if self.0 { Ok(vec![1.0]) } else { Err(EmbedError::ApiError("down".into())) }
+        }
+        fn embed_batch(&self, ts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
+            ts.iter().map(|t| self.embed(t)).collect()
+        }
+        fn dimensions(&self) -> usize { 1 }
+        fn model_id(&self) -> &str { "fake" }
+        fn provider_name(&self) -> &str { "test" }
+        fn is_available(&self) -> bool { true }
+    }
+
+    fn memory_texts(db: &Path) -> Vec<String> {
+        EmbeddingStore::open(db).unwrap().all().unwrap().into_iter().map(|r| r.text).collect()
+    }
+
+    /// A new text replaces the entry's vector; a failed embed leaves the old one in place.
+    #[test]
+    fn replaces_on_success_keeps_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("memory.db");
+        assert!(reindex_memory(&db, &Fake(true), "id-1", "old wording"));
+        assert!(reindex_memory(&db, &Fake(true), "id-1", "new wording"));
+        assert_eq!(memory_texts(&db), ["new wording"]);
+        assert!(!reindex_memory(&db, &Fake(false), "id-1", "newer wording"));
+        assert_eq!(memory_texts(&db), ["new wording"], "a failed embed must not drop the vector");
+    }
 }

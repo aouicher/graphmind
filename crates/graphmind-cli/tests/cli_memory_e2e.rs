@@ -143,3 +143,22 @@ fn memory_add_global_flag() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn memory_update_missing_id_fails_clearly() {
+    let env = CliTestEnv::new();
+    let out = env.run(&["memory", "update", "nope1234", "--content", "x"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no memory entry with that id"));
+}
+
+#[test]
+fn unknown_memory_type_is_rejected() {
+    let env = CliTestEnv::new();
+    let out = env.run(&["memory", "add", "a typo'd type", "--global", "--type", "decisions"]);
+    assert!(!out.status.success(), "unknown type must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("decision, pattern, convention"), "lists the valid types: {stderr}");
+    let list = env.run_ok(&["memory", "list"]);
+    assert!(!list.contains("a typo'd type"), "nothing saved: {list}");
+}
