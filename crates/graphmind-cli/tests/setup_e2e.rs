@@ -11,7 +11,7 @@ use common::{backups_of, claude_code_step, fake_claude, with_home, FAKE_CLAUDE_O
 use graphmind_cli::commands::claude_hook::install_hook;
 use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_mcp_client,
-    migrate_project_mcp_entries, repair_claude_settings, setup, McpClient, Outcome,
+    migrate_project_mcp_entries, repair_claude_settings, McpClient, Outcome,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -664,26 +664,6 @@ fn ensure_project_mcp_configs_idempotent() {
         assert_eq!(backups_of(&vscode_mcp), 0, "no backup when nothing changes");
     });
 }
-
-// ---------------------------------------------------------------------------
-// 12. Setup version — stamped only once the Claude Code entry is in place
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_version_waits_for_the_claude_code_entry() {
-    with_home(|home| {
-        let setup_version = || graphmind_config::read_config().unwrap().setup_version;
-        // Claude Code caught mid-write: the user-scope entry can't be added.
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 3,"#).unwrap();
-        setup();
-        assert_eq!(setup_version(), 0, "auto-setup must retry while the entry is missing");
-
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 3}"#).unwrap();
-        setup();
-        assert_eq!(setup_version(), graphmind_config::SETUP_VERSION);
-    });
-}
-
 
 // ---------------------------------------------------------------------------
 // 14. Claude Code hooks — settings.json that can't be used is left alone

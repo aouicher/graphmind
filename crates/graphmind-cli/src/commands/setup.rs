@@ -64,6 +64,9 @@ pub fn setup() {
 
     // Stamp setup version so CLI/desktop can detect outdated config. Not while the Claude Code
     // entry is missing: auto-setup must retry it, and the project-scope migration waits for it.
+    // Hooks that couldn't be registered don't hold it back: `installed_hooks_outdated()` sees
+    // installed scripts settings.json doesn't register, so auto-setup retries them whatever the
+    // stamp says.
     if claude_code.is_in_place() {
         if let Ok(mut config) = graphmind_config::read_config() {
             config.setup_version = graphmind_config::SETUP_VERSION;
@@ -72,7 +75,11 @@ pub fn setup() {
     }
 
     println!("\n{}", "─".repeat(50).dimmed());
-    println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
+    if claude_code.is_in_place() {
+        println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
+    } else {
+        println!("{} Setup finished — v{}\n", "⊘".yellow().bold(), env!("CARGO_PKG_VERSION"));
+    }
     println!("  {} PATH configured in shell profiles", "✓".green());
     print_hooks_and_skills_summary(&hooks, &skills);
     print_mcp_summary(&[
