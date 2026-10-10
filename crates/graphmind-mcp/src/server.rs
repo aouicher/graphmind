@@ -373,9 +373,7 @@ fn refresh_update_cache() {
         }
     }
 
-    let use_rtk = std::process::Command::new("which").arg("rtk").output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
 
     let output = if use_rtk {
         std::process::Command::new("rtk")
