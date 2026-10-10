@@ -440,7 +440,7 @@ enum SessionAction {
 
 #[derive(clap::Subcommand)]
 enum InstallAction {
-    /// Install Claude Code search hook (redirects grep/find to graphmind)
+    /// Install the Claude Code hooks (context injection, and a nudge from grep/find searches to graphmind)
     HookClaude,
     /// Install git hooks (rebuild after commit/merge/rebase/checkout, diff-impact before push)
     HookGit {

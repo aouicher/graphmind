@@ -22,12 +22,16 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // .toolName // empty')
 
 should_nudge() {
   case "$TOOL_NAME" in
-    Grep) return 0 ;;
+    # Grep and Glob exist only on some installs (Claude Code's native builds search through Bash).
+    Grep|Glob) return 0 ;;
     Bash)
       CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
-      # Only nudge for search-like commands, not graphmind itself
-      echo "$CMD" | grep -q "graphmind" && return 1
-      echo "$CMD" | grep -qE '^\s*(rtk\s+)?(grep|rg|ag|find|fd)\b' && return 0
+      # Only nudge for search-like commands, not graphmind itself. A search starts a command: at
+      # the start, or after `&&`, `||` or `;` (e.g. `cd src && rg …`). One after a pipe filters
+      # output and isn't a code search. ugrep and bfs are what native builds search with.
+      SEG='(^|&&|\|\||;)[[:space:]]*(rtk[[:space:]]+)?'
+      echo "$CMD" | grep -qE "${SEG}graphmind\b" && return 1
+      echo "$CMD" | grep -qE "${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\b" && return 0
       ;;
     Agent)
       SUBAGENT=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty')
@@ -296,7 +300,7 @@ struct Hook {
 /// fingerprint and the outdated check all loop over this list.
 const HOOKS: &[Hook] = &[
     // PreToolUse: only the tools the script can nudge for.
-    Hook { file: "graphmind-search.sh", script: PRE_TOOL_HOOK, event: "PreToolUse", timeout: 10, matchers: &["Grep", "Agent", "Bash"] },
+    Hook { file: "graphmind-search.sh", script: PRE_TOOL_HOOK, event: "PreToolUse", timeout: 10, matchers: &["Grep", "Glob", "Agent", "Bash"] },
     Hook { file: "graphmind-session.sh", script: SESSION_START_HOOK, event: "SessionStart", timeout: 30, matchers: &["*"] },
     Hook { file: "graphmind-prompt.sh", script: USER_PROMPT_HOOK, event: "UserPromptSubmit", timeout: 30, matchers: &["*"] },
 ];
@@ -325,13 +329,18 @@ fn settings_path() -> PathBuf {
         .join("settings.json")
 }
 
-/// FNV-1a of the hook scripts this binary installs: stable across builds and Rust versions,
-/// unlike `DefaultHasher`. Auto-setup's stamp records it, so a new hook version isn't throttled
-/// by a stamp left for the old one.
+/// FNV-1a of everything `HOOKS` says about the hooks this binary installs (file, event, timeout,
+/// matchers and script): stable across builds and Rust versions, unlike `DefaultHasher`. Auto-setup's
+/// stamp records it, so a new hook version isn't throttled by a stamp left for the old one.
 pub fn hooks_fingerprint() -> u64 {
+    fingerprint_of(HOOKS)
+}
+
+fn fingerprint_of(hooks: &[Hook]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for hook in HOOKS {
-        for byte in hook.script.bytes() {
+    for hook in hooks {
+        let fields = format!("{}\0{}\0{}\0{}\0{}", hook.file, hook.event, hook.timeout, hook.matchers.join(","), hook.script);
+        for byte in fields.bytes() {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
@@ -339,14 +348,63 @@ pub fn hooks_fingerprint() -> u64 {
     hash
 }
 
-/// True when an installed hook script differs from the one this binary would write, so a hook
-/// change reaches existing installs through auto-setup without a SETUP_VERSION bump. Scripts
-/// that aren't installed don't count: setup never adds hooks nobody asked for.
+/// One registration in settings.json: (event, matcher, hook entry as JSON text).
+type Registration = (String, String, String);
+
+/// The registrations this binary wants, the ones register_in_settings writes.
+fn expected_registrations(dir: &std::path::Path) -> Vec<Registration> {
+    let mut out = Vec::new();
+    for hook in HOOKS {
+        let cmd = dir.join(hook.file).to_string_lossy().into_owned();
+        for &matcher in hook.matchers {
+            out.push((hook.event.to_string(), matcher.to_string(), hook_entry(&cmd, hook.timeout).to_string()));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The registrations graphmind has in settings.json, retired scripts included.
+fn installed_registrations(settings: &serde_json::Value) -> Vec<Registration> {
+    let mut out = Vec::new();
+    let Some(events) = settings.get("hooks").and_then(|h| h.as_object()) else {
+        return out;
+    };
+    for (event, list) in events {
+        for entry in list.as_array().into_iter().flatten() {
+            let matcher = entry.get("matcher").and_then(|m| m.as_str()).unwrap_or_default();
+            for hook in entry.get("hooks").and_then(|h| h.as_array()).into_iter().flatten() {
+                if is_graphmind_hook(hook) {
+                    out.push((event.clone(), matcher.to_string(), hook.to_string()));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// True when this binary's hooks aren't the ones installed, so a hook change reaches existing
+/// installs through auto-setup without a SETUP_VERSION bump. That is an installed script that
+/// differs from the one this binary writes, or a registration in settings.json that differs from
+/// `HOOKS` (an event, matcher or timeout added, removed or changed, or a registration lost).
+/// Hooks that aren't installed don't count: setup never adds hooks nobody asked for. A settings.json
+/// that doesn't parse is left to setup, which reports it.
 pub fn installed_hooks_outdated() -> bool {
     let dir = hooks_dir();
-    HOOKS
-        .iter()
-        .any(|hook| fs::read_to_string(dir.join(hook.file)).is_ok_and(|installed| installed != hook.script))
+    if HOOKS.iter().any(|hook| fs::read_to_string(dir.join(hook.file)).is_ok_and(|installed| installed != hook.script)) {
+        return true;
+    }
+    if !HOOKS.iter().any(|hook| dir.join(hook.file).exists()) {
+        return false;
+    }
+    let Ok(content) = fs::read_to_string(settings_path()) else {
+        return true;
+    };
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    installed_registrations(&settings) != expected_registrations(&dir)
 }
 
 pub fn install_hook() {
@@ -503,6 +561,25 @@ fn write_settings(path: &std::path::Path, settings: &serde_json::Value) -> Resul
     let output = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     graphmind_config::write_atomic(path, output.as_bytes()).map_err(|e| format!("Failed to write settings.json: {}", e))
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    fn hook(matchers: &'static [&'static str], event: &'static str, timeout: u64) -> Hook {
+        Hook { file: "graphmind-test.sh", script: "echo", event, timeout, matchers }
+    }
+
+    /// A matcher, event or timeout change alone changes the fingerprint, so auto-setup's stamp
+    /// doesn't throttle the reinstall that registers it.
+    #[test]
+    fn fingerprint_covers_matchers_event_and_timeout() {
+        let base = fingerprint_of(&[hook(&["Bash"], "PreToolUse", 10)]);
+        assert_ne!(base, fingerprint_of(&[hook(&["Bash", "Glob"], "PreToolUse", 10)]));
+        assert_ne!(base, fingerprint_of(&[hook(&["Bash"], "PostToolUse", 10)]));
+        assert_ne!(base, fingerprint_of(&[hook(&["Bash"], "PreToolUse", 20)]));
+    }
 }
 
 #[cfg(test)]

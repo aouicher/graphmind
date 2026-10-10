@@ -42,7 +42,7 @@ fn install_migrates_old_entries_and_keeps_other_hooks() {
 
     let pre = h["PreToolUse"].as_array().unwrap();
     let matchers: Vec<_> = pre.iter().map(|e| e["matcher"].as_str().unwrap()).collect();
-    assert_eq!(matchers, ["Bash", "Grep", "Agent"], "{pre:?}");
+    assert_eq!(matchers, ["Bash", "Grep", "Glob", "Agent"], "{pre:?}");
     let bash_cmds: Vec<_> = pre[0]["hooks"].as_array().unwrap().iter().map(|x| x["command"].as_str().unwrap()).collect();
     assert_eq!(bash_cmds, ["/usr/local/bin/my-guard.py", gm("graphmind-search.sh").as_str()]);
     for event in ["SessionStart", "UserPromptSubmit"] {
@@ -154,6 +154,101 @@ fn run_hook(env: &CliTestEnv, script: &str, cwd: &std::path::Path, input: &Value
     child.stdin.take().unwrap().write_all(input.to_string().as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
     String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// The search hook nudges toward graphmind for the ways Claude Code searches: the Grep and Glob
+/// tools where they exist, and search commands through Bash, including the ugrep/bfs native
+/// builds use and searches after `cd … &&`. Output filtered through a pipe isn't a code search.
+#[test]
+fn search_hook_nudges_for_code_searches() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return; // the hooks need jq
+    }
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    let project = env.fixture_path();
+    env.run_ok(&["install", "hook-claude"]);
+    let cases = [
+        (json!({"tool_name": "Grep", "tool_input": {"pattern": "x"}}), true),
+        (json!({"tool_name": "Glob", "tool_input": {"pattern": "**/*.rs"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "rg fetchInBatches src"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "cd src && rg fetchInBatches"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "cd /tmp/graphmind-x && rg foo"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "test -d src || rg fetchUser"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "rg graphmind_config src"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "ugrep -r fetchInBatches ."}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "bfs . -name '*.rs'"}}), true),
+        (json!({"tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "prompt": "list the modules"}}), true),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "cargo test 2>&1 | grep FAILED"}}), false),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "graphmind search fetch"}}), false),
+        (json!({"tool_name": "Bash", "tool_input": {"command": "cd /tmp/graphmind-x && graphmind search fetch"}}), false),
+        (json!({"tool_name": "Read", "tool_input": {"file_path": "a.rs"}}), false),
+    ];
+    for (i, (mut input, nudges)) in cases.into_iter().enumerate() {
+        input["session_id"] = json!(format!("search-{i}")); // once per session: a fresh one each
+        let out = run_hook(&env, "graphmind-search.sh", &project, &input);
+        assert_eq!(out.contains("graphmind-indexed"), nudges, "{input}: {out}");
+    }
+}
+
+/// Every PreToolUse matcher the install registers reaches a nudge for some input, so a matcher
+/// added to HOOKS without a case in the script (or the other way round) fails here.
+#[test]
+fn every_search_hook_matcher_nudges() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return; // the hooks need jq
+    }
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    let project = env.fixture_path();
+    env.run_ok(&["install", "hook-claude"]);
+    let settings = read_settings(&env);
+    let matchers: Vec<String> = settings["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["matcher"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!matchers.is_empty(), "{settings}");
+    for (i, matcher) in matchers.iter().enumerate() {
+        let mut input = match matcher.as_str() {
+            "Grep" => json!({"tool_name": "Grep", "tool_input": {"pattern": "x"}}),
+            "Glob" => json!({"tool_name": "Glob", "tool_input": {"pattern": "**/*.rs"}}),
+            "Agent" => json!({"tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "prompt": "x"}}),
+            "Bash" => json!({"tool_name": "Bash", "tool_input": {"command": "rg fetchInBatches src"}}),
+            other => panic!("no sample input for the {other} matcher: add one here and a case to the script"),
+        };
+        input["session_id"] = json!(format!("matcher-{i}"));
+        let out = run_hook(&env, "graphmind-search.sh", &project, &input);
+        assert!(out.contains("graphmind-indexed"), "{matcher} does not nudge: {out}");
+    }
+}
+
+fn read_settings(env: &CliTestEnv) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(env.home.path().join(".claude/settings.json")).unwrap()).unwrap()
+}
+
+/// settings.json that lost a registration is repaired by auto-setup even though the hook scripts
+/// are unchanged: the Glob matcher is removed by hand here.
+#[test]
+fn missing_registration_is_repaired_by_auto_setup() {
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    env.run_ok(&["install", "hook-claude"]);
+    let path = env.home.path().join(".claude/settings.json");
+    let mut settings = read_settings(&env);
+    settings["hooks"]["PreToolUse"].as_array_mut().unwrap().retain(|e| e["matcher"] != "Glob");
+    std::fs::write(&path, settings.to_string()).unwrap();
+    let has_glob = |env: &CliTestEnv| read_settings(env)["hooks"]["PreToolUse"].as_array().unwrap().iter().any(|e| e["matcher"] == "Glob");
+    assert!(!has_glob(&env));
+
+    run_with_notices(&env);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !has_glob(&env) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    assert!(has_glob(&env), "auto-setup should re-register the Glob matcher");
 }
 
 /// The prompt hook doesn't repeat priority entries SessionStart showed, even ones longer than
