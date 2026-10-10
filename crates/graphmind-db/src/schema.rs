@@ -1,4 +1,5 @@
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, ErrorCode, Transaction, TransactionBehavior};
+use std::time::{Duration, Instant};
 
 /// Version of the indexed content, stored in `meta.schema_version`: bump it when parsing output
 /// changes so that existing graphs need `build --reset` to be correct. It says nothing about the
@@ -81,9 +82,36 @@ pub fn init_database(db_path: &str) -> rusqlite::Result<Connection> {
     db.execute_batch("PRAGMA foreign_keys = ON;")?;
     let layout: i32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if layout < LAYOUT_VERSION {
-        migrate(&db)?;
+        migrate_with_retry(&db)?;
     }
     Ok(db)
+}
+
+/// How long `migrate_with_retry` keeps trying while another process holds the database: the
+/// busy timeout rusqlite gives every connection.
+const MIGRATE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// `migrate`, tried again while the database is busy. Several processes opening an old graph at
+/// once (hooks right after an upgrade) can get `SQLITE_BUSY` immediately, without the busy
+/// handler: SQLite refuses a lock upgrade that could deadlock, e.g. when they all switch the
+/// file to WAL at the same moment. The migration is idempotent and re-reads `user_version`
+/// under its lock, so another attempt is safe; a failed one has rolled back.
+fn migrate_with_retry(db: &Connection) -> rusqlite::Result<()> {
+    let deadline = Instant::now() + MIGRATE_DEADLINE;
+    let mut wait = Duration::from_millis(5);
+    loop {
+        match migrate(db) {
+            Err(e) if is_busy(&e) && Instant::now() + wait < deadline => {
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(Duration::from_millis(200));
+            }
+            result => return result,
+        }
+    }
+}
+
+fn is_busy(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(f, _) if matches!(f.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked))
 }
 
 /// Bring the layout to `LAYOUT_VERSION`: WAL mode (also for graphs seeded by 0.3.0-0.3.2 with
@@ -244,8 +272,9 @@ mod tests {
         assert_eq!(layout, 0);
     }
 
-    /// Several processes opening a new database at once: each waits for the migration lock, and
-    /// all of them succeed on a current, stamped layout.
+    /// Several processes opening a new database at once: each waits for the migration lock (or
+    /// retries when SQLite reports busy without waiting), and all of them succeed on a current,
+    /// stamped layout.
     #[test]
     fn concurrent_first_opens_all_succeed() {
         let dir = tempfile::tempdir().unwrap();
