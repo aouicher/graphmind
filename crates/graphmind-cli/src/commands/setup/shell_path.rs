@@ -7,13 +7,34 @@ use graphmind_config::back_up;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// What the PATH step found or did. When it can't set PATH up, it returns `Err` instead, with the
+/// reason and the folder to add by hand. Step 1 prints the detail; the setup summary is built
+/// from this.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ShellPath {
+    /// PATH, the profile or the Windows user PATH already reaches graphmind: nothing written.
+    Unchanged,
+    /// graphmind's folder was added to the shell profile at this path.
+    AddedToProfile(PathBuf),
+    /// Windows: graphmind's folder was added to the user PATH (registry).
+    AddedToUserPath,
+}
+
 #[doc(hidden)]
-pub fn install_shell_path() {
+pub fn install_shell_path() -> Result<ShellPath, String> {
     if cfg!(target_os = "windows") {
-        install_shell_path_windows();
+        install_shell_path_windows()
     } else {
-        install_shell_path_unix();
+        install_shell_path_unix()
     }
+}
+
+/// Say why PATH was left as it was and that `dir` must be added by hand. The returned reason
+/// carries both, for the summary.
+fn left_alone(reason: &str, dir: &str) -> Result<ShellPath, String> {
+    println!("    {} {reason}", "⊘".yellow());
+    println!("    {} add {dir} to PATH yourself", "→".cyan());
+    Err(format!("{reason}; add {dir} to PATH yourself"))
 }
 
 /// Marks PATH lines written by setup, so uninstall removes exactly what setup added.
@@ -59,11 +80,16 @@ pub fn already_on_path(exe: &Path, path_env: &str) -> Option<PathBuf> {
         .then_some(bin_dir)
 }
 
-fn install_shell_path_unix() {
-    let Ok(exe) = std::env::current_exe() else { return };
+fn install_shell_path_unix() -> Result<ShellPath, String> {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            return left_alone(&format!("can't locate the running graphmind ({e}); left unchanged"), "graphmind's folder")
+        }
+    };
     let path_env = std::env::var("PATH").unwrap_or_default();
     let shell = std::env::var("SHELL").unwrap_or_default();
-    install_shell_path_for(&exe, &path_env, &shell);
+    install_shell_path_for(&exe, &path_env, &shell)
 }
 
 /// Make the graphmind at `exe` reachable on PATH for `shell` (a $SHELL value):
@@ -74,13 +100,15 @@ fn install_shell_path_unix() {
 ///    zsh reads it, interactive or not), `.bashrc` for bash, `.profile` for anything else. A
 ///    missing profile is created; an existing one is backed up first, and one that can't be read
 ///    as text is left as is.
+///
+/// `Err` holds the reason the profile was left as it was, and the folder to add by hand.
 #[doc(hidden)]
-pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) {
+pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) -> Result<ShellPath, String> {
     remove_dead_legacy_line();
 
     if let Some(found) = already_on_path(exe, path_env) {
         println!("    {} PATH already includes graphmind ({})", "✓".green(), found.display());
-        return;
+        return Ok(ShellPath::Unchanged);
     }
 
     let bin_dir = bin_dir_for(exe);
@@ -92,16 +120,18 @@ pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) {
         "bash" => ".bashrc",
         _ => ".profile",
     };
-    match append_line(&home_dir().join(profile), &export_line, |content| content.contains(&needle)) {
-        Ok(Appended::AlreadyPresent) => println!("    {} PATH already configured in ~/{}", "✓".green(), profile),
+    let path = home_dir().join(profile);
+    match append_line(&path, &export_line, |content| content.contains(&needle)) {
+        Ok(Appended::AlreadyPresent) => {
+            println!("    {} PATH already configured in {}", "✓".green(), path.display());
+            Ok(ShellPath::Unchanged)
+        }
         Ok(Appended::Written) => {
-            println!("    {} added {} to ~/{}", "✓".green(), bin_dir.display(), profile);
-            println!("    {} restart your shell or run: source ~/{}", "→".cyan(), profile);
+            println!("    {} added {} to {}", "✓".green(), bin_dir.display(), path.display());
+            println!("    {} restart your shell or run: source {}", "→".cyan(), path.display());
+            Ok(ShellPath::AddedToProfile(path))
         }
-        Err(reason) => {
-            println!("    {} {reason}", "⊘".yellow());
-            println!("    {} add {} to PATH yourself", "→".cyan(), bin_dir.display());
-        }
+        Err(reason) => left_alone(&reason, &bin_dir_str),
     }
 }
 
@@ -172,11 +202,12 @@ fn remove_dead_legacy_line() {
     }
 }
 
-fn install_shell_path_windows() {
+/// Add graphmind's folder to the user PATH in the registry, which every new process inherits,
+/// PowerShell sessions included.
+fn install_shell_path_windows() -> Result<ShellPath, String> {
     let install_dir = home_dir().join(".graphmind").join("bin");
     let install_dir_str = install_dir.to_string_lossy().to_string();
 
-    // 1. Add to user PATH via registry (persistent, non-interactive shells)
     let ps_set_path = format!(
         r#"$current = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($current -notlike '*{0}*') {{ [Environment]::SetEnvironmentVariable('PATH', '{0};' + $current, 'User'); Write-Output 'updated' }} else {{ Write-Output 'already' }}"#,
         install_dir_str
@@ -186,44 +217,20 @@ fn install_shell_path_windows() {
         .output()
     {
         Ok(out) if out.status.success() => {
-            let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if result == "already" {
+            if String::from_utf8_lossy(&out.stdout).trim() == "already" {
                 println!("    {} PATH already configured (user environment)", "✓".green());
+                Ok(ShellPath::Unchanged)
             } else {
-                println!("    {} added to user PATH (registry)", "✓".green());
+                println!("    {} added {} to user PATH (registry)", "✓".green(), install_dir.display());
+                println!("    {} restart your terminal to pick up changes", "→".cyan());
+                Ok(ShellPath::AddedToUserPath)
             }
         }
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr);
-            println!("    {} failed to set user PATH: {}", "✗".red(), err.trim());
+            left_alone(&format!("can't update the user PATH ({}); left unchanged", err.trim()), &install_dir_str)
         }
-        Err(e) => {
-            println!("    {} powershell not available: {e}", "✗".red());
-        }
-    }
-
-    // 2. Also add to PowerShell profile for interactive sessions
-    let ps_get_profile = "$PROFILE";
-    if let Ok(out) = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", ps_get_profile])
-        .output()
-    {
-        if out.status.success() {
-            let profile_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let profile_path = std::path::PathBuf::from(&profile_path);
-            let add_line = format!("$env:PATH = '{};' + $env:PATH", install_dir_str);
-            match append_line(&profile_path, &add_line, |content| content.contains(&install_dir_str)) {
-                Ok(Appended::AlreadyPresent) => {}
-                Ok(Appended::Written) => {
-                    println!("    {} added to PowerShell profile", "✓".green());
-                    println!("    {} restart PowerShell to pick up changes", "→".cyan());
-                }
-                Err(reason) => {
-                    println!("    {} {reason}", "⊘".yellow());
-                    println!("    {} add {} to PATH yourself", "→".cyan(), install_dir.display());
-                }
-            }
-        }
+        Err(e) => left_alone(&format!("can't run powershell ({e}); user PATH left unchanged"), &install_dir_str),
     }
 }
 
@@ -338,7 +345,7 @@ fn uninstall_shell_path_windows() {
         }
     }
 
-    // 2. Remove the matching line from $PROFILE
+    // 2. Remove the $PROFILE line setup added up to 0.3.2 (the user PATH above covers PowerShell)
     let ps_get_profile = "$PROFILE";
     if let Ok(out) = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", ps_get_profile])

@@ -6,7 +6,7 @@
 //!   cargo test -p graphmind-cli --test setup_shell_path_e2e -- --test-threads=1
 
 use common::{run_setup_as, skip_as_root, with_home};
-use graphmind_cli::commands::setup::{already_on_path, install_shell_path_for};
+use graphmind_cli::commands::setup::{already_on_path, install_shell_path_for, ShellPath};
 use std::fs;
 use std::path::Path;
 
@@ -21,10 +21,12 @@ fn setup_shell_path_idempotent() {
     with_home(|home| {
         // Not on PATH, zsh: written once, to .zshenv only.
         let bin_dir = home.join("opt").join("bin");
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
-
         let zshenv = home.join(".zshenv");
+        let first = install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
+        let second = install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
+        assert_eq!(first, Ok(ShellPath::AddedToProfile(zshenv.clone())));
+        assert_eq!(second, Ok(ShellPath::Unchanged));
+
         let content = fs::read_to_string(&zshenv).expect(".zshenv should be created");
         let entry = format!("\"{}:$PATH\"", bin_dir.display());
         let count = content.matches(&entry).count();
@@ -39,7 +41,8 @@ fn setup_shell_path_skips_dir_already_on_path() {
         let bin_dir = home.join(".local").join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
         let path_env = format!("/usr/bin:{}", bin_dir.display());
-        install_shell_path_for(&bin_dir.join("graphmind"), &path_env, "/bin/zsh");
+        let outcome = install_shell_path_for(&bin_dir.join("graphmind"), &path_env, "/bin/zsh");
+        assert_eq!(outcome, Ok(ShellPath::Unchanged));
         assert!(!home.join(".zshenv").exists(), "nothing to add when the binary is already on PATH");
     });
 }
@@ -54,8 +57,9 @@ fn setup_shell_path_removes_dead_legacy_line() {
 
         let bin_dir = home.join(".local").join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/zsh");
+        let outcome = install_shell_path_for(&bin_dir.join("graphmind"), &bin_dir.display().to_string(), "/bin/zsh");
 
+        assert_eq!(outcome, Ok(ShellPath::Unchanged));
         assert_eq!(fs::read_to_string(home.join(".zshrc")).unwrap(), "alias ll='ls -la'\n");
         assert!(!fs::read_to_string(home.join(".bashrc")).unwrap().contains(".graphmind/bin"));
     });
@@ -72,8 +76,25 @@ fn profile_backups(dir: &std::path::Path, name: &str) -> Vec<std::path::PathBuf>
         .collect()
 }
 
+/// The summary at the end of setup's output: everything after the separator line.
+fn summary(stdout: &str) -> &str {
+    let start = stdout.rfind('─').unwrap_or_else(|| panic!("no summary:\n{stdout}"));
+    &stdout[start..]
+}
+
+/// The folder step 1 tells the user to add to PATH (`→ add <dir> to PATH yourself`).
+fn folder_to_add(stdout: &str) -> Option<&str> {
+    stdout.lines().find_map(|l| l.trim().strip_prefix("→ add ")?.strip_suffix(" to PATH yourself"))
+}
+
+/// The folder setup run as a command puts on PATH: the test binary's own.
+fn test_binary_dir() -> std::path::PathBuf {
+    fs::canonicalize(Path::new(env!("CARGO_BIN_EXE_graphmind")).parent().unwrap()).unwrap()
+}
+
 /// A profile that isn't UTF-8 would be replaced by the export line alone: it is left as is, and
-/// setup says so. Runs setup as a command (the setup the desktop app spawns: graphmind not on PATH).
+/// setup says so, in step 1 and in the summary, which must not claim PATH is configured. Runs
+/// setup as a command (the setup the desktop app spawns: graphmind not on PATH).
 #[test]
 fn setup_shell_path_leaves_a_non_utf8_profile_alone() {
     let home = tempfile::tempdir().unwrap();
@@ -88,6 +109,41 @@ fn setup_shell_path_leaves_a_non_utf8_profile_alone() {
     assert!(profile_backups(home.path(), ".zshenv").is_empty());
     let line = stdout.lines().find(|l| l.contains("⊘") && l.contains(&*zshenv.to_string_lossy()));
     assert!(line.is_some_and(|l| l.contains("left unchanged")), "no left-as-is message:\n{stdout}");
+
+    let summary = summary(&stdout);
+    assert!(!summary.contains("PATH configured"), "{summary}");
+    let line = summary.lines().find(|l| l.contains("PATH not configured")).unwrap_or_else(|| panic!("{summary}"));
+    assert!(line.contains("⊘") && line.contains(&*zshenv.to_string_lossy()), "no reason: {line}");
+    assert!(line.ends_with("to PATH yourself") && !line.contains("graphmind's folder"), "no folder: {line}");
+}
+
+/// A profile that can't be written (here: missing, in a read-only home) is reported like one that
+/// can't be read: step 1 names the folder to add by hand, and the summary gives the reason and the
+/// folder instead of pointing back at step 1.
+#[cfg(unix)]
+#[test]
+fn setup_shell_path_names_the_folder_when_the_profile_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let test = "setup_shell_path_names_the_folder_when_the_profile_cannot_be_written";
+    if skip_as_root(test) {
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let zshenv = home.path().join(".zshenv");
+    fs::set_permissions(home.path(), fs::Permissions::from_mode(0o555)).unwrap();
+
+    let out = run_setup_as(Path::new(env!("CARGO_BIN_EXE_graphmind")), home.path(), "/bin/zsh");
+
+    fs::set_permissions(home.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!zshenv.exists(), "{stdout}");
+    let folder = folder_to_add(&stdout).unwrap_or_else(|| panic!("step 1 doesn't name the folder:\n{stdout}"));
+    assert_eq!(fs::canonicalize(folder).ok(), Some(test_binary_dir()), "{stdout}");
+
+    let summary = summary(&stdout);
+    let line = summary.lines().find(|l| l.contains("PATH not configured")).unwrap_or_else(|| panic!("{summary}"));
+    assert!(line.contains("failed to update") && line.contains(&*zshenv.to_string_lossy()), "no reason: {line}");
+    assert!(line.ends_with(&format!("add {folder} to PATH yourself")), "no folder: {line}");
 }
 
 /// The reported case: a `.zshenv` with the dead `~/.graphmind/bin` line. Setup backs it up before
@@ -106,6 +162,11 @@ fn setup_keeps_the_profile_from_before_setup_when_it_backs_up_twice() {
     let out = run_setup_as(Path::new(env!("CARGO_BIN_EXE_graphmind")), home.path(), "/bin/zsh");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "setup failed\n{stdout}");
+    // Step 1 and the summary name the profile written.
+    let step = stdout.lines().find(|l| l.contains("✓ added ")).unwrap_or_else(|| panic!("{stdout}"));
+    assert!(step.ends_with(&format!(" to {}", zshenv.display())), "{step}");
+    let summary = summary(&stdout);
+    assert!(summary.contains(&format!("✓ PATH configured in {}\n", zshenv.display())), "{summary}");
 
     let backups = profile_backups(home.path(), ".zshenv");
     assert_eq!(backups.len(), 2, "one backup before the removal, one before the append: {backups:?}");
@@ -118,7 +179,7 @@ fn setup_keeps_the_profile_from_before_setup_when_it_backs_up_twice() {
     assert!(content.contains("# added by graphmind setup"), "new line missing:\n{content}");
 }
 
-/// A profile that can't be backed up is not rewritten, and the summary names it. The home folder
+/// A profile that can't be backed up is not rewritten, and the summary says why. The home folder
 /// is read-only once the profile exists, so the backup next to it can't be created.
 #[cfg(unix)]
 #[test]
@@ -141,6 +202,9 @@ fn setup_shell_path_leaves_a_profile_alone_when_it_cannot_be_backed_up() {
     assert_eq!(fs::read_to_string(&zshenv).unwrap(), content, ".zshenv changed\n{stdout}");
     let line = stdout.lines().find(|l| l.contains("⊘") && l.contains(".zshenv"));
     assert!(line.is_some_and(|l| l.contains("can't back up") && l.contains("left unchanged")), "{stdout}");
+    let summary = summary(&stdout);
+    let line = summary.lines().find(|l| l.contains("PATH not configured"));
+    assert!(line.is_some_and(|l| l.contains("can't back up")), "{summary}");
 }
 
 #[test]
@@ -150,8 +214,9 @@ fn setup_shell_path_backs_up_an_existing_profile_before_appending() {
         fs::write(&zshenv, "export EDITOR=vim\n").unwrap();
         let bin_dir = home.join("opt").join("bin");
 
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
+        let outcome = install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/zsh");
 
+        assert_eq!(outcome, Ok(ShellPath::AddedToProfile(zshenv.clone())));
         let backups = profile_backups(home, ".zshenv");
         assert_eq!(backups.len(), 1, "{backups:?}");
         assert_eq!(fs::read_to_string(&backups[0]).unwrap(), "export EDITOR=vim\n");
@@ -164,7 +229,9 @@ fn setup_shell_path_backs_up_an_existing_profile_before_appending() {
 fn setup_shell_path_creates_a_missing_profile() {
     with_home(|home| {
         let bin_dir = home.join("opt").join("bin");
-        install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/bash");
+        let outcome = install_shell_path_for(&bin_dir.join("graphmind"), "/usr/bin:/bin", "/bin/bash");
+
+        assert_eq!(outcome, Ok(ShellPath::AddedToProfile(home.join(".bashrc"))));
 
         let content = fs::read_to_string(home.join(".bashrc")).expect(".bashrc should be created");
         assert!(content.starts_with(&format!("export PATH=\"{}:$PATH\"", bin_dir.display())), "{content}");
@@ -210,7 +277,8 @@ fn setup_shell_path_writes_nothing_for_a_linked_binary() {
         fs::write(&exe, "binary").unwrap();
         std::os::unix::fs::symlink(&exe, linked.join("graphmind")).unwrap();
 
-        install_shell_path_for(&exe, &format!("/usr/bin:{}", linked.display()), "/bin/zsh");
+        let outcome = install_shell_path_for(&exe, &format!("/usr/bin:{}", linked.display()), "/bin/zsh");
+        assert_eq!(outcome, Ok(ShellPath::Unchanged));
         assert!(!home.join(".zshenv").exists(), "the versioned Cellar dir must not be added");
     });
 }

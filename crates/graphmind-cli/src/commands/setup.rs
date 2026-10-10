@@ -13,7 +13,7 @@ pub use claude_md::{install_claude_md_block, uninstall_claude_md_block};
 
 mod shell_path;
 #[doc(hidden)]
-pub use shell_path::{already_on_path, install_shell_path, install_shell_path_for, uninstall_shell_path};
+pub use shell_path::{already_on_path, install_shell_path, install_shell_path_for, uninstall_shell_path, ShellPath};
 
 #[doc(hidden)]
 pub use graphmind_config::paths::home_dir;
@@ -26,7 +26,7 @@ pub fn setup() {
     );
 
     print_step(1, 10, "Shell PATH configuration");
-    install_shell_path();
+    let shell_path = install_shell_path();
 
     print_step(2, 10, "Claude Code hooks");
     let hooks = super::claude_hook::install_hook();
@@ -81,7 +81,7 @@ pub fn setup() {
     } else {
         println!("{} Setup finished — v{}\n", "⊘".yellow().bold(), env!("CARGO_PKG_VERSION"));
     }
-    println!("  {} PATH configured in shell profiles", "✓".green());
+    print_shell_path_summary(&shell_path);
     print_hooks_and_skills_summary(&hooks, &skills);
     print_mcp_summary(&[
         (McpClient::ClaudeDesktop.label(), &desktop),
@@ -176,6 +176,15 @@ fn print_install(client: &McpClient, outcome: &Outcome) {
         Outcome::Written => println!("    {} configured at {}", "✓".green(), path.display()),
         Outcome::NotInstalled => println!("    {} {} not installed, skipped", "⊘".yellow(), client.label()),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+    }
+}
+
+fn print_shell_path_summary(shell_path: &Result<ShellPath, String>) {
+    match shell_path {
+        Ok(ShellPath::Unchanged) => println!("  {} PATH already reaches graphmind", "✓".green()),
+        Ok(ShellPath::AddedToProfile(profile)) => println!("  {} PATH configured in {}", "✓".green(), profile.display()),
+        Ok(ShellPath::AddedToUserPath) => println!("  {} PATH configured in the user environment", "✓".green()),
+        Err(reason) => println!("  {} PATH not configured: {reason}", "⊘".yellow()),
     }
 }
 
