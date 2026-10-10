@@ -156,7 +156,7 @@ pub fn install_claude_desktop_mcp() {
         fs::create_dir_all(parent).ok();
     }
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
     println!("    {} configured at {}", "✓".green(), config_path.display());
@@ -246,7 +246,7 @@ pub fn register_mcp_in_claude_code() {
     }
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&settings_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&settings_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write settings: {e}", "✗".red());
     });
     println!("    {} configured", "✓".green());
@@ -291,7 +291,7 @@ pub fn repair_project_mcp_env() {
                 let backup = claude_json_path.with_extension(format!("json.{ts}.bak"));
                 fs::copy(&claude_json_path, &backup).ok();
                 let formatted = serde_json::to_string_pretty(&config).unwrap();
-                fs::write(&claude_json_path, formatted).ok();
+                graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).ok();
             }
         }
     }
@@ -316,7 +316,7 @@ pub fn repair_project_mcp_env() {
             let backup = vscode_mcp.with_extension(format!("json.{ts}.bak"));
             fs::copy(&vscode_mcp, &backup).ok();
             let formatted = serde_json::to_string_pretty(&config).unwrap();
-            fs::write(&vscode_mcp, formatted).ok();
+            graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).ok();
             repaired += 1;
         }
     }
@@ -471,7 +471,7 @@ pub fn install_opencode_mcp() {
         fs::create_dir_all(parent).ok();
     }
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
 
@@ -529,7 +529,7 @@ pub fn install_cursor_global_mcp() {
         fs::create_dir_all(parent).ok();
     }
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
     println!("    {} configured at {}", "✓".green(), config_path.display());
@@ -600,7 +600,7 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
             );
 
             let formatted = serde_json::to_string_pretty(&config).unwrap();
-            fs::write(&claude_json_path, formatted).unwrap_or_else(|e| {
+            graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).unwrap_or_else(|e| {
                 println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
             });
             println!("    {} Claude Code (~/.claude.json) configured", "✓".green());
@@ -651,7 +651,7 @@ pub fn ensure_project_mcp_configs(project_path: &str) {
 
             fs::create_dir_all(&vscode_dir).ok();
             let formatted = serde_json::to_string_pretty(&config).unwrap();
-            fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
+            graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).unwrap_or_else(|e| {
                 println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
             });
             println!("    {} VS Code (.vscode/mcp.json) configured", "✓".green());
@@ -779,7 +779,7 @@ pub fn uninstall_claude_desktop_mcp() {
     }
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
     println!("    {} removed from {}", "✓".green(), config_path.display());
@@ -838,7 +838,7 @@ pub fn unregister_mcp_in_claude_code() {
     repair_claude_settings_path(&mut config, &graphmind_bin_dir);
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&settings_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&settings_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write settings: {e}", "✗".red());
     });
     println!("    {} unregistered from Claude Code settings", "✓".green());
@@ -885,7 +885,7 @@ pub fn uninstall_opencode_mcp() {
     }
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
     println!("    {} removed from {}", "✓".green(), config_path.display());
@@ -921,7 +921,7 @@ pub fn uninstall_cursor_global_mcp() {
     }
 
     let formatted = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_path, formatted).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&config_path, formatted.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write config: {e}", "✗".red());
     });
     println!("    {} removed from {}", "✓".green(), config_path.display());
@@ -965,7 +965,7 @@ pub fn uninstall_project_mcp_configs(project_path: &str) {
                     }
 
                     let formatted = serde_json::to_string_pretty(&config).unwrap();
-                    fs::write(&claude_json_path, formatted).unwrap_or_else(|e| {
+                    graphmind_config::write_atomic(&claude_json_path, formatted.as_bytes()).unwrap_or_else(|e| {
                         println!("    {} failed to write ~/.claude.json: {e}", "✗".red());
                     });
                     println!("    {} removed from ~/.claude.json", "✓".green());
@@ -995,7 +995,7 @@ pub fn uninstall_project_mcp_configs(project_path: &str) {
                     }
 
                     let formatted = serde_json::to_string_pretty(&config).unwrap();
-                    fs::write(&vscode_mcp, formatted).unwrap_or_else(|e| {
+                    graphmind_config::write_atomic(&vscode_mcp, formatted.as_bytes()).unwrap_or_else(|e| {
                         println!("    {} failed to write .vscode/mcp.json: {e}", "✗".red());
                     });
                     println!("    {} removed from .vscode/mcp.json", "✓".green());
@@ -1033,7 +1033,7 @@ pub fn uninstall_claude_md_block() {
         new_content = new_content.replace("\n\n\n", "\n\n");
     }
 
-    fs::write(&claude_md, new_content).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&claude_md, new_content.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
     });
     println!("    {} instruction block removed", "✓".green());
@@ -1160,8 +1160,32 @@ pub fn install_claude_md_block() {
     };
 
     fs::create_dir_all(claude_md.parent().unwrap()).ok();
-    fs::write(&claude_md, new_content).unwrap_or_else(|e| {
+    graphmind_config::write_atomic(&claude_md, new_content.as_bytes()).unwrap_or_else(|e| {
         println!("    {} failed to write CLAUDE.md: {e}", "✗".red());
     });
     println!("    {} instruction block installed", "✓".green());
+}
+
+#[cfg(test)]
+mod write_tests {
+    /// Setup writes config files people often manage with dotfile tools: a symlink stays a link,
+    /// the target's permissions are kept, and no temp file is left behind.
+    #[cfg(unix)]
+    #[test]
+    fn config_writes_keep_symlink_and_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles-claude.json");
+        std::fs::write(&real, "old").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.path().join(".claude.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        graphmind_config::write_atomic(&link, b"new").unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2, "temp file left behind");
+    }
 }

@@ -164,6 +164,14 @@ pub fn delete(id: &str, slug: Option<&str>) {
     }
 }
 
+/// Daily background clean from `notices::memory_auto_clean`: same steps as `clean`, but prints
+/// nothing — it runs inside other commands, whose stdout hooks capture.
+pub fn clean_quiet() {
+    let store = get_store();
+    let project = resolve_memory_project(None);
+    consolidate_steps_abcd(&store, project.as_deref(), false);
+}
+
 /// `graphmind memory clean` — steps A+B+C+D, no external API.
 pub fn clean(slug: Option<&str>) {
     let store = get_store();

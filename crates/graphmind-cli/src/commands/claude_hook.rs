@@ -400,7 +400,9 @@ pub fn install_hook() {
     ];
 
     for (path, content, name) in &scripts {
-        fs::write(path, content).unwrap_or_else(|e| {
+        // Atomic: auto-setup can run while Claude Code is executing a hook, and bash reads a
+        // running script as it goes, so it must never see a half-written file.
+        graphmind_config::write_atomic(path, content.as_bytes()).unwrap_or_else(|e| {
             eprintln!("{} Failed to write {} hook: {}", "Error:".red().bold(), name, e);
             std::process::exit(1);
         });
@@ -605,7 +607,7 @@ fn register_in_settings() -> Result<(), String> {
     let output = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
-    fs::write(&path, output)
+    graphmind_config::write_atomic(&path, output.as_bytes())
         .map_err(|e| format!("Failed to write settings.json: {}", e))?;
 
     Ok(())
@@ -658,7 +660,7 @@ fn unregister_from_settings() -> Result<(), String> {
     let output = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
-    fs::write(&path, output)
+    graphmind_config::write_atomic(&path, output.as_bytes())
         .map_err(|e| format!("Failed to write settings.json: {}", e))?;
 
     Ok(())

@@ -99,7 +99,7 @@ pub fn install_shell_path_for(exe: &Path, path_env: &str, shell: &str) {
     } else {
         format!("{}\n{}\n", content.trim_end(), export_line)
     };
-    if let Err(e) = fs::write(&path, new_content) {
+    if let Err(e) = graphmind_config::write_atomic(&path, new_content.as_bytes()) {
         println!("    {} failed to update {}: {e}", "✗".red(), profile);
     } else {
         println!("    {} added {} to ~/{}", "✓".green(), bin_dir.display(), profile);
@@ -177,7 +177,7 @@ fn install_shell_path_windows() {
                 } else {
                     format!("{}\n{}\n", content.trim_end(), add_line)
                 };
-                if let Err(e) = fs::write(&profile_path, new_content) {
+                if let Err(e) = graphmind_config::write_atomic(&profile_path, new_content.as_bytes()) {
                     println!("    {} failed to update PowerShell profile: {e}", "✗".red());
                 } else {
                     println!("    {} added to PowerShell profile", "✓".green());
@@ -250,7 +250,7 @@ fn remove_profile_lines(matches: &dyn Fn(&str) -> bool) -> Vec<&'static str> {
             new_content.push('\n');
         }
 
-        if let Err(e) = fs::write(&path, new_content) {
+        if let Err(e) = graphmind_config::write_atomic(&path, new_content.as_bytes()) {
             println!("    {} failed to update {}: {e}", "✗".red(), profile);
         } else {
             updated.push(*profile);
@@ -312,7 +312,7 @@ fn uninstall_shell_path_windows() {
                         .filter(|l| *l != target_line)
                         .collect::<Vec<_>>()
                         .join("\n");
-                    if let Err(e) = fs::write(&profile_path, format!("{new_content}\n")) {
+                    if let Err(e) = graphmind_config::write_atomic(&profile_path, format!("{new_content}\n").as_bytes()) {
                         println!("    {} failed to update PowerShell profile: {e}", "✗".red());
                     } else {
                         println!("    {} removed from PowerShell profile", "✓".green());

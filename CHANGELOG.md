@@ -8,6 +8,9 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 ### Fixed
 
 - **Ignored files stay out of the graph.** Exclude patterns and `.gitignore` files now follow gitignore rules (`**`, `*`, root-anchored entries like `/build`, `!` negation, nested `.gitignore` files). Before, wildcard and root-anchored entries silently matched nothing, so ignored files (generated code, credentials, private scripts) were indexed and, with a remote embedding provider, sent to it. Thanks @KennethWKZ.
+- **No notices or network checks in pipes and hooks.** Runs whose stderr isn't a terminal (Claude Code hooks, git hooks, scripts) no longer check GitHub for updates and announcements or revalidate the license; they only run auto-setup and the daily memory clean, which now finishes inline and prints nothing to the output hooks capture. `graphmind mcp` revalidates the license itself. Thanks @KennethWKZ.
+- **No repeated timeouts offline.** A failed update or announcement check is cached like a successful one, so an offline machine waits for it once a day instead of on every command.
+- **Config files written atomically.** Setup writes `~/.claude.json`, `~/.claude/settings.json`, `CLAUDE.md`, editor MCP configs, shell profiles and the hook scripts through a temp file and a rename, so Claude Code never reads a half-written file. Symlinked dotfiles stay links and keep their permissions.
 
 ### Changed
 

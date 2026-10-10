@@ -52,11 +52,6 @@ pub fn check_cli_update() {
     let current = env!("CARGO_PKG_VERSION");
     let Some(latest) = fetch_latest_version() else { return };
 
-    // Only display if stderr is a TTY
-    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
-        return;
-    }
-
     if version_cmp(&latest, current) > 0 {
         eprintln!(
             "\x1b[33m[graphmind]\x1b[0m Update available: {} → {} — run \x1b[36mgraphmind update\x1b[0m",
@@ -71,11 +66,16 @@ fn fetch_latest_version() -> Option<String> {
 
     if let Ok(raw) = fs::read_to_string(&path) {
         if let Ok(cache) = serde_json::from_str::<UpdateCache>(&raw) {
-            if now - cache.fetched_at < CACHE_TTL_SECS && !cache.latest_version.is_empty() {
-                return Some(cache.latest_version);
+            if now.saturating_sub(cache.fetched_at) < CACHE_TTL_SECS {
+                // An empty version is a cached failure: don't retry until the TTL expires.
+                return (!cache.latest_version.is_empty()).then_some(cache.latest_version);
             }
         }
     }
+    // Record the attempt first, so an offline machine pays the timeout once a day, not on
+    // every command.
+    let failed = UpdateCache { fetched_at: now, latest_version: String::new() };
+    write_cache(&path, &failed);
 
     let use_rtk = which::which("rtk").is_ok();
     let timeout_str = FETCH_TIMEOUT_SECS.to_string();
@@ -103,11 +103,16 @@ fn fetch_latest_version() -> Option<String> {
         return None;
     }
 
-    let cache = UpdateCache { fetched_at: now, latest_version: latest.clone() };
-    let json = serde_json::to_string(&cache).unwrap_or_default();
-    fs::write(&path, json).ok();
+    write_cache(&path, &UpdateCache { fetched_at: now, latest_version: latest.clone() });
 
     Some(latest)
+}
+
+/// Cache files are read by every interactive command, so they are replaced, never truncated.
+fn write_cache(path: &std::path::Path, cache: &impl Serialize) {
+    if let Ok(json) = serde_json::to_string(cache) {
+        graphmind_config::write_atomic(path, json.as_bytes()).ok();
+    }
 }
 
 fn cache_path() -> PathBuf {
@@ -247,9 +252,6 @@ pub fn dismiss(id: &str) {
 }
 
 pub fn check_schema_version() {
-    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
-        return;
-    }
     let projects = graphmind_config::Registry::list();
     let stale_count = projects.iter().filter(|p| {
         let db_path = graphmind_config::paths::graph_db_path(&p.slug);
@@ -301,11 +303,13 @@ fn load_or_fetch_cache() -> Option<AnnouncementsCache> {
 
     if let Ok(raw) = fs::read_to_string(&path) {
         if let Ok(cache) = serde_json::from_str::<AnnouncementsCache>(&raw) {
-            if now - cache.fetched_at < CACHE_TTL_SECS {
+            if now.saturating_sub(cache.fetched_at) < CACHE_TTL_SECS {
                 return Some(cache);
             }
         }
     }
+    // Record the attempt first (empty list), so a failed fetch isn't retried on every command.
+    write_cache(&path, &AnnouncementsCache { fetched_at: now, announcements: Vec::new() });
 
     // Fetch in foreground with short timeout — non-blocking failure
     let output = std::process::Command::new("curl")
@@ -329,9 +333,7 @@ fn load_or_fetch_cache() -> Option<AnnouncementsCache> {
         fetched_at: now,
         announcements,
     };
-
-    let json = serde_json::to_string(&cache).unwrap_or_default();
-    fs::write(&path, json).ok();
+    write_cache(&path, &cache);
 
     Some(cache)
 }
@@ -349,8 +351,11 @@ fn memory_clean_stamp_path() -> PathBuf {
     graphmind_config::paths::graphmind_dir().join("memory-clean.stamp")
 }
 
-/// Run memory clean (expire, commit purge, dedup, auto-promote) at most once per day.
-/// Runs in a background thread — non-blocking, silent on failure.
+/// Run memory clean (expire, commit purge, dedup, auto-promote) at most once per day, inline
+/// and silent. Not on a background thread: it would die with short commands before writing its
+/// stamp, so the clean restarted on the next command, and it could write back entries the
+/// command itself had just deleted. The stamp is written first, so concurrent commands (hooks
+/// run several at once) start one clean, not one each.
 pub fn memory_auto_clean() {
     const ONE_DAY: u64 = 86_400;
     let stamp = memory_clean_stamp_path();
@@ -365,10 +370,10 @@ pub fn memory_auto_clean() {
         }
     }
 
-    std::thread::spawn(move || {
-        super::memory::clean(None);
-        let _ = fs::write(&stamp, now.to_string());
-    });
+    if graphmind_config::write_atomic(&stamp, now.to_string().as_bytes()).is_err() {
+        return;
+    }
+    super::memory::clean_quiet();
 }
 
 fn version_cmp(a: &str, b: &str) -> i32 {

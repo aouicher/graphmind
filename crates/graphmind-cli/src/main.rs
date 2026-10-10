@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::io::IsTerminal;
 
 use graphmind_cli::commands;
 
@@ -464,11 +465,35 @@ enum ExcludeAction {
     },
 }
 
+/// Work a command does besides its own, decided once per run.
+#[derive(Debug, PartialEq, Eq)]
+enum Background {
+    /// Interactive (stderr is a terminal): auto-setup, notices, update and announcement checks,
+    /// memory upkeep, license revalidation.
+    All,
+    /// Hooks, git hooks, scripts: auto-setup only (and, for now, the daily memory clean). Hooks
+    /// are how an upgrade reaches people who never run graphmind in a terminal; notices and
+    /// network checks would only cost them time.
+    AutoSetupOnly,
+    /// `GRAPHMIND_SKIP_NOTICES` (tests, graphmind's own child processes), and commands that
+    /// manage setup themselves or must stay fast and silent.
+    Off,
+}
+
+fn background(command: &Commands, skip_notices: bool, interactive: bool) -> Background {
+    if skip_notices || matches!(command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
+        return Background::Off;
+    }
+    if interactive {
+        Background::All
+    } else {
+        Background::AutoSetupOnly
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     graphmind_config::ensure_dirs();
-
-    let skip_notices = std::env::var("GRAPHMIND_SKIP_NOTICES").is_ok();
 
     // A worktree registered on the fly gets its graph seeded, then built in the
     // background — except by `build` itself, which is about to do it.
@@ -476,21 +501,33 @@ fn main() {
         graphmind_config::on_worktree_linked(graphmind_config::spawn_background_build);
     }
 
-    // Show notices (setup outdated, announcements) except for setup/mcp/update commands
-    if !skip_notices && !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
-        // Auto-reinstall hooks/skills/CLAUDE.md when binary is newer than installed setup
-        // version. First, so a slow network check below can't delay it.
-        commands::notices::auto_setup_if_outdated();
-        commands::notices::check_setup_version();
-        commands::notices::check_announcements();
-        commands::notices::check_cli_update();
-        commands::notices::check_schema_version();
-        commands::notices::memory_auto_clean();
-    }
-
-    // Silent license revalidation every 24h (non-blocking)
-    if !skip_notices && !matches!(cli.command, Commands::Auth { .. }) {
-        std::thread::spawn(commands::auth::maybe_revalidate);
+    let mode = background(
+        &cli.command,
+        std::env::var_os("GRAPHMIND_SKIP_NOTICES").is_some(),
+        std::io::stderr().is_terminal(),
+    );
+    match mode {
+        Background::All => {
+            // Auto-reinstall hooks/skills/CLAUDE.md when the binary is newer than the installed
+            // setup. First, so a slow network check below can't delay it.
+            commands::notices::auto_setup_if_outdated();
+            commands::notices::check_setup_version();
+            commands::notices::check_announcements();
+            commands::notices::check_cli_update();
+            commands::notices::check_schema_version();
+            commands::notices::memory_auto_clean();
+            // Silent license revalidation every 24h (non-blocking)
+            if !matches!(cli.command, Commands::Auth { .. }) {
+                std::thread::spawn(commands::auth::maybe_revalidate);
+            }
+        }
+        Background::AutoSetupOnly => {
+            commands::notices::auto_setup_if_outdated();
+            // Daily memory upkeep for people who only use graphmind through hooks, until the
+            // SessionStart hook does it.
+            commands::notices::memory_auto_clean();
+        }
+        Background::Off => {}
     }
 
     match cli.command {
@@ -727,6 +764,9 @@ fn main() {
             commands::update::update(check);
         }
         Commands::Mcp => {
+            // MCP-only users never run graphmind in a terminal, so the server revalidates the
+            // license itself; it lives long enough for the request to finish.
+            std::thread::spawn(commands::auth::maybe_revalidate);
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             if let Err(e) = rt.block_on(graphmind_mcp::server::run_mcp_server()) {
                 eprintln!("MCP server error: {e}");
@@ -744,5 +784,23 @@ fn main() {
                 commands::auth::logout();
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_follows_terminal_env_and_command() {
+        let status = Commands::Status { slug: None };
+        assert_eq!(background(&status, false, true), Background::All);
+        // Hooks and scripts: no terminal, no env var needed.
+        assert_eq!(background(&status, false, false), Background::AutoSetupOnly);
+        assert_eq!(background(&status, true, true), Background::Off);
+        for command in [Commands::Setup, Commands::Mcp, Commands::Update { check: false }] {
+            assert_eq!(background(&command, false, true), Background::Off);
+            assert_eq!(background(&command, false, false), Background::Off);
+        }
     }
 }
