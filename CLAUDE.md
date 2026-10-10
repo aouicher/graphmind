@@ -39,6 +39,11 @@ graphmind init --skip-build   # per-project without building
 curl -fsSL https://raw.githubusercontent.com/aouicher/graphmind/main/scripts/install.sh | bash
 ```
 
+## Git & GitHub conventions
+- Never mention Claude, Claude Code or Anthropic in commits, PRs or GitHub comments.
+- No `Co-Authored-By: Claude …` or `Claude-Session:` trailers in commit messages.
+- No "Generated with Claude Code" line or session link in PR descriptions or comments.
+
 <!-- graphmind:start -->
 
 ## graphmind
