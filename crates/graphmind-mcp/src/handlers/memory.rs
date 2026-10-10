@@ -6,11 +6,12 @@ use serde_json::Value;
 use crate::formatting::{err_text, text_content};
 use crate::search_helpers::load_embed_engine;
 
-/// Maps a caller-supplied project slug to the key memory should be stored
-/// under — a repo's `repo_id` when it's inside a git repo (shared across
-/// worktrees), else the raw slug. See `Registry::memory_key`.
+/// Maps a caller-supplied project slug to the key its memory is stored under:
+/// the primary project's for a linked worktree, else the slug. See `Registry::memory_key`.
 fn memory_project(slug: Option<&str>) -> Option<String> {
-    slug.map(graphmind_config::Registry::memory_key)
+    let slug = slug?;
+    let slug = graphmind_config::resolve_path(slug).unwrap_or_else(|| slug.to_string());
+    Some(graphmind_config::Registry::memory_key(&slug))
 }
 
 pub(crate) fn handle_memory_search(args: &Value) -> Value {

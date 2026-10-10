@@ -1914,6 +1914,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "fs4",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

@@ -51,10 +51,17 @@ pub fn list() {
     for p in &projects {
         let build_info_owned = p.last_build.as_deref().map(fmt_local).unwrap_or_else(|| "never".to_string());
         let build_info = build_info_owned.as_str();
+        let worktree = match (&p.branch, &p.primary) {
+            (Some(b), Some(primary)) => format!("  [{b}, worktree of {primary}]"),
+            (Some(b), None) => format!("  [{b}]"),
+            (None, Some(primary)) => format!("  [worktree of {primary}]"),
+            (None, None) => String::new(),
+        };
         println!(
-            "  {} {}",
+            "  {} {}{}",
             p.slug.cyan().bold(),
-            p.path.dimmed()
+            p.path.dimmed(),
+            worktree.dimmed()
         );
         println!(
             "    last build: {}  languages: {}",

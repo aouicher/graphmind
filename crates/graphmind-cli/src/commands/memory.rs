@@ -7,9 +7,8 @@ fn get_store() -> MemoryStore {
     MemoryStore::new(&paths::memory_dir())
 }
 
-/// Resolves `slug` to the project the memory store should key entries
-/// under — a repo's `repo_id` when it's inside a git repo (shared across
-/// all its worktrees), else the raw slug. See `Registry::memory_key`.
+/// Resolves `slug` to the key the memory store files entries under: the
+/// primary project's for a linked worktree, else the slug. See `Registry::memory_key`.
 fn resolve_memory_project(slug: Option<&str>) -> Option<String> {
     resolve_project_slug(&[slug]).map(|s| Registry::memory_key(&s))
 }
@@ -181,76 +180,6 @@ pub fn consolidate(slug: Option<&str>, dry_run: bool) {
     let summary = consolidate_steps_abcd(&store, project.as_deref(), dry_run);
     println!("{} Consolidate complete:", "OK".green().bold());
     println!("  {}", summary);
-}
-
-/// `graphmind memory merge <target>` — folds every registered project's
-/// legacy per-slug memory file that shares `target`'s repo_id into
-/// `target`'s shared file (deduped by id), then removes the legacy files.
-/// `target` is typically a repo_id, printed by the auto-link notice when a
-/// legacy file couldn't be merged automatically.
-pub fn merge(target: &str) {
-    let store = get_store();
-    let target_path = paths::memory_path(target);
-
-    let sources: Vec<_> = Registry::list()
-        .into_iter()
-        .filter(|p| p.repo_id.as_deref() == Some(target) || p.slug == target)
-        .map(|p| (p.slug.clone(), paths::memory_path(&p.slug)))
-        .filter(|(_, path)| path.exists() && *path != target_path)
-        .collect();
-
-    if sources.is_empty() {
-        println!("{}", "No legacy memory files found to merge.".dimmed());
-        return;
-    }
-
-    let (merged_count, skipped_count, merged_slugs) = store.with_file_lock(&target_path, || {
-        let mut merged: Vec<graphmind_memory::store::MemoryEntry> = if target_path.exists() {
-            store.read_jsonl(&target_path)
-        } else {
-            Vec::new()
-        };
-        let mut seen: std::collections::HashSet<String> = merged.iter().map(|e| e.id.clone()).collect();
-
-        let mut merged_count = 0usize;
-        let mut skipped_count = 0usize;
-        let mut merged_slugs = Vec::new();
-
-        for (slug, path) in &sources {
-            let entries = store.read_jsonl(path);
-            for entry in entries {
-                if seen.insert(entry.id.clone()) {
-                    merged.push(entry);
-                    merged_count += 1;
-                } else {
-                    skipped_count += 1;
-                }
-            }
-            merged_slugs.push(slug.clone());
-        }
-
-        store.rewrite_file(&target_path, &merged);
-        (merged_count, skipped_count, merged_slugs)
-    });
-
-    for (_, path) in &sources {
-        std::fs::remove_file(path).ok();
-    }
-
-    println!(
-        "{} Merged {} entr{} from {} legacy file(s) ({}) into '{}.jsonl'{}",
-        "OK".green().bold(),
-        merged_count,
-        if merged_count == 1 { "y" } else { "ies" },
-        sources.len(),
-        merged_slugs.join(", "),
-        target,
-        if skipped_count > 0 {
-            format!(", {skipped_count} duplicate(s) skipped")
-        } else {
-            String::new()
-        }
-    );
 }
 
 // ---------------------------------------------------------------------------

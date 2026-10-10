@@ -350,11 +350,6 @@ enum MemoryAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Merge a legacy per-slug memory file into a repo's shared file
-    Merge {
-        /// The repo_id (or slug) whose shared memory file entries should be merged into
-        target: String,
-    },
 }
 
 #[derive(clap::Subcommand)]
@@ -474,6 +469,12 @@ fn main() {
     graphmind_config::ensure_dirs();
 
     let skip_notices = std::env::var("GRAPHMIND_SKIP_NOTICES").is_ok();
+
+    // A worktree registered on the fly gets its graph seeded, then built in the
+    // background — except by `build` itself, which is about to do it.
+    if !matches!(cli.command, Commands::Build { changed: None, .. }) {
+        graphmind_config::on_worktree_linked(graphmind_config::spawn_background_build);
+    }
 
     // Show notices (setup outdated, announcements) except for setup/mcp/update commands
     if !skip_notices && !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
@@ -645,9 +646,6 @@ fn main() {
             }
             MemoryAction::Consolidate { slug, dry_run } => {
                 commands::memory::consolidate(slug.as_deref(), dry_run);
-            }
-            MemoryAction::Merge { target } => {
-                commands::memory::merge(&target);
             }
         },
         Commands::Cross { action } => match action {

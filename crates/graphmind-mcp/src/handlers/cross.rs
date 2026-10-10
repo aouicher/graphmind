@@ -75,7 +75,7 @@ pub(crate) fn handle_diff_impact(args: &Value) -> Value {
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
         Some(p) => p,
-        None => return err_text("No project found."),
+        None => return err_text(&crate::graph_helpers::no_project_message()),
     };
 
     // Get changed files from git

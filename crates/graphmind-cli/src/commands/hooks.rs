@@ -89,13 +89,19 @@ fn print_manual_instructions(dir: &Path, why: &str) {
 }
 
 // git passes $1=previous HEAD, $2=new HEAD, $3=1 for a branch checkout (0
-// for a plain file checkout) — only reindex on an actual branch switch.
+// for a plain file checkout) — only reindex on an actual branch switch. An
+// all-zero $1 is a brand-new checkout (`git worktree add`): a plain build there
+// registers the worktree and seeds its graph from the main checkout's.
 const POST_CHECKOUT_HOOK: &str = r#"#!/bin/sh
-# graphmind: incremental reindex on branch switch
+# graphmind: reindex on branch switch and new worktrees
 export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 if [ "$3" = "1" ]; then
-  graphmind build --changed "$1" "$2" 2>/dev/null &
+  if [ -z "$(printf '%s' "$1" | tr -d 0)" ]; then
+    graphmind build 2>/dev/null &
+  else
+    graphmind build --changed "$1" "$2" 2>/dev/null &
+  fi
 fi
 "#;
 

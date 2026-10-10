@@ -92,9 +92,7 @@ pub fn build_changed_between(slug: Option<&str>, old_head: &str, new_head: &str)
         }
     };
 
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&project.path)
+    let output = graphmind_config::git_identity::git_command(Path::new(&project.path))
         .args(["diff", "--name-only", old_head, new_head])
         .output();
 
@@ -134,25 +132,22 @@ pub fn build_changed_between(slug: Option<&str>, old_head: &str, new_head: &str)
     }
 }
 
-/// Exclusive per-project build lock, held until the returned file is dropped. Git hooks start
-/// builds in the background (commit, merge, rebase, checkout can fire in quick succession);
-/// two builds writing the same graph at once could insert duplicate symbols. A second build
-/// waits for the first, then has little left to do.
-fn lock_build(slug: &str) -> Option<std::fs::File> {
-    use fs4::FileExt;
-    let dir = paths::graph_dir(slug);
-    std::fs::create_dir_all(&dir).ok();
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(dir.join("build.lock"))
-        .ok()?;
-    if FileExt::try_lock(&file).is_err() {
-        eprintln!("Waiting for another build of {slug} to finish...");
-        FileExt::lock(&file).ok()?;
-    }
-    Some(file)
+/// Stamps a finished build on the project, with the branch it was built from
+/// (worktree metadata shown by `list`) and its repo identity if it predates it.
+fn record_build(slug: &str, project_path: &str, lang_names: &[String]) {
+    let path = Path::new(project_path);
+    let branch = graphmind_config::git_identity::current_branch(path);
+    let repo_id = Registry::get(slug)
+        .filter(|p| p.repo_id.is_none())
+        .and_then(|_| graphmind_config::git_identity::repo_id(path));
+    Registry::update_project(slug, |p| {
+        p.last_build = Some(chrono::Utc::now().to_rfc3339());
+        p.languages = lang_names.to_vec();
+        p.branch = branch;
+        if repo_id.is_some() {
+            p.repo_id = repo_id;
+        }
+    });
 }
 
 fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
@@ -164,7 +159,7 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
         }
     };
 
-    let _build_lock = lock_build(slug);
+    let _build_lock = graphmind_config::lock_build(slug);
 
     println!(
         "{} Building {} at {}",
@@ -190,6 +185,16 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
         std::fs::remove_file(&db_path).ok();
         std::fs::remove_dir_all(&cache_dir).ok();
         println!("{} DB and cache cleared", ">>".cyan().bold());
+    }
+
+    // A worktree's first build starts from its primary's graph: only the files that
+    // differ between the two checkouts get parsed.
+    if !reset && !db_path.exists() {
+        if let Some(primary) = &project.primary {
+            if graphmind_config::seed_graph(slug, primary) {
+                println!("{} Seeded from {}'s graph", ">>".cyan().bold(), primary.cyan());
+            }
+        }
     }
 
     let mut builder = GraphBuilder::new(&db_path_str, &cache_dir_str);
@@ -222,10 +227,7 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let lang_names: Vec<String> = langs.iter().map(|l| l.language.clone()).collect();
 
     // Update project config with build info
-    Registry::update_project(slug, |p| {
-        p.last_build = Some(chrono::Utc::now().to_rfc3339());
-        p.languages.clone_from(&lang_names);
-    });
+    record_build(slug, &project.path, &lang_names);
 
     // Write meta.json
     let meta = json!({
@@ -488,7 +490,7 @@ fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
         None => return BuildResult::default(),
     };
 
-    let _build_lock = lock_build(slug);
+    let _build_lock = graphmind_config::lock_build(slug);
 
     let project_path = PathBuf::from(&project.path);
     let rel_paths: Vec<String> = changed_paths
@@ -531,10 +533,7 @@ fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
     let langs = queries.language_breakdown();
     let lang_names: Vec<String> = langs.iter().map(|l| l.language.clone()).collect();
 
-    Registry::update_project(slug, |p| {
-        p.last_build = Some(chrono::Utc::now().to_rfc3339());
-        p.languages.clone_from(&lang_names);
-    });
+    record_build(slug, &project.path, &lang_names);
 
     let meta = json!({
         "slug": slug,

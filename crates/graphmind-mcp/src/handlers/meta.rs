@@ -51,7 +51,7 @@ pub(crate) fn handle_context(args: &Value) -> Value {
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
         Some(p) => p,
-        None => return err_text("No project found."),
+        None => return err_text(&crate::graph_helpers::no_project_message()),
     };
 
     // Graph stats
@@ -74,7 +74,10 @@ pub(crate) fn handle_context(args: &Value) -> Value {
 
     // Recent memory
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
-    let recent_memory: Vec<_> = store.list(Some(&proj.slug)).into_iter().take(10).collect();
+    let recent_memory: Vec<_> = store
+        .list(Some(&graphmind_config::Registry::memory_key(&proj.slug)))
+        .into_iter()
+        .take(10).collect();
 
     // Cross links
     let cl_store = CrossLinkStore::new(&graphmind_config::paths::cross_links_path());

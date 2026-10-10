@@ -35,7 +35,7 @@ fn tool_defs() -> Vec<Tool> {
                 "symbol": { "type": "string", "description": "Symbol name to find" },
                 "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class, Interface, Type" },
-                "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
@@ -47,7 +47,7 @@ fn tool_defs() -> Vec<Tool> {
                 "symbol": { "type": "string", "description": "Function name" },
                 "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class, Interface, Type" },
-                "project": { "type": "string", "description": "Project slug (optional — searches all projects if omitted)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional — searches all projects if omitted)" },
                 "limit": { "type": "integer", "description": "Max callers/callees to return (default 50)" },
                 "offset": { "type": "integer", "description": "Skip N callers/callees for pagination (default 0)" }
             },
@@ -57,7 +57,7 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path" },
-                "project": { "type": "string", "description": "Project slug (optional)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" },
                 "limit": { "type": "integer", "description": "Max symbols to return (default 100)" }
             },
             "required": ["file"]
@@ -67,7 +67,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "file": { "type": "string", "description": "File path" },
                 "depth": { "type": "integer", "description": "Max traversal depth (default 5)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["file"]
         })),
@@ -76,7 +76,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "symbol": { "type": "string", "description": "Function name" },
                 "file": { "type": "string", "description": "Filter by file path to disambiguate common symbol names" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["symbol"]
         })),
@@ -84,13 +84,13 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_cycles", "Detects circular import/dependency chains between files in the project. Returns each cycle as an ordered list of files. Use when diagnosing build issues, layering violations, or before major refactors.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_memory_search", "Searches saved memory entries by keyword (decisions, patterns, conventions, bugs). Call at session start with relevant topic keywords to recall prior context. Returns ranked entries with type and tags. Use gm_memory_list to browse all entries without filtering.", json!({
@@ -98,7 +98,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "query": { "type": "string", "description": "Search query" },
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["query"]
         })),
@@ -108,7 +108,7 @@ fn tool_defs() -> Vec<Tool> {
                 "content": { "type": "string", "description": "The fact/decision/pattern to remember. Keep atomic: one clear fact per entry." },
                 "type": { "type": "string", "description": "Memory type: decision, pattern, convention, bug, context, session" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags for categorization" },
-                "project": { "type": "string", "description": "Project slug (optional — for project-scoped facts)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional — for project-scoped facts)" },
                 "global": { "type": "boolean", "description": "Store as global memory (default false) — use for user preferences, cross-project knowledge" },
                 "priority": { "type": "boolean", "description": "Always-inject memory (shown at every session start and prompt). Use for critical conventions, active decisions, user preferences." }
             },
@@ -117,7 +117,7 @@ fn tool_defs() -> Vec<Tool> {
         make_tool("gm_memory_list", "Lists all memory entries for a project without filtering (paginated). Use to audit what has been saved or when you don't have a specific search keyword. For keyword-based recall, prefer gm_memory_search.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" },
                 "limit": { "type": "integer", "description": "Max results (default 20)" }
             }
         })),
@@ -138,7 +138,7 @@ fn tool_defs() -> Vec<Tool> {
                         "required": ["content"]
                     }
                 },
-                "project": { "type": "string", "description": "Project slug (optional — scopes to project)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional — scopes to project)" },
                 "global": { "type": "boolean", "description": "Store as global memory (default false)" }
             },
             "required": ["facts"]
@@ -150,13 +150,13 @@ fn tool_defs() -> Vec<Tool> {
         make_tool("gm_status", "Returns graph health stats for a project: symbol count, edge count, file count, last build time, and schema version. Use to verify the index is up to date before a complex analysis session.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_context", "Returns a combined session bootstrap payload: graph stats, recent memory entries, and cross-project links in one call. Use at session start when you need full project context quickly.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_cross_query", "Searches for a symbol by name across ALL registered projects. Use when you don't know which project owns a symbol, or when tracing a call that crosses project boundaries. Returns matches with project slug and file location.", json!({
@@ -180,7 +180,7 @@ fn tool_defs() -> Vec<Tool> {
         make_tool("gm_diff_impact", "Analyzes the current git diff and returns which symbols and files are affected, plus their transitive dependents. Use before committing or reviewing a PR to understand the real blast radius of staged changes.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug (optional)" },
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" },
                 "depth": { "type": "integer", "description": "Max trace depth (default 5)" }
             }
         })),
@@ -191,7 +191,7 @@ fn tool_defs() -> Vec<Tool> {
                 "limit": { "type": "integer", "description": "Max results (default 20)" },
                 "kind": { "type": "string", "description": "Filter by symbol kind: function, class, method, interface, type" },
                 "include_content": { "type": "boolean", "description": "Include full source code in results (default false)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["query"]
         })),
@@ -199,7 +199,7 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "event": { "type": "string", "description": "Event name (e.g. buy_order_created, order_created)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["event"]
         })),
@@ -207,7 +207,7 @@ fn tool_defs() -> Vec<Tool> {
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path (relative to project root)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["file"]
         })),
@@ -216,7 +216,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to trace callers for" },
                 "depth": { "type": "integer", "description": "Max traversal depth (default 3)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["symbol"]
         })),
@@ -225,7 +225,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "kind": { "type": "string", "description": "Filter by symbol kind: Function, Method, Class (default: Function+Method)" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_export", "Exports a file's dependency subgraph or a symbol's call neighborhood as Mermaid or DOT graph text. Use for visualizing architecture in docs or diagrams. Provide either file= (file subgraph) or symbol= (call neighborhood). Not for querying — use gm_deps or gm_fn for that.", json!({
@@ -235,14 +235,14 @@ fn tool_defs() -> Vec<Tool> {
                 "symbol": { "type": "string", "description": "Symbol name (exports neighborhood)" },
                 "format": { "type": "string", "description": "Output format: mermaid (default) or dot" },
                 "depth": { "type": "integer", "description": "Neighborhood depth for symbol mode (default 2)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
         make_tool("gm_file", "Returns the full raw source content of a file from a registered project. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "File path relative to project root" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["file"]
         })),
@@ -251,7 +251,7 @@ fn tool_defs() -> Vec<Tool> {
             "properties": {
                 "symbol": { "type": "string", "description": "Symbol name to find similar matches for" },
                 "limit": { "type": "integer", "description": "Max results (default 10)" },
-                "project": { "type": "string", "description": "Project slug (optional)" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["symbol"]
         })),
@@ -265,7 +265,7 @@ impl ServerHandler for GraphmindServer {
             .build();
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("graphmind", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Local-first code intelligence with persistent memory.\n\nTOOL USAGE:\n- gm_search: broad discovery — find symbols by keyword/intent. Start here when you don't know the exact name.\n- gm_fn: deep dive into ONE specific symbol — source code + callers + callees. Use when you need the call graph or full implementation. Pass file= to disambiguate common names.\n- gm_outline: file structure at a glance. Use to understand a file before reading it.\n- gm_deps: what a file imports and what imports it.\n- Do NOT chain gm_fn after every gm_search. Only use gm_fn when you actually need callers/callees for your task (debugging, refactoring, impact analysis). For simple lookups, gm_search results are sufficient.\n\nAUTO-MEMORY RULES:\n1. RECALL: At the start of every conversation or when context is needed, call gm_memory_search with relevant keywords.\n2. SAVE: When the user makes a decision, states a preference, establishes a convention, or shares important context — immediately call gm_memory_add. No confirmation needed. Use --priority for critical facts that should always be injected.\n3. SCOPE: Use project=<slug> for project-specific facts. Use global=true for cross-project knowledge.\n\nThis gives you persistent memory across sessions. Use it proactively.")
+            .with_instructions("Local-first code intelligence with persistent memory.\n\nTOOL USAGE:\n- gm_search: broad discovery — find symbols by keyword/intent. Start here when you don't know the exact name.\n- gm_fn: deep dive into ONE specific symbol — source code + callers + callees. Use when you need the call graph or full implementation. Pass file= to disambiguate common names.\n- gm_outline: file structure at a glance. Use to understand a file before reading it.\n- gm_deps: what a file imports and what imports it.\n- Do NOT chain gm_fn after every gm_search. Only use gm_fn when you actually need callers/callees for your task (debugging, refactoring, impact analysis). For simple lookups, gm_search results are sufficient.\n\nAUTO-MEMORY RULES:\n1. RECALL: At the start of every conversation or when context is needed, call gm_memory_search with relevant keywords.\n2. SAVE: When the user makes a decision, states a preference, establishes a convention, or shares important context — immediately call gm_memory_add. No confirmation needed. Use --priority for critical facts that should always be injected.\n3. SCOPE: Use project=<slug> for project-specific facts. Use global=true for cross-project knowledge.\n\nWORKTREES: tools target the checkout this server was started in. When you work in another git worktree (e.g. after switching into .claude/worktrees/<name>), pass project=<absolute path of that worktree> so answers come from its branch.\n\nThis gives you persistent memory across sessions. Use it proactively.")
     }
 
     fn list_tools(
@@ -315,6 +315,7 @@ impl ServerHandler for GraphmindServer {
 }
 
 pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
+    graphmind_config::on_worktree_linked(graphmind_config::spawn_background_build);
     // Refresh update cache in background so MCP-only users get update notices
     std::thread::spawn(refresh_update_cache);
 

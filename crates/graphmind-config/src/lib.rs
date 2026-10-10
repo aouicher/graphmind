@@ -3,10 +3,12 @@ pub mod config;
 pub mod git_identity;
 pub mod paths;
 pub mod resolve;
+pub mod seed;
 
 pub use breaking::{update_crosses_breaking, BREAKING_VERSIONS};
 pub use config::{
     ensure_dirs, load_config, save_config, slugify, DefaultsConfig, EmbeddingConfig, EmbeddingMode,
     Feature, GlobalConfig, LicenseConfig, McpConfig, ProjectConfig, Registry, Tier, SETUP_VERSION,
 };
-pub use resolve::resolve_project_slug;
+pub use resolve::{resolve_path, resolve_project_slug};
+pub use seed::{lock_build, on_worktree_linked, seed_graph, spawn_background_build};

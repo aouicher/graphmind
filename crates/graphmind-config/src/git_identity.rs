@@ -4,13 +4,28 @@ use std::process::Command;
 
 use crate::config::slugify;
 
+/// A `git -C <path>` command that asks about `path` and nothing else. Git exports
+/// `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`… to the hooks it runs, and those
+/// override `-C`: without clearing them, graphmind invoked from a hook would answer
+/// every question about the hook's repo instead of the path it was given.
+pub fn git_command(path: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(path);
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+    ] {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 fn run_git(path: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(args)
-        .output()
-        .ok()?;
+    let output = git_command(path).args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -61,8 +76,6 @@ pub fn repo_id(path: &Path) -> Option<String> {
     }
 }
 
-/// The hooks directory for `path`'s repo, correctly resolved for worktrees
-/// (shared with the main checkout) and `core.hooksPath` overrides.
 /// Root of the work tree containing `path`, canonicalized.
 pub fn toplevel(path: &Path) -> Option<PathBuf> {
     let raw = run_git(path, &["rev-parse", "--show-toplevel"])?;
@@ -70,6 +83,39 @@ pub fn toplevel(path: &Path) -> Option<PathBuf> {
     Some(p.canonicalize().unwrap_or(p))
 }
 
+/// The work tree containing `path`, as seen by git.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkTree {
+    /// Root of the work tree, canonicalized.
+    pub root: PathBuf,
+    /// True for a `git worktree add` checkout, false for a repo's main checkout
+    /// (and for submodules, whose git dir is not a `worktrees/` entry).
+    pub linked: bool,
+}
+
+/// The work tree containing `path`, in one git call. `None` outside a git repo.
+pub fn work_tree(path: &Path) -> Option<WorkTree> {
+    // No `--path-format=absolute` (git >= 2.31): --git-dir and --git-common-dir may
+    // come back relative to `path`, so resolve them here.
+    let raw = run_git(path, &["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"])?;
+    let mut lines = raw.lines();
+    let canon = |s: &str| {
+        let p = path.join(s);
+        p.canonicalize().unwrap_or(p)
+    };
+    let root = canon(lines.next()?);
+    let git_dir = canon(lines.next()?);
+    let common = canon(lines.next()?);
+    Some(WorkTree { root, linked: git_dir != common })
+}
+
+/// The branch checked out at `path`, `None` when detached or outside a repo.
+pub fn current_branch(path: &Path) -> Option<String> {
+    run_git(path, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+}
+
+/// The hooks directory for `path`'s repo, correctly resolved for worktrees
+/// (shared with the main checkout) and `core.hooksPath` overrides.
 pub fn hooks_dir(path: &Path) -> Option<PathBuf> {
     let raw = run_git(path, &["rev-parse", "--git-path", "hooks"])?;
     let candidate = PathBuf::from(raw);
