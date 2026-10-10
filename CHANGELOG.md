@@ -7,6 +7,8 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ### Fixed
 
+- **Memory search ranks by what you searched for.** Applies to every memory search: `graphmind memory search`, `gm_memory_search` and the prompt hook. Common English and French words are ignored, so long facts no longer win on filler; repeating a word counts at most 3 times; terms of one or two letters match whole words only; with three or more search terms a fact must match at least two; and equal scores list the newest fact first, so results don't change from run to run. A search term written like a name (`fetchInBatches`, `FEATURE_GRADES`, `src/models/retry-policy.ts`, `web-app:direct`) that appears in a fact counts like one of its tags, a path matches its file name and a scoped name its parts, so facts no longer need the names repeated as `--tags`. Names written with `/`, `.`, `-` or `:`, or in camelCase, match this way only in direct `memory search` and `gm_memory_search` calls: the prompt hook keeps only `[a-z0-9_]`, so there only snake_case names do. A search made only of common words ("yes please", "why") finds nothing instead of listing the newest facts. Thanks @KennethWKZ.
+
 - **Ignored files stay out of the graph.** Exclude patterns and `.gitignore` files now follow gitignore rules (`**`, `*`, root-anchored entries like `/build`, `!` negation, nested `.gitignore` files). Before, wildcard and root-anchored entries silently matched nothing, so ignored files (generated code, credentials, private scripts) were indexed and, with a remote embedding provider, sent to it. Thanks @KennethWKZ.
 
 ### Changed

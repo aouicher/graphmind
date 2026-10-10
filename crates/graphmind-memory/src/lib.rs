@@ -1,4 +1,6 @@
 pub mod store;
+mod identifiers;
+mod terms;
 pub mod search;
 pub mod index;
 pub mod cross_links;

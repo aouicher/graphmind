@@ -513,3 +513,14 @@ fn a_failed_update_write_is_an_error() {
     assert_eq!(result.unwrap_err(), MemoryError::NotWritten);
     assert_eq!(store.get(&e.id, None).unwrap().content, "fact");
 }
+
+// ── tags ─────────────────────────────────────────────────────────────────────
+
+/// Names in the text are matched at search time; `add` doesn't write them into the tags.
+#[test]
+fn add_stores_tags_as_given() {
+    let (store, _dir) = make_store();
+    let e = store.add("make sure fetchInBatches reads src/a.ts", AddOptions { tags: vec!["Cache".into()], ..AddOptions::default() });
+    assert_eq!(e.tags, ["Cache"]);
+    assert_eq!(store.list(None)[0].tags, ["Cache"]);
+}
