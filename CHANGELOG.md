@@ -3,6 +3,23 @@
 User-facing changes per release. Each entry becomes the release notes on GitHub.
 Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmind/releases).
 
+## [0.3.2] - 2026-10-10
+
+### Fixed
+
+- **Callers no longer disappear after a commit.** An incremental build (the one the post-commit hook runs) dropped every call into a changed file from files that had not changed, so `fn`, who-calls chains, impact analysis and dead-code results got worse with each commit until a `build --full`. Symbols in a changed file now keep their identity, and only that file's own calls and imports are re-resolved. Thanks @KennethWKZ.
+- **Semantic search stays in sync with the code.** Edited, renamed and deleted symbols are re-embedded or removed on every build, not only in watch mode, and symbols whose embedding failed are retried on the next build. A failed request no longer drops a whole batch: it is split and retried, so one bad input loses only itself, and an unreachable provider stops after a few attempts instead of timing out hundreds of times. Thanks @KennethWKZ.
+- **Local model servers (Ollama, LM Studio) no longer time out mid-build.** The request timeout is 300 s when `openai_base_url` points at this machine (30 s otherwise). Both the timeout and the batch size can be set in the `embedding` section of `config.json` (`request_timeout_secs`, `batch_size`).
+- **Search results are stable.** With embeddings on, `graphmind search` and `gm_search` returned a different order from run to run and could list the same symbol twice. Results are now deterministic, and a symbol found by both keyword and semantic search appears once, with its real line and signature. Thanks @KennethWKZ.
+- **Searches with punctuation work.** Queries such as `user-service`, `App\Models` or `getBalance()` used to return nothing; they are now matched literally.
+- **`--offset` pages correctly.** Page 2 now holds the next results, not unrelated neighbours of page 1.
+
+### Upgrading
+
+Nothing to rebuild. Existing embedding indexes are kept; the next build only embeds what changed or failed before. To restore callers lost by earlier incremental builds, run `graphmind build --full` once.
+
+`graphmind embed --run` now exits 1 when some symbols could not be embedded. `graphmind build` still exits 0.
+
 ## [0.3.1] - 2026-10-10
 
 ### Fixed
