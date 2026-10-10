@@ -127,11 +127,14 @@ fn now_secs() -> u64 {
 
 /// Auto-reinstall hooks/skills/CLAUDE.md in background when binary version is newer than installed setup.
 /// Runs at most once per day (stamp file). Triggered by brew upgrade or any binary replacement.
+///
+/// `setup` runs as a detached, silent child process: a thread would die with the command that
+/// started it (usually a few milliseconds later), and its output must not reach that command's
+/// stdout (hooks capture it). The stamp is written before spawning, so the many commands hooks
+/// run concurrently start one setup, not one each.
 pub fn auto_setup_if_outdated() {
     let config = graphmind_config::load_config();
-    let local = config.setup_version;
-    let expected = graphmind_config::SETUP_VERSION;
-    if local >= expected {
+    if config.setup_version >= graphmind_config::SETUP_VERSION {
         return;
     }
 
@@ -145,11 +148,26 @@ pub fn auto_setup_if_outdated() {
             }
         }
     }
+    if fs::write(&stamp, now.to_string()).is_err() {
+        return;
+    }
 
-    std::thread::spawn(move || {
-        super::setup::setup();
-        let _ = fs::write(&stamp, now.to_string());
-    });
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("setup")
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let _ = cmd.spawn();
 }
 
 pub fn check_setup_version() {

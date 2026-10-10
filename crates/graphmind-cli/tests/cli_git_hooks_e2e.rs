@@ -156,3 +156,38 @@ fn setup_completes_hooks_installed_by_an_older_version() {
         assert!(!never.join(".git/hooks").join(name).exists(), "{name} must not be installed unasked");
     }
 }
+
+#[test]
+fn auto_setup_after_an_upgrade_finishes_after_the_command_exits() {
+    let env = CliTestEnv::new();
+    let repo = new_repo(&env, "upgraded");
+    env.run_ok(&["register", repo.to_str().unwrap(), "--slug", "upgraded"]);
+    let hooks = repo.join(".git/hooks");
+    std::fs::write(hooks.join("post-commit"), "#!/bin/sh\n# graphmind: auto-rebuild\ngraphmind build 2>/dev/null &\n").unwrap();
+
+    // The binary was just replaced by a newer one: its setup version is ahead of the config's.
+    let config_path = env.home.path().join(".graphmind/config.json");
+    let mut cfg: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    cfg["setup_version"] = serde_json::json!(3);
+    std::fs::write(&config_path, cfg.to_string()).unwrap();
+
+    // Any quick command, notices enabled (as for a real user).
+    let out = Command::new(&env.binary)
+        .arg("list")
+        .env("HOME", env.home.path())
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("Setup complete"),
+        "setup output must not leak into the command's stdout"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !hooks.join("post-checkout").exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    assert!(hooks.join("post-checkout").exists(), "setup should complete on its own");
+}

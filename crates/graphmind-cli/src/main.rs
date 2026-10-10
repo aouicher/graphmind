@@ -478,13 +478,14 @@ fn main() {
 
     // Show notices (setup outdated, announcements) except for setup/mcp/update commands
     if !skip_notices && !matches!(cli.command, Commands::Setup | Commands::Mcp | Commands::Update { .. }) {
+        // Auto-reinstall hooks/skills/CLAUDE.md when binary is newer than installed setup
+        // version. First, so a slow network check below can't delay it.
+        commands::notices::auto_setup_if_outdated();
         commands::notices::check_setup_version();
         commands::notices::check_announcements();
         commands::notices::check_cli_update();
         commands::notices::check_schema_version();
         commands::notices::memory_auto_clean();
-        // Auto-reinstall hooks/skills/CLAUDE.md when binary is newer than installed setup version
-        commands::notices::auto_setup_if_outdated();
     }
 
     // Silent license revalidation every 24h (non-blocking)
