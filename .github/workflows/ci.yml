@@ -68,6 +68,8 @@ jobs:
             --test cli_exclude_e2e \
             --test cli_sync_e2e \
             --test cli_auth_e2e \
+            --test cli_worktree_e2e \
+            --test cli_git_hooks_e2e \
             -- --test-threads=1 &
           PID2=$!
 
