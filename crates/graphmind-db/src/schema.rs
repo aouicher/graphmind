@@ -1,7 +1,8 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
-/// Increment this when the graph schema or parsing output changes in a way
-/// that requires a full rebuild (--reset) to get correct results.
+/// Version of the indexed content, stored in `meta.schema_version`: bump it when parsing output
+/// changes so that existing graphs need `build --reset` to be correct. It says nothing about the
+/// tables themselves; that is `LAYOUT_VERSION` (`PRAGMA user_version`), which upgrades in place.
 pub const SCHEMA_VERSION: u32 = 2; // v0.2.134: edge kind classification
 
 pub const SCHEMA_SQL: &str = "
@@ -88,34 +89,44 @@ pub fn init_database(db_path: &str) -> rusqlite::Result<Connection> {
 /// Bring the layout to `LAYOUT_VERSION`: WAL mode (also for graphs seeded by 0.3.0-0.3.2 with
 /// `VACUUM INTO`, which come out in rollback mode and keep `user_version` 0), the idempotent DDL
 /// and the content-column migration. A new database gets its content version stamped.
+///
+/// WAL is set first (SQLite can't change the journal mode inside a transaction). Everything else
+/// runs in one `BEGIN IMMEDIATE` transaction, so a crash or error leaves the old layout intact
+/// rather than half-migrated, and a second process migrating at the same time waits for the lock,
+/// then finds the layout current and does nothing.
 fn migrate(db: &Connection) -> rusqlite::Result<()> {
-    let fresh = !db
+    db.execute_batch("PRAGMA journal_mode = WAL;")?;
+    let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
+    let layout: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if layout >= LAYOUT_VERSION {
+        return tx.commit();
+    }
+    let fresh = !tx
         .prepare("SELECT 1 FROM sqlite_master WHERE name = 'symbols'")?
         .exists([])?;
 
-    db.execute_batch("PRAGMA journal_mode = WAL;")?;
-    db.execute_batch(SCHEMA_SQL)?;
+    tx.execute_batch(SCHEMA_SQL)?;
 
-    let has_content: bool = db
+    let has_content: bool = tx
         .prepare("PRAGMA table_info(symbols)")?
         .query_map([], |row| row.get::<_, String>(1))?
         .any(|col| col.as_deref() == Ok("content"));
 
     if !has_content {
-        db.execute_batch("ALTER TABLE symbols ADD COLUMN content TEXT;")?;
-        db.execute_batch("DROP TABLE IF EXISTS symbols_fts;")?;
-        db.execute_batch("DROP TRIGGER IF EXISTS symbols_ai;")?;
-        db.execute_batch("DROP TRIGGER IF EXISTS symbols_ad;")?;
-        db.execute_batch("DROP TRIGGER IF EXISTS symbols_au;")?;
+        tx.execute_batch("ALTER TABLE symbols ADD COLUMN content TEXT;")?;
+        tx.execute_batch("DROP TABLE IF EXISTS symbols_fts;")?;
+        tx.execute_batch("DROP TRIGGER IF EXISTS symbols_ai;")?;
+        tx.execute_batch("DROP TRIGGER IF EXISTS symbols_ad;")?;
+        tx.execute_batch("DROP TRIGGER IF EXISTS symbols_au;")?;
     }
 
-    db.execute_batch(FTS_SQL)?;
+    tx.execute_batch(FTS_SQL)?;
 
     if fresh {
-        stamp_schema_version(db)?;
+        stamp_schema_version(&tx)?;
     }
-    db.execute_batch(&format!("PRAGMA user_version = {LAYOUT_VERSION};"))?;
-    Ok(())
+    tx.execute_batch(&format!("PRAGMA user_version = {LAYOUT_VERSION};"))?;
+    tx.commit()
 }
 
 /// Record that this database's indexed content matches the current schema version. Only a new
@@ -213,6 +224,42 @@ mod tests {
         drop(db);
         init_database(path).unwrap();
         assert!(schema_needs_reset(path));
+    }
+
+    /// A migration that fails part-way is rolled back: no tables from the DDL that ran before the
+    /// error, and `user_version` stays 0, so the next open tries again.
+    #[test]
+    fn failed_migration_leaves_the_database_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph.db");
+        let path = path.to_str().unwrap();
+        // A `symbols` view: `SCHEMA_SQL` creates `meta` and `files`, then fails on its index.
+        Connection::open(path).unwrap().execute_batch("CREATE VIEW symbols AS SELECT 1 AS id;").unwrap();
+
+        assert!(init_database(path).is_err());
+        let db = Connection::open(path).unwrap();
+        let files = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'files'").unwrap().exists([]).unwrap();
+        assert!(!files, "DDL before the error was rolled back");
+        let layout: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(layout, 0);
+    }
+
+    /// Several processes opening a new database at once: each waits for the migration lock, and
+    /// all of them succeed on a current, stamped layout.
+    #[test]
+    fn concurrent_first_opens_all_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph.db").to_str().unwrap().to_string();
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || init_database(&path).map(|_| ()))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().expect("every first open succeeds");
+        }
+        assert_eq!(read_schema_version(&path), SCHEMA_VERSION);
     }
 
     #[test]
