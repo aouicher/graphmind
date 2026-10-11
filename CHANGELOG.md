@@ -7,6 +7,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ### Fixed
 
+- **`graphmind update` downloads to a file of its own.** The new binary is written next to the installed one, under a unique name created for this update, instead of a fixed name in the temp folder: two updates at once no longer corrupt each other, and on a shared machine no other user can put a file in its place. A downloaded binary that crashes now says why.
 - **The install script no longer fails on a shell profile it can't read or write.** That profile is left as it is, and the script prints the PATH line to add yourself; before, it stopped with an error after installing the binary.
 
 ## [0.3.4] - 2026-10-11
