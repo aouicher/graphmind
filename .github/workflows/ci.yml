@@ -1,11 +1,13 @@
 name: CI/CD
 
 on:
+  # Branches are tested through their pull request; pushes run on main only.
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   # Manual release from main: same jobs as a tag push, and the release job
   # creates the tag on the commit it built.
   workflow_dispatch:
@@ -32,8 +34,37 @@ permissions:
   contents: write
 
 jobs:
-  rust-check:
+  # Whether the pull request touches anything beyond docs and images. Every
+  # other event counts as a code change. The test jobs skip otherwise, and a
+  # skipped job satisfies the required checks, so docs-only PRs stay mergeable.
+  changes:
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.notes_only) }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename'); then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(printf '%s\n' "$files" | grep -vE '^(README|CHANGELOG|SECURITY|CLAUDE)\.md$|^LICENSE$|^assets/|\.(gif|png)$' | grep -q . && echo true || echo false)
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  rust-check:
+    needs: [changes]
+    # Draft PRs are tested when marked ready for review.
+    if: needs.changes.outputs.code == 'true' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
