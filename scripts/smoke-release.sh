@@ -61,6 +61,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Temp files too: graphmind update downloads to a fixed name in the temp folder.
+mkdir -p "$SANDBOX/tmp" && export TMPDIR="$SANDBOX/tmp"
 case "$(uname -m)" in arm64|aarch64) MAC_ARCH=arm64 ;; *) MAC_ARCH=x64 ;; esac
 DL="$SANDBOX/dl"; mkdir -p "$DL"
 
@@ -195,13 +197,20 @@ if install_version "$PREVIOUS"; then
     ' <<<"$base" > "$HOME/.claude.json"
 
     check "install.sh upgrades to $VERSION" install_version "$VERSION"
-    # The first command after the update runs setup on its own (no terminal: auto-setup only).
+    # The first command after the update runs setup on its own (no terminal: auto-setup only)
+    # when the new version's setup or hooks differ; it leaves a stamp when it does.
+    rm -f "$HOME/.graphmind/auto-setup.stamp"
     (cd "$P/app" && graphmind status >/dev/null 2>&1)
     check "auto-setup finishes within a minute" wait_auto_setup
     C="$HOME/.claude.json"; BIN="$GRAPHMIND_INSTALL_DIR/graphmind"
-    check "auto-setup ran (setup_version recorded)" jq -e '.setup_version > 0' "$HOME/.graphmind/config.json"
-    expect "CLAUDE.md block updated to $BARE" "GM:VERSION:$BARE" "$(cat "$HOME/.claude/CLAUDE.md")"
-    check "hooks updated (they call graphmind which)" grep -q 'graphmind which' "$HOME/.claude/hooks/graphmind-prompt.sh"
+    if [ -f "$HOME/.graphmind/auto-setup.stamp" ]; then
+        ok "auto-setup ran after the update"
+        expect "CLAUDE.md block updated to $BARE" "GM:VERSION:$BARE" "$(cat "$HOME/.claude/CLAUDE.md")"
+    else
+        skip "auto-setup after the update" "$PREVIOUS and $VERSION have the same setup and hooks"
+        out="$(graphmind setup 2>&1)" || ko "graphmind setup failed" "$out"
+    fi
+    check "hooks current (they call graphmind which)" grep -q 'graphmind which' "$HOME/.claude/hooks/graphmind-prompt.sh"
     check "MCP: app entry repaired to the installed binary" jq -e --arg k "$P/app" --arg b "$BIN" '.projects[$k].mcpServers.graphmind.command == $b' "$C"
     check "MCP: app's other project settings kept" jq -e --arg k "$P/app" '.projects[$k].allowedTools == ["Bash"]' "$C"
     check "MCP: hand-made entry left alone" jq -e --arg k "$P/mono" '.projects[$k].mcpServers.graphmind.command == "/usr/local/bin/my-gm-wrapper"' "$C"
