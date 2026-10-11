@@ -245,21 +245,20 @@ pub fn update(check_only: bool) {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
-    /// A directory holding a fake installed `graphmind`, and a fetch that writes `script` as the
-    /// downloaded binary and records where it was asked to write it.
-    fn setup(script: &'static str) -> (tempfile::TempDir, PathBuf, impl FnOnce(&Path) -> Result<(), String>, std::rc::Rc<std::cell::RefCell<Option<PathBuf>>>) {
+    /// A directory holding a fake installed `graphmind` 1.0.0.
+    fn installed() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("graphmind");
         fs::write(&bin, "#!/bin/sh\necho 'graphmind 1.0.0'\n").unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-        let seen = std::rc::Rc::new(std::cell::RefCell::new(None));
-        let record = seen.clone();
-        let fetch = move |path: &Path| {
-            *record.borrow_mut() = Some(path.to_path_buf());
-            fs::write(path, script).map_err(|e| e.to_string())
-        };
-        (dir, bin, fetch, seen)
+        (dir, bin)
+    }
+
+    /// A fetch that writes `script` as the downloaded binary.
+    fn download(script: &'static str) -> impl FnOnce(&Path) -> Result<(), String> {
+        move |path: &Path| fs::write(path, script).map_err(|e| e.to_string())
     }
 
     fn entries(dir: &Path) -> Vec<String> {
@@ -270,10 +269,15 @@ mod tests {
 
     #[test]
     fn the_download_goes_to_a_unique_file_next_to_the_binary_and_replaces_it() {
-        let (dir, bin, fetch, seen) = setup("#!/bin/sh\necho 'graphmind 9.9.9'\n");
-        replace_binary(&bin, "9.9.9", fetch).unwrap();
+        let (dir, bin) = installed();
+        let seen = RefCell::new(None);
+        replace_binary(&bin, "9.9.9", |path| {
+            *seen.borrow_mut() = Some(path.to_path_buf());
+            download("#!/bin/sh\necho 'graphmind 9.9.9'\n")(path)
+        })
+        .unwrap();
 
-        let tmp = seen.borrow().clone().unwrap();
+        let tmp = seen.into_inner().unwrap();
         assert_eq!(tmp.parent(), Some(dir.path()), "{tmp:?}");
         assert!(tmp.file_name().unwrap().to_string_lossy().starts_with(".graphmind-update-"), "{tmp:?}");
         assert!(fs::read_to_string(&bin).unwrap().contains("9.9.9"));
@@ -282,23 +286,23 @@ mod tests {
 
     #[test]
     fn two_updates_download_to_different_files() {
-        let (_dir, bin, fetch_a, seen_a) = setup("#!/bin/sh\necho 'graphmind 9.9.9'\n");
-        let seen_b = std::rc::Rc::new(std::cell::RefCell::new(None));
-        let record_b = seen_b.clone();
-        let check_both = move |path: &Path| {
-            // While the first download's file exists, a second update picks another name.
-            let second = tempfile::Builder::new().prefix(".graphmind-update-").tempfile_in(path.parent().unwrap()).unwrap();
-            *record_b.borrow_mut() = Some(second.path().to_path_buf());
-            fetch_a(path)
-        };
-        replace_binary(&bin, "9.9.9", check_both).unwrap();
-        assert_ne!(*seen_a.borrow(), *seen_b.borrow());
+        let (dir, bin) = installed();
+        let (first, second) = (RefCell::new(None), RefCell::new(None));
+        replace_binary(&bin, "9.9.9", |path| {
+            *first.borrow_mut() = Some(path.to_path_buf());
+            // While this download's file exists, a second update gets another one.
+            let other = tempfile::Builder::new().prefix(".graphmind-update-").tempfile_in(dir.path()).unwrap();
+            *second.borrow_mut() = Some(other.path().to_path_buf());
+            download("#!/bin/sh\necho 'graphmind 9.9.9'\n")(path)
+        })
+        .unwrap();
+        assert_ne!(first.into_inner(), second.into_inner());
     }
 
     #[test]
     fn a_binary_killed_by_a_signal_is_reported_and_the_installed_one_is_kept() {
-        let (dir, bin, fetch, _) = setup("#!/bin/sh\nkill -9 $$\n");
-        let err = replace_binary(&bin, "9.9.9", fetch).unwrap_err();
+        let (dir, bin) = installed();
+        let err = replace_binary(&bin, "9.9.9", download("#!/bin/sh\nkill -9 $$\n")).unwrap_err();
 
         assert!(err.contains("signal"), "{err}");
         assert!(fs::read_to_string(&bin).unwrap().contains("1.0.0"));
@@ -307,8 +311,8 @@ mod tests {
 
     #[test]
     fn a_binary_reporting_another_version_is_refused() {
-        let (dir, bin, fetch, _) = setup("#!/bin/sh\necho 'graphmind 9.9.8'\n");
-        let err = replace_binary(&bin, "9.9.9", fetch).unwrap_err();
+        let (dir, bin) = installed();
+        let err = replace_binary(&bin, "9.9.9", download("#!/bin/sh\necho 'graphmind 9.9.8'\n")).unwrap_err();
 
         assert!(err.contains("version mismatch"), "{err}");
         assert!(fs::read_to_string(&bin).unwrap().contains("1.0.0"));
@@ -317,7 +321,7 @@ mod tests {
 
     #[test]
     fn a_failed_download_leaves_nothing_behind() {
-        let (dir, bin, _, _) = setup("");
+        let (dir, bin) = installed();
         let err = replace_binary(&bin, "9.9.9", |_| Err("Failed to download".into())).unwrap_err();
 
         assert_eq!(err, "Failed to download");
