@@ -5,9 +5,15 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-11
+
 ### Fixed
 
 - **A build never empties the graph when the project can't be read.** A project folder that exists but can't be read (permissions) fails the build and leaves the graph as it was, as a missing folder already did. A folder inside the project that can't be read keeps its files in the graph, with a warning, instead of having them removed.
+
+### Upgrading
+
+Nothing to do. If a build emptied a project's graph, run `graphmind build --full` on it once.
 
 ## [0.3.3] - 2026-10-11
 
