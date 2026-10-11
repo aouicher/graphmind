@@ -50,3 +50,28 @@ fn build_unknown_slug_error() {
         "building unknown slug should fail or warn"
     );
 }
+
+/// `build --all` builds every project even when one fails, then exits non-zero and names the
+/// projects that failed, so a script or hook can tell.
+#[test]
+fn build_all_exits_non_zero_when_a_project_fails() {
+    let env = CliTestEnv::new();
+    let fixture = env.fixture_path();
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "all-ok"]);
+    let gone = env.home.path().join("gone-project");
+    std::fs::create_dir_all(&gone).unwrap();
+    std::fs::write(gone.join("lib.rs"), "pub fn f() {}\n").unwrap();
+    env.run_ok(&["register", gone.to_str().unwrap(), "--slug", "all-gone"]);
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    let out = env.run(&["build", "--all"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "a failed project must fail the run\nstderr: {stderr}");
+    assert!(stderr.contains("1 of 2 builds failed: all-gone"), "{stderr}");
+    let graph_db = env.home.path().join(".graphmind/graphs/all-ok/graph.db");
+    assert!(graph_db.exists(), "the other project is still built");
+
+    // With every project buildable again, the run succeeds.
+    env.run_ok(&["unregister", "all-gone"]);
+    env.run_ok(&["build", "--all"]);
+}

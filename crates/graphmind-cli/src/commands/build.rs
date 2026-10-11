@@ -54,8 +54,21 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
             eprintln!("{} No projects registered", "Error:".red().bold());
             std::process::exit(1);
         }
-        for p in &projects {
-            build_single(&p.slug, full, reset, true);
+        // A failed project doesn't stop the others; the exit code says whether any failed.
+        let failed: Vec<&str> = projects
+            .iter()
+            .filter(|p| !build_single(&p.slug, full, reset, true))
+            .map(|p| p.slug.as_str())
+            .collect();
+        if !failed.is_empty() {
+            eprintln!(
+                "{} {} of {} builds failed: {}",
+                "Error:".red().bold(),
+                failed.len(),
+                projects.len(),
+                failed.join(", ")
+            );
+            std::process::exit(1);
         }
         return;
     }
@@ -71,7 +84,9 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
         }
     };
 
-    build_single(&slug, full, reset, false);
+    if !build_single(&slug, full, reset, false) {
+        std::process::exit(1);
+    }
 }
 
 /// `graphmind build --changed <old-head> <new-head>` — invoked by the
@@ -157,12 +172,14 @@ fn record_build(slug: &str, project_path: &str, lang_names: &[String]) {
     });
 }
 
-fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
+/// Builds one project and reports the outcome; false when the build failed (the reason is
+/// printed). Callers decide the exit code.
+fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) -> bool {
     let project = match Registry::get(slug) {
         Some(p) => p,
         None => {
             eprintln!("{} Project {} not found", "Error:".red().bold(), slug);
-            return;
+            return false;
         }
     };
 
@@ -227,10 +244,7 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     let result = builder.build(&project.path, &options);
     if !result.errors.is_empty() {
         eprintln!("{} Build of {} failed (see the errors above)", "Error:".red().bold(), slug);
-        if !is_all {
-            std::process::exit(1);
-        }
-        return;
+        return false;
     }
 
     // Collect stats for meta.json
@@ -311,6 +325,7 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
             );
         }
     }
+    true
 }
 
 /// Outcome of an embedding step, for the exit code of `graphmind embed`.
@@ -631,7 +646,9 @@ fn watch_project(slug: &str) {
     );
 
     // Initial full build
-    build_single(slug, false, false, false);
+    if !build_single(slug, false, false, false) {
+        std::process::exit(1);
+    }
 
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
