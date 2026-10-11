@@ -197,8 +197,8 @@ impl GraphBuilder {
         let only_set: Option<HashSet<String>> = options.only_files.as_ref().map(|v| v.iter().cloned().collect());
         // Without the project directory there is no file list to compare the graph with: fail
         // the build and keep the graph as it is.
-        let files = match self.collect_files(project_path, &options.exclude, only_set.as_ref()) {
-            Ok(files) => files,
+        let Collected { files, unreadable } = match self.collect_files(project_path, &options.exclude, only_set.as_ref()) {
+            Ok(collected) => collected,
             Err(e) => {
                 let msg = format!("error: cannot read the project directory {project_path}: {e}");
                 eprintln!("{msg}");
@@ -237,8 +237,15 @@ impl GraphBuilder {
                 known
             };
 
+            // A folder the walk couldn't read hides its files, which are not gone: they stay in
+            // the graph as they are.
+            for dir in &unreadable {
+                eprintln!("warn: cannot read {dir}: its files stay in the graph as they were");
+            }
+            let under_unreadable = |path: &str| unreadable.iter().any(|dir| Path::new(path).starts_with(dir));
+
             for stale in &all_known {
-                if !current_paths.contains(stale) {
+                if !current_paths.contains(stale) && !under_unreadable(stale) {
                     if let Err(e) = self.db.execute(
                         "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
                         params![stale],
@@ -603,10 +610,12 @@ impl GraphBuilder {
     /// - symlinks, unless they resolve to a regular file inside the project that this walk
     ///   accepts itself, so a link can't bring in a file the rules above skip.
     ///
-    /// Fails when the project directory can't be resolved.
-    fn collect_files(&self, project_path: &str, exclude: &[String], only: Option<&HashSet<String>>) -> std::io::Result<Vec<SourceFile>> {
+    /// Folders inside the project that can't be read are returned, relative to the root, with
+    /// the files found elsewhere. Fails when the project directory can't be resolved or read.
+    fn collect_files(&self, project_path: &str, exclude: &[String], only: Option<&HashSet<String>>) -> std::io::Result<Collected> {
         let root = PathBuf::from(project_path);
         let canonical_root = fs::canonicalize(&root)?;
+        fs::read_dir(&root)?;
         let excludes = build_exclude_matcher(&root, exclude);
         let filter_root = root.clone();
 
@@ -639,7 +648,17 @@ impl GraphBuilder {
         let mut accepted: HashSet<PathBuf> = HashSet::new();
         // (path, language, is a symlink), in walk order.
         let mut candidates = Vec::new();
-        for entry in walker.flatten() {
+        let mut unreadable = Vec::new();
+        for entry in walker {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    if let Some(path) = walk_error_path(&err) {
+                        unreadable.push(pathdiff(path.to_str().unwrap_or(""), project_path));
+                    }
+                    continue;
+                }
+            };
             let Some(file_type) = entry.file_type() else { continue };
             let is_link = entry.path_is_symlink();
             if !is_link && !file_type.is_file() {
@@ -673,7 +692,7 @@ impl GraphBuilder {
                 Some(SourceFile { full_path, read_path, language: language.to_string() })
             })
             .collect();
-        Ok(files)
+        Ok(Collected { files, unreadable })
     }
 
     fn resolve_import_path(&self, import_source: &str, from_file: &str) -> Option<String> {
@@ -718,6 +737,22 @@ fn build_exclude_matcher(root: &Path, exclude: &[String]) -> ignore::gitignore::
         eprintln!("warn: exclude patterns not applied: {e}");
         ignore::gitignore::Gitignore::empty()
     })
+}
+
+/// What a walk of the project found: the files to index, and the folders it couldn't read
+/// (relative to the project root).
+struct Collected {
+    files: Vec<SourceFile>,
+    unreadable: Vec<String>,
+}
+
+/// The path a walk error is about (the folder that couldn't be read), if it names one.
+fn walk_error_path(err: &ignore::Error) -> Option<&Path> {
+    match err {
+        ignore::Error::WithPath { path, .. } => Some(path),
+        ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => walk_error_path(err),
+        _ => None,
+    }
 }
 
 fn pathdiff(full_path: &str, base: &str) -> String {

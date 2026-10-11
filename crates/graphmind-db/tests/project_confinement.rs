@@ -120,3 +120,71 @@ fn build_fails_and_keeps_the_graph_when_the_project_directory_cannot_be_resolved
     assert_eq!(result.deleted, 0);
     assert_eq!(indexed_files(&work), ["src/lib.rs"], "the graph is left as it was");
 }
+
+/// Removes every permission on `dir` until dropped. None when permissions don't stop this
+/// process from reading it (running as root), so the caller can skip its test.
+struct Unreadable(std::path::PathBuf);
+
+impl Unreadable {
+    fn new(dir: &Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let guard = Unreadable(dir.to_path_buf());
+        std::fs::read_dir(dir).is_err().then_some(guard)
+    }
+}
+
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755)).ok();
+    }
+}
+
+fn rebuild(work: &Path, project: &Path) -> graphmind_db::builder::BuildResult {
+    let mut builder = GraphBuilder::new(
+        &work.join("graph.db").to_string_lossy(),
+        &work.join("cache").to_string_lossy(),
+    );
+    builder.build(&project.to_string_lossy(), &BuildOptions::default())
+}
+
+#[test]
+fn build_fails_and_keeps_the_graph_when_the_project_directory_cannot_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/lib.rs"), "pub fn kept_fn() {}\n").unwrap();
+    let work = dir.path().join("work");
+    assert!(build_and_list(&work, &project).iter().any(|(_, n)| n == "kept_fn"));
+
+    let Some(_guard) = Unreadable::new(&project) else { return };
+    let result = rebuild(&work, &project);
+
+    assert!(result.errors.iter().any(|e| e.contains("cannot read the project directory")), "{:?}", result.errors);
+    assert_eq!(result.deleted, 0);
+    assert_eq!(indexed_files(&work), ["src/lib.rs"], "the graph is left as it was");
+}
+
+#[test]
+fn files_of_a_folder_that_cannot_be_read_stay_in_the_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("data/nested")).unwrap();
+    std::fs::write(project.join("src/lib.rs"), "pub fn lib_fn() {}\n").unwrap();
+    std::fs::write(project.join("src/gone.rs"), "pub fn gone_fn() {}\n").unwrap();
+    std::fs::write(project.join("data/nested/db.rs"), "pub fn db_fn() {}\n").unwrap();
+    let work = dir.path().join("work");
+    build_and_list(&work, &project);
+    assert_eq!(indexed_files(&work), ["data/nested/db.rs", "src/gone.rs", "src/lib.rs"]);
+
+    std::fs::remove_file(project.join("src/gone.rs")).unwrap();
+    std::fs::write(project.join("src/new.rs"), "pub fn new_fn() {}\n").unwrap();
+    let Some(_guard) = Unreadable::new(&project.join("data")) else { return };
+    let result = rebuild(&work, &project);
+
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(result.deleted, 1, "only the deleted file leaves the graph");
+    assert_eq!(indexed_files(&work), ["data/nested/db.rs", "src/lib.rs", "src/new.rs"]);
+}
