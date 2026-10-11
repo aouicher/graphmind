@@ -138,7 +138,7 @@ fn unregister_mcp_in_claude_code_preserves_unrelated() {
         )
         .unwrap();
 
-        unregister_mcp_in_claude_code();
+        unregister_mcp_in_claude_code(None);
 
         let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
         assert!(user["mcpServers"]["graphmind"].is_null(), "{user}");
@@ -168,7 +168,7 @@ fn unregister_mcp_in_claude_code_leaves_unrelated_path_untouched() {
         });
         fs::write(&settings_path, serde_json::to_string_pretty(&original).unwrap()).unwrap();
 
-        unregister_mcp_in_claude_code();
+        unregister_mcp_in_claude_code(None);
 
         let content = fs::read_to_string(&settings_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();
@@ -204,7 +204,7 @@ fn unregister_mcp_in_claude_code_strips_segment_not_at_start() {
         )
         .unwrap();
 
-        unregister_mcp_in_claude_code();
+        unregister_mcp_in_claude_code(None);
 
         let json: Value =
             serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
@@ -428,7 +428,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
         fs::create_dir_all(&other_skill).unwrap();
         fs::write(other_skill.join("SKILL.md"), "unrelated skill content").unwrap();
 
-        install_skill();
+        install_skill().unwrap();
 
         // Sanity: graphmind + all 19 sub-skills exist.
         assert!(skills_base.join("graphmind").exists());
@@ -547,8 +547,8 @@ fn round_trip_install_then_uninstall_hooks_and_configs() {
         });
         fs::write(&settings_path, serde_json::to_string_pretty(&canary_settings).unwrap()).unwrap();
 
-        install_hook();
-        uninstall_hook();
+        install_hook().unwrap();
+        uninstall_hook().unwrap();
 
         let content = fs::read_to_string(&settings_path).unwrap();
         let json: Value = serde_json::from_str(&content).unwrap();

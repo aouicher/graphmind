@@ -139,23 +139,32 @@ fn sub_skill_text(name: &str, content: &str) -> String {
     }
 }
 
-pub fn install_skill() {
+/// Number of sub-skills `install_skill` installs next to /gm.
+pub fn sub_skill_count() -> usize {
+    SUB_SKILLS.len()
+}
+
+/// Install the /gm skill and its sub-skills in ~/.claude/skills. `Err` with the reason when /gm
+/// can't be written (the sub-skills are skipped then) or some sub-skills couldn't be.
+pub fn install_skill() -> Result<(), String> {
     let skills_base = home_dir()
         .join(".claude")
         .join("skills");
 
     // Main skill
     let skill_dir = skills_base.join("graphmind");
-    fs::create_dir_all(&skill_dir).unwrap_or_else(|e| {
-        eprintln!("{} Failed to create skill directory: {}", "Error:".red().bold(), e);
-        std::process::exit(1);
-    });
+    if let Err(e) = fs::create_dir_all(&skill_dir) {
+        let reason = format!("can't create {} ({e})", skill_dir.display());
+        eprintln!("{} {reason}", "Error:".red().bold());
+        return Err(reason);
+    }
 
     let skill_path = skill_dir.join("SKILL.md");
-    fs::write(&skill_path, SKILL_CONTENT).unwrap_or_else(|e| {
-        eprintln!("{} Failed to write SKILL.md: {}", "Error:".red().bold(), e);
-        std::process::exit(1);
-    });
+    if let Err(e) = fs::write(&skill_path, SKILL_CONTENT) {
+        let reason = format!("can't write {} ({e})", skill_path.display());
+        eprintln!("{} {reason}", "Error:".red().bold());
+        return Err(reason);
+    }
 
     // Sub-skills
     let mut installed = 0;
@@ -176,11 +185,13 @@ pub fn install_skill() {
         skills_base.display()
     );
 
-    if !failed.is_empty() {
-        for f in &failed {
-            eprintln!("    {} {}", "✗".red(), f);
-        }
+    if failed.is_empty() {
+        return Ok(());
     }
+    for f in &failed {
+        eprintln!("    {} {}", "✗".red(), f);
+    }
+    Err(format!("{} of {} sub-skills not written", failed.len(), SUB_SKILLS.len()))
 }
 
 /// Remove the /gm skill and all sub-skills installed by `install_skill()`.

@@ -24,18 +24,25 @@ pub fn with_home<F: FnOnce(&std::path::Path)>(f: F) {
     // dir dropped here — content cleaned up, HOME still points at it but that's harmless.
 }
 
-/// `.bak` files next to `file`.
+/// How many backups of `file` there are (see [`backups`]).
 pub fn backups_of(file: &std::path::Path) -> usize {
-    let name = file.file_name().unwrap().to_string_lossy().to_string();
-    let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).to_string();
-    std::fs::read_dir(file.parent().unwrap())
+    backups(file).len()
+}
+
+/// The content of each backup of `file` (`<file name>.<timestamp>.bak` next to it), sorted.
+pub fn backups(file: &std::path::Path) -> Vec<Vec<u8>> {
+    let prefix = format!("{}.", file.file_name().unwrap().to_string_lossy());
+    let mut found: Vec<_> = std::fs::read_dir(file.parent().unwrap())
         .unwrap()
         .flatten()
         .filter(|e| {
-            let n = e.file_name().to_string_lossy().to_string();
-            n.starts_with(&stem) && n.ends_with(".bak")
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with(&prefix) && name.ends_with(".bak")
         })
-        .count()
+        .map(|e| std::fs::read(e.path()).unwrap())
+        .collect();
+    found.sort();
+    found
 }
 
 pub struct CliTestEnv {
@@ -72,15 +79,21 @@ impl CliTestEnv {
     }
 
     pub fn run(&self, args: &[&str]) -> Output {
-        Command::new(&self.binary)
+        self.command(args).output().expect("failed to run graphmind")
+    }
+
+    /// `graphmind <args>` with the temp HOME, for tests that add their own environment (PATH,
+    /// SHELL) before running it.
+    pub fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(&self.binary);
+        command
             .args(args)
             .env("HOME", self.home.path())
             .env_remove("CLAUDE_CONFIG_DIR")
             .env("GRAPHMIND_SKIP_NOTICES", "1")
             // A background build outliving the command would race the test's assertions.
-            .env("GRAPHMIND_NO_AUTO_BUILD", "1")
-            .output()
-            .expect("failed to run graphmind")
+            .env("GRAPHMIND_NO_AUTO_BUILD", "1");
+        command
     }
 
     /// Like `run`, but executes with the given directory as cwd — needed

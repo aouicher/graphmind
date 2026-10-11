@@ -106,60 +106,80 @@ if [ "$3" = "1" ]; then
 fi
 "#;
 
-fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> bool {
-    let hook_path = hooks_dir.join(name);
+/// What [`install_hook`] did with one hook.
+enum HookWrite {
+    Written,
+    AlreadyInstalled,
+    /// Left byte-identical for the reason printed.
+    LeftUnchanged,
+}
 
-    if hook_path.exists() {
-        let existing = fs::read_to_string(&hook_path).unwrap_or_default();
-        if existing.contains("graphmind") {
+/// Write the hook `name`, or add graphmind's lines to the end of an existing one. An existing hook
+/// is backed up first; one that can't be read as text (permissions, not UTF-8) or backed up is
+/// left byte-identical and the reason printed: rewriting a hook that couldn't be read would
+/// replace it with graphmind's lines.
+fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> HookWrite {
+    let hook_path = hooks_dir.join(name);
+    let left_unchanged = |reason: String| {
+        println!("  {} {name}: {reason}", "⊘".yellow());
+        HookWrite::LeftUnchanged
+    };
+
+    // The new content, and the hook already there: an outdated graphmind hook (`Some(true)`) or
+    // someone's own (`Some(false)`).
+    let (new_content, previous) = match fs::read_to_string(&hook_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (content.to_string(), None),
+        Err(e) => return left_unchanged(format!("can't read {} ({e}); left unchanged", hook_path.display())),
+        Ok(existing) if existing.contains("graphmind") => {
             let is_outdated = existing.contains("memory add \"[commit]")
                 || existing.contains("memory add '[commit]");
-            if is_outdated {
-                // Backup before overwriting
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let backup = hook_path.with_extension(format!("{ts}.bak"));
-                fs::copy(&hook_path, &backup).ok();
-                fs::write(&hook_path, content).ok();
-                println!("  {}: updated (removed outdated patterns)", name.dimmed());
-            } else {
+            if !is_outdated {
                 println!("  {}: already installed", name.dimmed());
-                return false;
+                return HookWrite::AlreadyInstalled;
             }
-        } else {
-            // Backup before appending
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let backup = hook_path.with_extension(format!("{ts}.bak"));
-            fs::copy(&hook_path, &backup).ok();
+            (content.to_string(), Some(true))
+        }
+        Ok(existing) => {
             let stripped: String = content
                 .lines()
                 .filter(|l| !l.starts_with("#!"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            fs::write(&hook_path, format!("{existing}\n{stripped}")).ok();
+            (format!("{existing}\n{stripped}"), Some(false))
         }
-    } else {
-        fs::write(&hook_path, content).ok();
+    };
+    if previous.is_some() {
+        if let Err(reason) = graphmind_config::back_up(&hook_path) {
+            return left_unchanged(reason);
+        }
+    }
+    if let Err(e) = graphmind_config::write_atomic(&hook_path, new_content.as_bytes()) {
+        return left_unchanged(format!("failed to write {} ({e}); left unchanged", hook_path.display()));
+    }
+    if previous == Some(true) {
+        println!("  {}: updated (removed outdated patterns)", name.dimmed());
     }
 
     #[cfg(unix)]
     fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755)).ok();
-    true
+    HookWrite::Written
+}
+
+/// What [`refresh_installed`] did across the registered repos.
+pub struct HooksRefresh {
+    /// Repos that got a hook.
+    pub updated: usize,
+    /// Hooks left byte-identical for the reason printed.
+    pub left_unchanged: usize,
 }
 
 /// Adds the hooks introduced since graphmind's hooks were installed in each registered
 /// repo (post-checkout, post-merge, post-rewrite). Run by `setup`, which re-runs after
 /// an upgrade. Only repos whose own git dir already has graphmind's post-commit hook:
-/// this completes an install people chose, it never starts one. Returns the number of
-/// repos updated.
-pub fn refresh_installed() -> usize {
+/// this completes an install people chose, it never starts one.
+pub fn refresh_installed() -> HooksRefresh {
     let mut seen = std::collections::HashSet::new();
-    let mut updated = 0;
+    let mut refresh = HooksRefresh { updated: 0, left_unchanged: 0 };
     for project in Registry::list() {
         let Some(HooksLocation::GitDir(dir)) = locate_hooks(Path::new(&project.path)) else {
             continue;
@@ -174,15 +194,20 @@ pub fn refresh_installed() -> usize {
         }
         let mut added = false;
         for (name, content) in HOOKS {
-            if !ours(name) {
-                added |= install_hook(&dir, name, content);
+            if ours(name) {
+                continue;
+            }
+            match install_hook(&dir, name, content) {
+                HookWrite::Written => added = true,
+                HookWrite::AlreadyInstalled => {}
+                HookWrite::LeftUnchanged => refresh.left_unchanged += 1,
             }
         }
         if added {
-            updated += 1;
+            refresh.updated += 1;
         }
     }
-    updated
+    refresh
 }
 
 pub fn install(slug: Option<&str>) {
@@ -230,9 +255,12 @@ pub fn install(slug: Option<&str>) {
     fs::create_dir_all(&hooks_dir).ok();
 
     let mut installed = 0;
+    let mut left_unchanged = 0;
     for (name, content) in HOOKS {
-        if install_hook(&hooks_dir, name, content) {
-            installed += 1;
+        match install_hook(&hooks_dir, name, content) {
+            HookWrite::Written => installed += 1,
+            HookWrite::AlreadyInstalled => {}
+            HookWrite::LeftUnchanged => left_unchanged += 1,
         }
     }
 
@@ -243,7 +271,7 @@ pub fn install(slug: Option<&str>) {
             installed,
             slug
         );
-    } else {
+    } else if left_unchanged == 0 {
         println!("{}", "All hooks already installed.".dimmed());
     }
 }

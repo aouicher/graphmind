@@ -196,6 +196,9 @@ pub enum Outcome {
     NotInstalled,
     /// The file was not changed, for the reason given (path included).
     LeftAlone(String),
+    /// Left as the person set it (a hand-made entry), for the reason given: a deliberate state,
+    /// not a failure.
+    Kept(String),
 }
 
 impl Outcome {
@@ -218,7 +221,7 @@ pub fn upsert(client: &McpClient, bin: &str, on_cli_fallback: &mut dyn FnMut(&st
     if client.is_claude_code() {
         match current_entry(client) {
             Err(reason) => return Outcome::LeftAlone(reason),
-            Ok(Some(entry)) if !points_at_graphmind(&entry) => return Outcome::LeftAlone(hand_made(client)),
+            Ok(Some(entry)) if !points_at_graphmind(&entry) => return Outcome::Kept(hand_made(client)),
             Ok(_) => {}
         }
     }
@@ -247,7 +250,7 @@ pub(crate) fn remove_with(client: &McpClient, back_up: bool, on_cli_fallback: &m
         match current_entry(client) {
             Err(reason) => return Outcome::LeftAlone(reason),
             Ok(None) => return Outcome::Unchanged,
-            Ok(Some(entry)) if !points_at_graphmind(&entry) => return Outcome::LeftAlone(hand_made(client)),
+            Ok(Some(entry)) if !points_at_graphmind(&entry) => return Outcome::Kept(hand_made(client)),
             Ok(Some(_)) => {}
         }
     }
@@ -402,7 +405,7 @@ fn write_json(path: &Path, config: &Value, back_up_first: bool) -> Result<(), St
         .map_err(|e| format!("can't serialize {} ({e}); left unchanged", path.display()))?;
     if path.exists() {
         if back_up_first {
-            back_up(path).map_err(|e| format!("can't back up {} ({e}); left unchanged", path.display()))?;
+            crate::back_up(path)?;
         }
     } else if let Some(parent) = path.parent() {
         // Reachable for OpenCode found on PATH before its first run created the folder, and for a
@@ -411,24 +414,6 @@ fn write_json(path: &Path, config: &Value, back_up_first: bool) -> Result<(), St
     }
     crate::write_atomic(path, content.as_bytes())
         .map_err(|e| format!("failed to write {} ({e}); left unchanged", path.display()))
-}
-
-/// Copy `path` to `<path>.<UTC timestamp>.bak`, or `<path>.<timestamp>-<n>.bak` when that name is
-/// taken: a backup never replaces another, so the first one of a run holds the file as it was.
-fn back_up(path: &Path) -> std::io::Result<PathBuf> {
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let ext = path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-    for n in 0..1000 {
-        let stamp = if n == 0 { ts.to_string() } else { format!("{ts}-{n}") };
-        let backup = path.with_extension(format!("{ext}.{stamp}.bak"));
-        // The name is claimed with create_new; the copy then fills it and carries the permissions.
-        match fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
-            Ok(_) => return fs::copy(path, &backup).map(|_| backup),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    }
-    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "too many backups in one second"))
 }
 
 /// The graphmind binary MCP entries point at: the install location (~/.graphmind/bin) when it
@@ -565,18 +550,13 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_never_replaces_another() {
+    fn writing_a_config_backs_it_up_first() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("config.json");
-        fs::write(&file, "original").unwrap();
-        let first = back_up(&file).unwrap();
-        fs::write(&file, "second").unwrap();
-        let second = back_up(&file).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(fs::read_to_string(&first).unwrap(), "original");
-        assert_eq!(fs::read_to_string(&second).unwrap(), "second");
+        fs::write(&file, "{}").unwrap();
         write_config(&file, &json!({ "a": 1 })).unwrap();
-        assert_eq!(backups_in(dir.path()), 3);
+        write_config(&file, &json!({ "a": 2 })).unwrap();
+        assert_eq!(backups_in(dir.path()), 2);
     }
 
     #[test]

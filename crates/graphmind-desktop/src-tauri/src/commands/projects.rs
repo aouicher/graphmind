@@ -74,7 +74,7 @@ pub async fn remove_project(slug: String) -> Result<bool, String> {
 fn add_claude_code_entry(project: &Path) -> Outcome {
     let client = McpClient::ClaudeCodeProject(claude_code::claude_code_key(project));
     let outcome = mcp_clients::upsert(&client, &mcp_clients::graphmind_binary(), &mut log_cli_fallback);
-    if let Outcome::LeftAlone(reason) = &outcome {
+    if let Outcome::LeftAlone(reason) | Outcome::Kept(reason) = &outcome {
         eprintln!("[graphmind] Claude Code MCP entry not written: {reason}");
     }
     outcome
@@ -84,7 +84,7 @@ fn add_claude_code_entry(project: &Path) -> Outcome {
 /// why it stays, when it does, is logged.
 fn remove_claude_code_entry(project: &Path) -> Outcome {
     let outcome = claude_code::remove_claude_code_project(project, &mut log_cli_fallback);
-    if let Outcome::LeftAlone(reason) = &outcome {
+    if let Outcome::LeftAlone(reason) | Outcome::Kept(reason) = &outcome {
         eprintln!("[graphmind] Claude Code MCP entry not removed: {reason}");
     }
     outcome
@@ -221,10 +221,10 @@ mod tests {
         fs::write(env.claude_json(), &mine).unwrap();
 
         match add_claude_code_entry(&project) {
-            Outcome::LeftAlone(reason) => assert!(reason.contains("hand-made graphmind entry"), "{reason}"),
-            other => panic!("left alone: {other:?}"),
+            Outcome::Kept(reason) => assert!(reason.contains("hand-made graphmind entry"), "{reason}"),
+            other => panic!("kept: {other:?}"),
         }
-        assert!(matches!(remove_claude_code_entry(&project), Outcome::LeftAlone(_)));
+        assert!(matches!(remove_claude_code_entry(&project), Outcome::Kept(_)));
         assert_eq!(fs::read_to_string(env.claude_json()).unwrap(), mine);
     }
 

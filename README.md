@@ -95,16 +95,16 @@ That's it. Claude Code, Claude Desktop, Cursor, and VS Code will use graphmind a
 ### `graphmind setup` (once, global)
 
 Configures your machine so all AI tools can use graphmind:
-1. Shell PATH: when graphmind isn't on PATH yet, one marked line in the profile your shell reads (`~/.zshenv` for zsh, `~/.bashrc` for bash, `~/.profile` otherwise). On Windows, `~/.graphmind/bin` goes on the user PATH and into your PowerShell profile instead
-2. Claude Code hooks (session context, prompt pre-fetch, and a once-per-session nudge from grep/find searches and Explore agents to graphmind)
+1. Shell PATH: when graphmind isn't on PATH yet, one marked line in the profile your shell reads (`~/.zshenv` for zsh, `~/.bashrc` for bash, `~/.profile` otherwise), after a backup of that profile. On Windows, `~/.graphmind/bin` goes on the user PATH and into your PowerShell profile instead. A profile that can't be read as text is left unchanged, and setup prints the folder to add to PATH yourself
+2. Claude Code hooks (session context, prompt pre-fetch, and a once-per-session nudge from grep/find searches and Explore agents to graphmind), registered in `~/.claude/settings.json`; a settings.json that can't be read or parsed is left unchanged
 3. Claude Code skill (`/gm` + 19 sub-skills)
 4. Claude Desktop MCP (`claude_desktop_config.json`; the location per OS is under [Manual setup](#manual-setup-if-you-prefer-granular-control))
 5. Claude Code MCP entries, one per repository (`projects.<path>.mcpServers.graphmind` in `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set, under the path Claude Code reads for the repository, usually its main checkout; see [MCP server for Claude Code](#mcp-server-for-claude-code)): rewrites an entry that points at a moved binary or carries an `env` block, moves an entry earlier versions wrote under a worktree's or a subfolder's own path (which Claude Code never reads) to the repository's, and replaces a user-scope `graphmind` entry that runs graphmind with entries for the registered projects, in one write. Entries are added when a project is registered (`graphmind init`, `graphmind register`, the desktop app); a `.claude.json` that doesn't parse is left as is, and setup runs again later
 6. OpenCode MCP (`~/.config/opencode/opencode.jsonc`)
 7. Cursor global MCP (`~/.cursor/mcp.json`) — available in all Cursor projects
 8. VS Code MCP entries — updates the entry in `.vscode/mcp.json` of registered projects that already have one
-9. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are)
-10. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
+9. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are); an existing hook is backed up first, and one that can't be read as text or backed up is left unchanged
+10. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`); a block you edited is left as you set it
 
 `setup` re-runs automatically after the binary is updated, when its configuration changed.
 

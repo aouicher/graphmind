@@ -689,18 +689,24 @@ fn main() {
         },
         Commands::Install { action } => match action {
             InstallAction::HookClaude => {
-                commands::claude_hook::install_hook();
+                if commands::claude_hook::install_hook().is_err() {
+                    std::process::exit(1);
+                }
             }
             InstallAction::HookGit { slug } => {
                 commands::hooks::install(slug.as_deref());
             }
             InstallAction::Skill => {
-                commands::install_skill::install_skill();
+                if commands::install_skill::install_skill().is_err() {
+                    std::process::exit(1);
+                }
             }
         },
         Commands::Uninstall { action } => match action {
             UninstallAction::HookClaude => {
-                commands::claude_hook::uninstall_hook();
+                if commands::claude_hook::uninstall_hook().is_err() {
+                    std::process::exit(1);
+                }
             }
             UninstallAction::HookGit { slug } => {
                 commands::hooks::uninstall(slug.as_deref());

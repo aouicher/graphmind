@@ -1,5 +1,5 @@
 //! E2E tests for the graphmind block in ~/.claude/CLAUDE.md (`install_claude_md_block`): written,
-//! updated from a stock block, left alone when edited or unreadable, backed up when it changes.
+//! updated from a stock block, kept when edited, left alone when unreadable, backed up when it changes.
 //!
 //! Each test points `HOME` at a fresh temp dir; tests are serialized because `HOME` is
 //! process-wide. Run with:
@@ -99,7 +99,7 @@ fn setup_keeps_an_edited_claude_md_block() {
             &installed[end..]
         );
         fs::write(&claude_md, &mine).unwrap();
-        assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));
+        assert!(matches!(install_claude_md_block(), Outcome::Kept(_)));
         assert_eq!(fs::read_to_string(&claude_md).unwrap(), mine);
         assert_eq!(backups_of(&claude_md), 0, "no backup when nothing changes");
     });
@@ -118,7 +118,7 @@ fn setup_keeps_an_edited_block_from_before_fingerprints() {
         ] {
             let content = format!("# Mine\n\n{edited}\n");
             fs::write(&claude_md, &content).unwrap();
-            assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)));
+            assert!(matches!(install_claude_md_block(), Outcome::Kept(_)));
             assert_eq!(fs::read_to_string(&claude_md).unwrap(), content);
         }
     });
@@ -193,7 +193,7 @@ fn setup_keeps_an_edited_previous_stock_block() {
             assert_ne!(edited, previous);
             let content = format!("# Mine\n\n{edited}\n");
             fs::write(&claude_md, &content).unwrap();
-            assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)), "{edited}");
+            assert!(matches!(install_claude_md_block(), Outcome::Kept(_)), "{edited}");
             assert_eq!(fs::read_to_string(&claude_md).unwrap(), content);
         }
     });

@@ -21,7 +21,7 @@ mod common;
 /// whether the entries are in place.
 fn claude_code_step() -> bool {
     let complete = install_claude_code_entries().is_complete();
-    repair_claude_settings(complete);
+    repair_claude_settings(complete, None);
     complete
 }
 
@@ -418,7 +418,7 @@ fn setup_never_replaces_unparseable_json() {
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
         let broken = "{\n  \"hooks\": {},\n}\n"; // trailing comma
         fs::write(&settings, broken).unwrap();
-        repair_claude_settings(true);
+        repair_claude_settings(true, None);
         assert_eq!(fs::read_to_string(&settings).unwrap(), broken);
 
         let claude_json = home.join(".claude.json");

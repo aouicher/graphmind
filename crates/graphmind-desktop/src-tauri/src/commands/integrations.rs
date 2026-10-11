@@ -118,7 +118,7 @@ pub(crate) fn install_claude_code() -> Result<(), String> {
 fn sync_result(sync: claude_code::ClaudeCodeSync) -> Result<(), String> {
     match (sync.left_alone.first(), sync.user_scope) {
         (Some(reason), _) => Err(reason.clone()),
-        (None, Outcome::LeftAlone(reason)) => Err(reason),
+        (None, Outcome::LeftAlone(reason) | Outcome::Kept(reason)) => Err(reason),
         (None, _) => Ok(()),
     }
 }
@@ -137,7 +137,7 @@ fn into_result(client: &McpClient, outcome: Outcome) -> Result<(), String> {
     match outcome {
         Outcome::Unchanged | Outcome::Written => Ok(()),
         Outcome::NotInstalled => Err(format!("{} is not installed", client.label())),
-        Outcome::LeftAlone(reason) => Err(reason),
+        Outcome::LeftAlone(reason) | Outcome::Kept(reason) => Err(reason),
     }
 }
 

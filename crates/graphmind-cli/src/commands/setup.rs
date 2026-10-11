@@ -15,7 +15,7 @@ pub(crate) use claude_md::GM_INSTRUCTIONS;
 
 mod shell_path;
 #[doc(hidden)]
-pub use shell_path::{already_on_path, install_shell_path, install_shell_path_for, uninstall_shell_path};
+pub use shell_path::{already_on_path, install_shell_path, install_shell_path_for, uninstall_shell_path, ShellPath};
 
 #[doc(hidden)]
 pub use graphmind_config::paths::home_dir;
@@ -28,13 +28,13 @@ pub fn setup() {
     );
 
     print_step(1, 10, "Shell PATH configuration");
-    install_shell_path();
+    let shell_path = install_shell_path();
 
     print_step(2, 10, "Claude Code hooks");
-    super::claude_hook::install_hook();
+    let hooks = super::claude_hook::install_hook();
 
     print_step(3, 10, "Claude Code skills");
-    super::install_skill::install_skill();
+    let skills = super::install_skill::install_skill();
 
     print_step(4, 10, "Claude Desktop MCP config");
     let desktop = install_mcp_client(&McpClient::ClaudeDesktop);
@@ -43,7 +43,7 @@ pub fn setup() {
     let claude_code = install_claude_code_entries();
     // Separate from the entries: a settings.json that doesn't parse must not block them, and the
     // old settings.json entry goes only once they are in place.
-    repair_claude_settings(claude_code.is_complete());
+    let settings_repaired = repair_claude_settings(claude_code.is_complete(), hooks.as_ref().err().map(String::as_str));
 
     print_step(6, 10, "OpenCode MCP config");
     let opencode = install_mcp_client(&McpClient::OpenCode);
@@ -55,8 +55,10 @@ pub fn setup() {
     refresh_vscode_entries();
 
     print_step(9, 10, "Git hooks of registered projects");
-    match super::hooks::refresh_installed() {
-        0 => println!("    {} up to date", "✓".green()),
+    let git_hooks = super::hooks::refresh_installed();
+    match git_hooks.updated {
+        0 if git_hooks.left_unchanged == 0 => println!("    {} up to date", "✓".green()),
+        0 => {}
         n => println!("    {} added new hooks in {n} repo(s)", "✓".green()),
     }
 
@@ -72,30 +74,58 @@ pub fn setup() {
         }
     }
 
-    println!("\n{}", "─".repeat(50).dimmed());
-    println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
-    println!("  {} PATH configured in shell profiles", "✓".green());
-    println!("  {} 3 hooks registered (PreToolUse, SessionStart, UserPromptSubmit)", "✓".green());
-    println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
     let claude_code_summary = claude_code_outcome(&claude_code);
     let mut results = vec![(McpClient::ClaudeDesktop.label(), &desktop)];
     if let Some(outcome) = &claude_code_summary {
         results.push(("Claude Code (per project)", outcome));
     }
     results.extend([(McpClient::Cursor.label(), &cursor), (McpClient::OpenCode.label(), &opencode)]);
+    // What the person set up themselves (an edited CLAUDE.md block, a hand-made entry) is left as
+    // they set it and doesn't count against the header; only what setup failed to do does.
+    let everything_done = !matches!(shell_path, ShellPath::LeftUnchanged(_))
+        && hooks.is_ok()
+        && settings_repaired
+        && skills.is_ok()
+        && git_hooks.left_unchanged == 0
+        && !matches!(claude_md, Outcome::NotInstalled | Outcome::LeftAlone(_))
+        && !results.iter().any(|(_, outcome)| matches!(outcome, Outcome::LeftAlone(_)));
+
+    println!("\n{}", "─".repeat(50).dimmed());
+    if everything_done {
+        println!("{} Setup complete — v{}\n", "✓".green().bold(), env!("CARGO_PKG_VERSION"));
+    } else {
+        println!(
+            "{} Setup finished — v{}: not everything was set up (see below)\n",
+            "⊘".yellow().bold(),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+    print_setup_summary(&shell_path, &hooks, &skills);
     print_mcp_summary(&results);
-    if claude_code_summary.is_none() {
+    if claude_code.keys == 0 {
         println!(
             "  {} Claude Code: no project registered: run {} in a project",
             "⊘".yellow(),
             "graphmind init".cyan()
         );
     }
+    if !claude_code.hand_made.is_empty() {
+        let keys = claude_code.hand_made.iter().map(|key| key.display().to_string()).collect::<Vec<_>>();
+        println!(
+            "  {} Claude Code: graphmind entry left as you set it in {}",
+            "→".cyan(),
+            keys.join(", ")
+        );
+    }
+    if git_hooks.left_unchanged > 0 {
+        println!("  {} {} git hook(s) left unchanged (see above)", "⊘".yellow(), git_hooks.left_unchanged);
+    }
     match claude_md {
         Outcome::Written => println!("  {} CLAUDE.md instruction block updated", "✓".green()),
         Outcome::Unchanged => println!("  {} CLAUDE.md instruction block already current", "✓".green()),
+        Outcome::Kept(_) => println!("  {} CLAUDE.md instruction block left as you set it", "→".cyan()),
         Outcome::NotInstalled | Outcome::LeftAlone(_) => {
-            println!("  {} CLAUDE.md instruction block left as is (see above)", "⊘".yellow())
+            println!("  {} CLAUDE.md instruction block left unchanged (see above)", "⊘".yellow())
         }
     }
     if !claude_code.is_complete() {
@@ -142,6 +172,30 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     println!();
 }
 
+/// The summary lines of setup's first three steps, from what each one did.
+fn print_setup_summary(shell_path: &ShellPath, hooks: &Result<(), String>, skills: &Result<(), String>) {
+    match shell_path {
+        ShellPath::AlreadyOnPath => println!("  {} graphmind already on PATH", "✓".green()),
+        ShellPath::Configured(place) => println!("  {} PATH configured in {place}", "✓".green()),
+        ShellPath::InProfile(place) => println!("  {} PATH configured in {place} (open a new shell)", "✓".green()),
+        ShellPath::LeftUnchanged(dir) => println!(
+            "  {} PATH left unchanged (see above): add {} to PATH yourself",
+            "⊘".yellow(),
+            dir.display()
+        ),
+    }
+    let events = super::claude_hook::hook_events();
+    match hooks {
+        Ok(()) => println!("  {} {} hooks registered ({})", "✓".green(), events.len(), events.join(", ")),
+        Err(_) => println!("  {} Claude Code hooks not registered (see above)", "⊘".yellow()),
+    }
+    let sub_skills = super::install_skill::sub_skill_count();
+    match skills {
+        Ok(()) => println!("  {} /gm skill + {sub_skills} sub-skills installed", "✓".green()),
+        Err(reason) => println!("  {} skills not fully installed: {reason}", "⊘".yellow()),
+    }
+}
+
 fn print_step(n: u8, total: u8, label: &str) {
     println!("  {} {}", format!("[{n}/{total}]").cyan().bold(), label);
 }
@@ -162,6 +216,7 @@ pub fn uninstall_mcp_client(client: &McpClient) -> Outcome {
     match &outcome {
         Outcome::Written => println!("    {} removed from {}", "✓".green(), mcp_clients::describe(client)),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+        Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
         Outcome::Unchanged | Outcome::NotInstalled => {}
     }
     outcome
@@ -178,6 +233,7 @@ fn print_install(client: &McpClient, outcome: &Outcome) {
         Outcome::Written => println!("    {} configured at {path}", "✓".green()),
         Outcome::NotInstalled => println!("    {} {} not installed, skipped", "⊘".yellow(), client.label()),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+        Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
     }
 }
 
@@ -193,6 +249,7 @@ fn print_mcp_summary(results: &[(&str, &Outcome)]) {
     let configured = names(Outcome::is_in_place);
     let skipped = names(|o| *o == Outcome::NotInstalled);
     let left_alone = names(|o| matches!(o, Outcome::LeftAlone(_)));
+    let kept = names(|o| matches!(o, Outcome::Kept(_)));
     if !configured.is_empty() {
         println!("  {} MCP server configured for {configured}", "✓".green());
     }
@@ -201,6 +258,9 @@ fn print_mcp_summary(results: &[(&str, &Outcome)]) {
     }
     if !left_alone.is_empty() {
         println!("  {} MCP config left unchanged for {left_alone} (see above)", "✗".red());
+    }
+    if !kept.is_empty() {
+        println!("  {} MCP entry left as you set it for {kept}", "→".cyan());
     }
 }
 
@@ -225,7 +285,7 @@ pub fn install_claude_code_entries() -> ClaudeCodeSync {
         );
     }
     for key in &sync.hand_made {
-        println!("    {} {}: left alone: hand-made graphmind entry", "⊘".yellow(), key.display());
+        println!("    {} {}: left as you set it (hand-made graphmind entry)", "→".cyan(), key.display());
     }
     for reason in &sync.left_alone {
         println!("    {} {reason}", "✗".red());
@@ -239,23 +299,25 @@ pub fn install_claude_code_entries() -> ClaudeCodeSync {
         Outcome::LeftAlone(reason) if sync.left_alone.is_empty() => println!("    {} {reason}", "✗".red()),
         Outcome::LeftAlone(reason) if !sync.left_alone.contains(reason) => println!("    {} {reason}", "⊘".yellow()),
         Outcome::LeftAlone(_) => {}
+        Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
         Outcome::Unchanged | Outcome::NotInstalled => {}
     }
     if sync.keys == 0 {
         println!("    {} no project registered: run {} in a project", "⊘".yellow(), "graphmind init".cyan());
-    } else if sync.written.is_empty() && sync.moved.is_empty() && sync.is_complete() && sync.user_scope == Outcome::Unchanged {
+    } else if sync.current > 0 && sync.written.is_empty() && sync.moved.is_empty() && sync.is_complete() && sync.user_scope == Outcome::Unchanged {
         let n = sync.current;
         println!("    {} {n} project entr{} up to date", "✓".green(), if n == 1 { "y" } else { "ies" });
     }
     sync
 }
 
-/// The Claude Code step as one outcome, for the summary. `None` when no project is registered:
-/// Claude Code has no graphmind entry then.
+/// The Claude Code step as one outcome, for the summary. `None` when no project is registered
+/// (Claude Code has no graphmind entry then) or every key holds a hand-made entry (the summary
+/// has its own line for those).
 fn claude_code_outcome(sync: &ClaudeCodeSync) -> Option<Outcome> {
     if !sync.is_complete() {
         Some(Outcome::LeftAlone(String::new()))
-    } else if sync.keys == 0 {
+    } else if sync.keys == sync.hand_made.len() {
         None
     } else if !sync.written.is_empty() || !sync.moved.is_empty() || sync.user_scope == Outcome::Written {
         Some(Outcome::Written)
@@ -266,13 +328,17 @@ fn claude_code_outcome(sync: &ClaudeCodeSync) -> Option<Outcome> {
 
 /// Repair ~/.claude/settings.json (see `claude_settings::repair_claude_settings`) and say what
 /// changed. Setup sets `remove_legacy_entry` only once the Claude Code entries are in place.
+/// `false` when settings.json was left unchanged; the reason is printed unless it is
+/// `already_reported` (the hook step printed the same one).
 #[doc(hidden)]
-pub fn repair_claude_settings(remove_legacy_entry: bool) {
+pub fn repair_claude_settings(remove_legacy_entry: bool, already_reported: Option<&str>) -> bool {
     let repair = match claude_settings::repair_claude_settings(remove_legacy_entry) {
         Ok(repair) => repair,
         Err(reason) => {
-            println!("    {} {reason}", "✗".red());
-            return;
+            if already_reported != Some(reason.as_str()) {
+                println!("    {} {reason}", "✗".red());
+            }
+            return false;
         }
     };
     if repair.legacy_entry_removed {
@@ -310,6 +376,7 @@ pub fn repair_claude_settings(remove_legacy_entry: bool) {
             );
         }
     }
+    true
 }
 
 /// VS Code entries of registered projects: an existing `.vscode/mcp.json` entry that isn't current
@@ -326,6 +393,7 @@ pub fn refresh_vscode_entries() {
         match mcp_clients::upsert(&client, &bin, &mut print_cli_fallback) {
             Outcome::Written => updated += 1,
             Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+            Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
             Outcome::Unchanged | Outcome::NotInstalled => {}
         }
     }
@@ -375,9 +443,10 @@ fn canonical_project_path(project_path: &str) -> PathBuf {
 }
 
 /// Remove graphmind from Claude Code (see `claude_code::uninstall_claude_code`), then graphmind's
-/// MCP entry and `env.PATH` segment in ~/.claude/settings.json.
+/// MCP entry and `env.PATH` segment in ~/.claude/settings.json. A settings.json reason equal to
+/// `already_reported` (the hook step printed it) isn't printed again.
 #[doc(hidden)]
-pub fn unregister_mcp_in_claude_code() {
+pub fn unregister_mcp_in_claude_code(already_reported: Option<&str>) {
     let path = McpClient::ClaudeCodeUser.config_path();
     let removal = claude_code::uninstall_claude_code(&mut print_cli_fallback);
     match removal.projects {
@@ -393,9 +462,10 @@ pub fn unregister_mcp_in_claude_code() {
     match removal.user_scope {
         Outcome::Written => println!("    {} removed the user-scope entry from {}", "✓".green(), path.display()),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+        Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
         Outcome::Unchanged | Outcome::NotInstalled => {}
     }
-    repair_claude_settings(true);
+    repair_claude_settings(true, already_reported);
 }
 
 /// The Claude Code entry of an unregistered project (see `claude_code::remove_claude_code_project`)
@@ -411,6 +481,7 @@ pub fn uninstall_claude_code_project(project: &Path) -> Outcome {
             McpClient::ClaudeCodeUser.config_path().display()
         ),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "⊘".yellow()),
+        Outcome::Kept(reason) => println!("    {} {reason}", "→".cyan()),
         Outcome::Unchanged | Outcome::NotInstalled => {}
     }
     outcome
@@ -427,7 +498,7 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     );
 
     print_step(1, 10, "Claude Code hooks");
-    super::claude_hook::uninstall_hook();
+    let hooks_result = super::claude_hook::uninstall_hook();
 
     print_step(2, 10, "Claude Code skills");
     let skills_result = super::install_skill::uninstall_skill();
@@ -436,7 +507,7 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     uninstall_mcp_client(&McpClient::ClaudeDesktop);
 
     print_step(4, 10, "Claude Code MCP server");
-    unregister_mcp_in_claude_code();
+    unregister_mcp_in_claude_code(hooks_result.as_ref().err().map(String::as_str));
 
     print_step(5, 10, "OpenCode MCP config");
     uninstall_mcp_client(&McpClient::OpenCode);
@@ -463,13 +534,18 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     graphmind_config::save_config(&config);
 
     println!("\n{}", "─".repeat(50).dimmed());
-    match &skills_result {
-        Ok(()) => println!("{} Integrations removed.\n", "✓".green().bold()),
-        Err(e) => println!(
-            "{} Integrations removed, except the Claude Code skills: {}\n",
-            "✗".red().bold(),
-            e
-        ),
+    let mut not_removed = Vec::new();
+    if hooks_result.is_err() {
+        // Its reason was printed in step 1.
+        not_removed.push("the Claude Code hooks (see above)".to_string());
+    }
+    if let Err(e) = &skills_result {
+        not_removed.push(format!("the Claude Code skills: {e}"));
+    }
+    if not_removed.is_empty() {
+        println!("{} Integrations removed.\n", "✓".green().bold());
+    } else {
+        println!("{} Integrations removed, except {}\n", "✗".red().bold(), not_removed.join("; "));
     }
     println!(
         "  Indexed graphs, memory, and config under {} are {}.",

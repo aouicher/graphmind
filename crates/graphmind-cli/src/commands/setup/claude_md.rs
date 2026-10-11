@@ -6,8 +6,9 @@ use super::{home_dir, Outcome};
 use colored::Colorize;
 use std::fs;
 
-/// Install or update the graphmind block in ~/.claude/CLAUDE.md. A block the person edited, or
-/// a CLAUDE.md that can't be read, is left as is; a backup is made only when the file changes.
+/// Install or update the graphmind block in ~/.claude/CLAUDE.md. A block the person edited is
+/// kept (`Outcome::Kept`); a CLAUDE.md that can't be read, backed up or written is left unchanged
+/// (`Outcome::LeftAlone`). A backup is made only when the file changes.
 #[doc(hidden)]
 pub fn install_claude_md_block() -> Outcome {
     let claude_md = home_dir().join(".claude").join("CLAUDE.md");
@@ -30,10 +31,9 @@ pub fn install_claude_md_block() -> Outcome {
             .map(|i| i + "<!-- GM:END -->".len())
             .unwrap_or(content.len());
         if gm_block_edited(&content[start..end]) {
-            return left_alone(
-                "graphmind block in CLAUDE.md was edited; left as is (delete the block to get the current one)"
-                    .to_string(),
-            );
+            let reason = "graphmind block in CLAUDE.md was edited; left as you set it (delete the block to get the current one)";
+            println!("    {} {reason}", "→".cyan());
+            return Outcome::Kept(reason.to_string());
         }
         format!("{}{}{}", &content[..start], block, &content[end..])
     } else if let Some(omc_start) = content.find("<!-- OMC:START -->") {
@@ -49,10 +49,8 @@ pub fn install_claude_md_block() -> Outcome {
         return Outcome::Unchanged;
     }
     if claude_md.exists() {
-        let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup = claude_md.with_extension(format!("md.{ts}.bak"));
-        if let Err(e) = fs::write(&backup, &content) {
-            return left_alone(format!("can't back up {} ({e}); left unchanged", claude_md.display()));
+        if let Err(reason) = graphmind_config::back_up(&claude_md) {
+            return left_alone(reason);
         }
     } else if let Some(parent) = claude_md.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
@@ -80,10 +78,10 @@ pub fn uninstall_claude_md_block() {
         return;
     };
 
-    // Backup before modifying (timestamped)
-    let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup = claude_md.with_extension(format!("md.{ts}.bak"));
-    fs::write(&backup, &content).ok();
+    if let Err(reason) = graphmind_config::back_up(&claude_md) {
+        println!("    {} {reason}", "⊘".yellow());
+        return;
+    }
 
     let end = content.find("<!-- GM:END -->")
         .map(|i| i + "<!-- GM:END -->".len())
