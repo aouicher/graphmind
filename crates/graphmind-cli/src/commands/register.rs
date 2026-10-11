@@ -56,6 +56,7 @@ pub fn unregister(slug: Option<&str>) {
 }
 
 pub fn list() {
+    forget_gone_worktrees();
     let projects = Registry::list();
     if projects.is_empty() {
         println!("{}", "No projects registered. Use 'graphmind register' to add one.".dimmed());
@@ -160,5 +161,14 @@ pub fn status(slug: Option<&str>) {
         }
     } else {
         println!("  {}: {}", "Graph".bold(), "not built yet".yellow());
+    }
+}
+
+/// Forgets the worktrees removed since they were registered, saying so, so that listing and
+/// building every project don't trip over them.
+pub fn forget_gone_worktrees() {
+    let gone = Registry::forget_gone_worktrees();
+    if !gone.is_empty() {
+        eprintln!("{} removed worktree(s) forgotten: {}", "→".cyan(), gone.join(", "));
     }
 }

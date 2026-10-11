@@ -10,6 +10,7 @@ use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub fn list_projects(state: State<Mutex<AppState>>) -> Vec<ProjectInfo> {
+    Registry::forget_gone_worktrees();
     let app_state = state.lock().unwrap();
     let projects = Registry::list();
 

@@ -391,6 +391,20 @@ fn mutate_config<R>(f: impl FnOnce(&mut GlobalConfig) -> (R, bool)) -> Option<R>
     })
 }
 
+/// A worktree graphmind registered automatically (it has a primary) whose directory is gone.
+fn is_gone_worktree(project: &ProjectConfig) -> bool {
+    project.primary.is_some() && !Path::new(&project.path).exists()
+}
+
+/// Removes the gone worktrees from `config` and returns their slugs.
+fn remove_gone_worktrees(config: &mut GlobalConfig) -> Vec<String> {
+    let gone: Vec<String> = config.projects.values().filter(|p| is_gone_worktree(p)).map(|p| p.slug.clone()).collect();
+    for slug in &gone {
+        config.projects.remove(slug);
+    }
+    gone
+}
+
 /// `base`, unless a project at another path already uses it: then `base-<hash of
 /// the path>`. Worktrees are often named alike (`~/a/app`, `~/b/app`), and reusing
 /// the slug would silently re-point the existing project at the new path.
@@ -550,15 +564,7 @@ impl Registry {
             // other order): if it is taken, there is no seed, just a full build.
             let lock = crate::seed::try_lock_build(&slug);
 
-            let gone: Vec<String> = config
-                .projects
-                .values()
-                .filter(|p| p.primary.is_some() && !Path::new(&p.path).exists())
-                .map(|p| p.slug.clone())
-                .collect();
-            for slug in &gone {
-                config.projects.remove(slug);
-            }
+            let gone = remove_gone_worktrees(config);
             ((Some((project, sibling.slug, lock)), gone), true)
         })?;
 
@@ -606,6 +612,26 @@ impl Registry {
     pub fn get(slug: &str) -> Option<ProjectConfig> {
         let config = load_config();
         config.projects.get(slug).cloned()
+    }
+
+    /// Forgets the worktrees graphmind registered automatically whose directory is gone and
+    /// removes their graphs: their memory lives with the primary, so nothing is lost. Returns
+    /// their slugs. Projects registered by hand stay (`graphmind clean --stale` prunes those).
+    pub fn forget_gone_worktrees() -> Vec<String> {
+        // Lock-free early exit for the common case: nothing to forget.
+        if !load_config().projects.values().any(is_gone_worktree) {
+            return Vec::new();
+        }
+        let gone = mutate_config(|config| {
+            let gone = remove_gone_worktrees(config);
+            let changed = !gone.is_empty();
+            (gone, changed)
+        })
+        .unwrap_or_default();
+        for slug in &gone {
+            fs::remove_dir_all(paths::graph_dir(slug)).ok();
+        }
+        gone
     }
 
     /// Registered projects, sorted by slug (stable output for list and cross-project search).

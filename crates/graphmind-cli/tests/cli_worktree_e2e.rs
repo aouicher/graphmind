@@ -307,6 +307,55 @@ fn linking_forgets_auto_linked_worktrees_that_are_gone() {
     assert!(!env.home.path().join(".graphmind/graphs/wt2").exists());
 }
 
+/// A worktree removed with `git worktree remove` is forgotten by the next `graphmind list`,
+/// without waiting for another worktree of the repo to be registered.
+#[test]
+fn list_forgets_a_removed_worktree() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok_in(&wt2, &["status"]);
+    assert!(env.run_ok(&["list"]).contains("wt2"));
+
+    git(&repo, &["worktree", "remove", wt2.to_str().unwrap(), "--force"]);
+
+    let list = env.run_ok(&["list"]);
+    assert!(list.contains("main-wt") && !list.contains("wt2"), "got: {list}");
+    assert!(!env.home.path().join(".graphmind/graphs/wt2").exists());
+}
+
+/// `build --all` forgets a removed worktree instead of failing on its missing folder.
+#[test]
+fn build_all_succeeds_after_a_worktree_is_removed() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok_in(&wt2, &["status"]);
+    git(&repo, &["worktree", "remove", wt2.to_str().unwrap(), "--force"]);
+
+    let out = env.run(&["build", "--all"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert!(stderr.contains("removed worktree(s) forgotten: wt2"), "{stderr}");
+    assert!(!env.run_ok(&["list"]).contains("wt2"));
+}
+
+/// A project registered by hand stays listed when its folder is gone: only worktrees graphmind
+/// registered itself are forgotten on their own; `clean --stale` handles the rest.
+#[test]
+fn list_keeps_a_missing_project_registered_by_hand() {
+    let env = CliTestEnv::new();
+    let gone = env.home.path().join("gone-project");
+    std::fs::create_dir_all(&gone).unwrap();
+    std::fs::write(gone.join("lib.rs"), "pub fn f() {}\n").unwrap();
+    env.run_ok(&["register", gone.to_str().unwrap(), "--slug", "by-hand"]);
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    assert!(env.run_ok(&["list"]).contains("by-hand"));
+    env.run_ok(&["clean", "--stale"]);
+    assert!(!env.run_ok(&["list"]).contains("by-hand"));
+}
+
 #[test]
 fn unrelated_git_repo_does_not_borrow_the_only_project() {
     let env = CliTestEnv::new();

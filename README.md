@@ -303,8 +303,10 @@ conventions, bugs) is shared by all of them: it is repo-wide knowledge.
   which is where Claude Code reads it in every worktree. `graphmind init` in
   a worktree writes or confirms the main checkout's entry, and a worktree
   never gets an entry of its own.
-- **Cleanup**: worktrees that were registered automatically are forgotten
-  once their directory is gone. `graphmind clean --stale` prunes the rest.
+- **Cleanup**: a worktree registered automatically is forgotten, with its
+  graph, once its directory is gone: by the next `graphmind list`,
+  `graphmind build --all` or worktree registration. Projects registered by
+  hand stay until `graphmind clean --stale`.
 
 ### Agents switching worktrees mid-session
 

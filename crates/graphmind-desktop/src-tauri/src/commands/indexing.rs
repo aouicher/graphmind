@@ -236,6 +236,7 @@ pub async fn build_project_uncancelled(slug: String, full: bool, app: AppHandle)
 
 #[tauri::command]
 pub async fn build_all_projects(full: bool, app: AppHandle, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    Registry::forget_gone_worktrees();
     let projects = Registry::list();
     if projects.is_empty() {
         return Err("No projects registered".to_string());

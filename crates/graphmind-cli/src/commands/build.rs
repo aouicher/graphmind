@@ -49,6 +49,7 @@ pub fn build(slug: Option<&str>, all: bool, full: bool, reset: bool, watch: bool
     }
 
     if all {
+        super::register::forget_gone_worktrees();
         let projects = Registry::list();
         if projects.is_empty() {
             eprintln!("{} No projects registered", "Error:".red().bold());
@@ -471,6 +472,7 @@ pub fn embed_only(slug: Option<&str>, all: bool) {
     }
 
     if all {
+        super::register::forget_gone_worktrees();
         let projects = Registry::list();
         if projects.is_empty() {
             eprintln!("{} No projects registered", "Error:".red().bold());
