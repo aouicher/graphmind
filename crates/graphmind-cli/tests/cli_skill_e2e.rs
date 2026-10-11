@@ -160,3 +160,101 @@ fn positional_slug_and_slug_flag_together_are_rejected() {
         assert!(stderr.contains("cannot be used with"), "{command}: {stderr}");
     }
 }
+
+/// The desktop app's skill toggle runs `graphmind uninstall skill`: it removes graphmind's own
+/// skills and leaves every other skill alone.
+#[test]
+fn uninstall_skill_removes_the_installed_skills_and_keeps_others() {
+    let env = CliTestEnv::new();
+    let skills = env.home.path().join(".claude").join("skills");
+    let other = skills.join("some-other-skill");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("SKILL.md"), "unrelated").unwrap();
+
+    env.run_ok(&["install", "skill"]);
+    assert!(skills.join("graphmind").join("SKILL.md").exists());
+    assert!(skills.join("gm-fn").join("SKILL.md").exists());
+
+    let out = env.run_ok(&["uninstall", "skill"]);
+    assert!(out.contains("removed 20 skill dir(s)"), "{out}");
+    assert!(!skills.join("graphmind").exists(), "the /gm skill should be removed");
+    assert!(!skills.join("gm-fn").exists(), "sub-skills should be removed");
+    assert_eq!(fs::read_to_string(other.join("SKILL.md")).unwrap(), "unrelated");
+}
+
+/// The toggle can run twice: with nothing installed the command says so and exits 0.
+#[test]
+fn uninstall_skill_with_nothing_installed_succeeds() {
+    let env = CliTestEnv::new();
+    let out = env.run_ok(&["uninstall", "skill"]);
+    assert!(out.contains("no graphmind skills installed"), "{out}");
+}
+
+/// Make `dir` unremovable by putting a file in a read-only subdirectory; restores permissions
+/// on drop so the temp HOME can be cleaned up. `None` (with a visible message) when permissions
+/// aren't enforced, e.g. when running as root.
+#[cfg(unix)]
+struct Locked(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Locked {
+    fn new(dir: &std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let locked = dir.join("locked");
+        fs::create_dir_all(&locked).unwrap();
+        fs::write(locked.join("file"), "x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        let guard = Locked(locked.clone());
+        if fs::write(locked.join("probe"), "x").is_ok() {
+            eprintln!("SKIPPED: file permissions are not enforced here (running as root?)");
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Locked {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755)).ok();
+    }
+}
+
+/// A skill dir that can't be removed is named on stderr, left out of the count, and makes the
+/// command fail; the others are still removed.
+#[cfg(unix)]
+#[test]
+fn uninstall_skill_reports_a_dir_it_cannot_remove() {
+    let env = CliTestEnv::new();
+    let skills = env.home.path().join(".claude").join("skills");
+    env.run_ok(&["install", "skill"]);
+    let Some(_locked) = Locked::new(&skills.join("gm-fn")) else { return };
+
+    let out = env.run(&["uninstall", "skill"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stdout}\n{stderr}");
+    assert!(stderr.contains(&skills.join("gm-fn").display().to_string()), "{stderr}");
+    assert!(stderr.contains("failed to remove 1 skill dir(s)"), "{stderr}");
+    assert!(stdout.contains("removed 19 skill dir(s)"), "{stdout}");
+    assert!(!skills.join("graphmind").exists());
+    assert!(!skills.join("gm-search").exists());
+}
+
+/// `uninstall all` doesn't claim the skills were removed when one couldn't be.
+#[cfg(unix)]
+#[test]
+fn uninstall_all_reports_a_skill_dir_it_cannot_remove() {
+    let env = CliTestEnv::new();
+    let skills = env.home.path().join(".claude").join("skills");
+    env.run_ok(&["install", "skill"]);
+    let Some(_locked) = Locked::new(&skills.join("gm-fn")) else { return };
+
+    let out = env.run(&["uninstall", "all"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains(&skills.join("gm-fn").display().to_string()), "{stderr}");
+    assert!(stdout.contains("Integrations removed, except the Claude Code skills"), "{stdout}");
+    assert!(!stdout.contains("Integrations removed.\n"), "{stdout}");
+}

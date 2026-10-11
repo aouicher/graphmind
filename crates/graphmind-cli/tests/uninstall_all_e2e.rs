@@ -443,7 +443,7 @@ fn uninstall_skill_preserves_unrelated_skill_dir() {
             assert!(skills_base.join(name).exists(), "{name} should exist before uninstall");
         }
 
-        uninstall_skill();
+        uninstall_skill().unwrap();
 
         assert!(!skills_base.join("graphmind").exists(), "graphmind skill dir should be removed");
         for name in &sub_skill_names {

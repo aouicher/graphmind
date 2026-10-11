@@ -227,7 +227,7 @@ enum Commands {
         #[command(subcommand)]
         action: InstallAction,
     },
-    /// Uninstall components (hooks)
+    /// Uninstall components (hooks, skill)
     Uninstall {
         #[command(subcommand)]
         action: UninstallAction,
@@ -478,6 +478,8 @@ enum UninstallAction {
     HookGit {
         slug: Option<String>,
     },
+    /// Remove the Claude Code skills (/gm and its sub-skills); other skills are left alone
+    Skill,
     /// Remove all graphmind integrations (reverses setup + init)
     All {
         #[arg(long)]
@@ -702,6 +704,12 @@ fn main() {
             }
             UninstallAction::HookGit { slug } => {
                 commands::hooks::uninstall(slug.as_deref());
+            }
+            UninstallAction::Skill => {
+                if let Err(e) = commands::install_skill::uninstall_skill() {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
             }
             UninstallAction::All { purge, yes } => {
                 commands::setup::uninstall_all(purge, yes);

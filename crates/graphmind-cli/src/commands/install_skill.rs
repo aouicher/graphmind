@@ -186,33 +186,53 @@ pub fn install_skill() {
 /// Remove the /gm skill and all sub-skills installed by `install_skill()`.
 /// Only touches `~/.claude/skills/graphmind` and the exact sub-skill dirs
 /// from `SUB_SKILLS` — leaves any other directory under `~/.claude/skills/` untouched.
-pub fn uninstall_skill() {
+///
+/// Counts only the directories actually removed. A directory that can't be removed is reported
+/// on stderr with its path and the reason, and makes the call return `Err` (a directory that
+/// doesn't exist is not a failure).
+pub fn uninstall_skill() -> Result<(), String> {
     let skills_base = home_dir()
         .join(".claude")
         .join("skills");
 
+    let dirs = std::iter::once("graphmind").chain(SUB_SKILLS.iter().map(|(name, _)| *name));
     let mut removed = 0;
-
-    let skill_dir = skills_base.join("graphmind");
-    if skill_dir.exists() {
-        fs::remove_dir_all(&skill_dir).ok();
-        removed += 1;
-    }
-
-    for (name, _) in SUB_SKILLS {
+    let mut failed = 0;
+    for name in dirs {
         let dir = skills_base.join(name);
-        if dir.exists() {
-            fs::remove_dir_all(&dir).ok();
-            removed += 1;
+        if !dir.exists() {
+            continue;
+        }
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                failed += 1;
+                eprintln!("    {} could not remove {}: {}", "✗".red(), dir.display(), e);
+            }
         }
     }
 
-    println!(
-        "    {} removed {} skill dir(s) ({})",
-        "✓".green().bold(),
-        removed,
-        skills_base.display()
-    );
+    if removed > 0 {
+        println!(
+            "    {} removed {} skill dir(s) ({})",
+            "✓".green().bold(),
+            removed,
+            skills_base.display()
+        );
+    } else if failed == 0 {
+        println!(
+            "    {} no graphmind skills installed ({})",
+            "✓".green().bold(),
+            skills_base.display()
+        );
+    }
+
+    if failed > 0 {
+        Err(format!("failed to remove {failed} skill dir(s) under {}", skills_base.display()))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

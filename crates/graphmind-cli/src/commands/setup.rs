@@ -430,7 +430,7 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     super::claude_hook::uninstall_hook();
 
     print_step(2, 10, "Claude Code skills");
-    super::install_skill::uninstall_skill();
+    let skills_result = super::install_skill::uninstall_skill();
 
     print_step(3, 10, "Claude Desktop MCP config");
     uninstall_mcp_client(&McpClient::ClaudeDesktop);
@@ -463,7 +463,14 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     graphmind_config::save_config(&config);
 
     println!("\n{}", "─".repeat(50).dimmed());
-    println!("{} Integrations removed.\n", "✓".green().bold());
+    match &skills_result {
+        Ok(()) => println!("{} Integrations removed.\n", "✓".green().bold()),
+        Err(e) => println!(
+            "{} Integrations removed, except the Claude Code skills: {}\n",
+            "✗".red().bold(),
+            e
+        ),
+    }
     println!(
         "  Indexed graphs, memory, and config under {} are {}.",
         graphmind_config::paths::graphmind_dir().display(),
