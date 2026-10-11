@@ -1,5 +1,6 @@
 pub mod atomic;
 pub mod breaking;
+pub mod claude_code;
 pub mod claude_settings;
 pub mod config;
 pub mod git_identity;

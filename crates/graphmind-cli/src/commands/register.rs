@@ -1,6 +1,7 @@
 use chrono::{DateTime, Local};
 use colored::Colorize;
-use graphmind_config::{paths, Registry, resolve_project_slug};
+use graphmind_config::{paths, ProjectConfig, Registry, resolve_project_slug};
+use std::path::Path;
 
 fn fmt_local(utc: &str) -> String {
     DateTime::parse_from_rfc3339(utc)
@@ -8,7 +9,15 @@ fn fmt_local(utc: &str) -> String {
         .unwrap_or_else(|_| utc.to_string())
 }
 
+/// `graphmind register`: the project, and its Claude Code MCP entry, as `graphmind init` writes it.
+/// A .claude.json that can't be updated is reported and the registration stands.
 pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) {
+    let project = add(path, slug, exclude);
+    super::setup::install_claude_code_project(Path::new(&project.path));
+}
+
+/// Register the project and say so. `graphmind init` writes the MCP entries in a step of its own.
+pub fn add(path: &str, slug: Option<&str>, exclude: &[String]) -> ProjectConfig {
     let project = Registry::register(path, slug, exclude);
     println!(
         "{} Registered project {} at {}",
@@ -16,6 +25,7 @@ pub fn register(path: &str, slug: Option<&str>, exclude: &[String]) {
         project.slug.cyan(),
         project.path.dimmed()
     );
+    project
 }
 
 pub fn unregister(slug: Option<&str>) {
@@ -27,6 +37,7 @@ pub fn unregister(slug: Option<&str>) {
         }
     };
 
+    let project_path = Registry::get(&slug).map(|p| p.path);
     if Registry::unregister(&slug) {
         // Remove graph directory
         let graph_dir = paths::graph_dir(&slug);
@@ -34,6 +45,9 @@ pub fn unregister(slug: Option<&str>) {
             std::fs::remove_dir_all(&graph_dir).ok();
         }
         println!("{} Unregistered project {}", "OK".green().bold(), slug.cyan());
+        if let Some(project_path) = project_path {
+            super::setup::uninstall_claude_code_project(Path::new(&project_path));
+        }
     } else {
         eprintln!("{} Project {} not found", "Error:".red().bold(), slug);
         std::process::exit(1);

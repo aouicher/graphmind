@@ -46,8 +46,8 @@ pub enum PathRepair {
 
 /// Repair ~/.claude/settings.json: remove the `env.PATH` pollution of graphmind <= v0.2.211 and,
 /// when `remove_legacy_entry` is set, the `mcpServers.graphmind` entry older versions wrote there
-/// (Claude Code reads user-scope servers from ~/.claude.json). Callers set it only once the
-/// user-scope entry is in place, or on uninstall, so Claude Code is never left without one.
+/// (Claude Code reads MCP servers from .claude.json, not settings.json). Setup sets it once the
+/// Claude Code entries in .claude.json are in place; uninstall always does.
 ///
 /// A missing file needs nothing. A file that can't be read or parsed, or can't be written, is
 /// left alone and the reason returned.

@@ -12,9 +12,8 @@ use graphmind_cli::commands::claude_hook::{install_hook, uninstall_hook};
 use graphmind_cli::commands::install_skill::{install_skill, uninstall_skill};
 use graphmind_cli::commands::setup::{
     ensure_project_mcp_configs, home_dir, install_claude_md_block, install_mcp_client,
-    repair_claude_settings, uninstall_claude_md_block, uninstall_mcp_client,
-    uninstall_project_mcp_configs, uninstall_shell_path, unregister_mcp_in_claude_code, McpClient,
-    Outcome,
+    uninstall_claude_code_project, uninstall_claude_md_block, uninstall_mcp_client,
+    uninstall_shell_path, unregister_mcp_in_claude_code, McpClient, Outcome,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -127,29 +126,30 @@ fn unregister_mcp_in_claude_code_preserves_unrelated() {
             "env": {"PATH": format!("{bin_dir}:/usr/bin")},
             "someUnrelatedKey": "keep-me"
         })).unwrap()).unwrap();
-        fs::write(home.join(".claude.json"), r#"{"projects": {}, "numStartups": 7}"#).unwrap();
-
-        // Setup's Claude Code step.
-        let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
-        repair_claude_settings(outcome.is_in_place());
-
-        // Moved: gone from settings.json, present at user scope in ~/.claude.json.
-        let json: Value = serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
-        assert!(json["mcpServers"]["graphmind"].is_null(), "settings.json entry removed: {json}");
-        assert!(json["mcpServers"]["some-other-server"].is_object(), "{json}");
-        assert_eq!(json["someUnrelatedKey"].as_str(), Some("keep-me"));
-        assert!(!json["env"]["PATH"].as_str().unwrap_or("").contains(&bin_dir), "{json}");
-        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-        assert!(user["mcpServers"]["graphmind"]["command"].is_string(), "{user}");
-        assert_eq!(user["numStartups"], 7, "rest of ~/.claude.json kept");
+        // A user-scope entry and a project entry, next to servers that aren't graphmind's.
+        fs::write(
+            home.join(".claude.json"),
+            json!({
+                "numStartups": 7,
+                "mcpServers": { "graphmind": { "command": "/old/graphmind", "args": ["mcp"] }, "mine": { "command": "mine" } },
+                "projects": { "/repo/a": { "mcpServers": { "graphmind": { "command": "/old/graphmind" }, "mine": { "command": "mine" } } } }
+            })
+            .to_string(),
+        )
+        .unwrap();
 
         unregister_mcp_in_claude_code();
 
         let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
         assert!(user["mcpServers"]["graphmind"].is_null(), "{user}");
+        assert!(user["projects"]["/repo/a"]["mcpServers"]["graphmind"].is_null(), "{user}");
+        assert_eq!(user["mcpServers"]["mine"]["command"], "mine");
+        assert_eq!(user["projects"]["/repo/a"]["mcpServers"]["mine"]["command"], "mine");
         assert_eq!(user["numStartups"], 7);
         let json: Value = serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert!(json["mcpServers"]["graphmind"].is_null(), "settings.json entry removed: {json}");
         assert!(json["mcpServers"]["some-other-server"].is_object());
+        assert!(!json["env"]["PATH"].as_str().unwrap_or("").contains(&bin_dir), "{json}");
         assert_eq!(json["someUnrelatedKey"].as_str(), Some("keep-me"));
     });
 }
@@ -478,7 +478,7 @@ fn uninstall_project_mcp_configs_preserves_unrelated_project_and_server() {
             .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
         let abs_str = abs_path.to_string_lossy().to_string();
 
-        // The project-scope entry older versions wrote, next to an unrelated project.
+        // The project's entry, next to an unrelated project.
         let claude_json_path = home.join(".claude.json");
         let json = json!({
             "projects": {
@@ -495,7 +495,9 @@ fn uninstall_project_mcp_configs_preserves_unrelated_project_and_server() {
         json["servers"]["sibling"] = json!({"command": "sibling-cmd"});
         fs::write(&vscode_mcp, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
-        uninstall_project_mcp_configs(project_path);
+        // What `graphmind unregister` and `graphmind uninstall all` remove for one project.
+        uninstall_claude_code_project(&abs_path);
+        uninstall_mcp_client(&McpClient::VsCode(abs_path.clone()));
 
         // ~/.claude.json: graphmind gone for our project, unrelated project entry survives,
         // and the project entry itself must still exist (not deleted).

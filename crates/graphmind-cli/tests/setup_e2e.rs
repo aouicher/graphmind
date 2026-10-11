@@ -9,40 +9,21 @@
 ///   cargo test -p graphmind-cli --test setup_e2e -- --test-threads=1
 use common::{backups_of, with_home};
 use graphmind_cli::commands::setup::{
-    already_on_path, ensure_project_mcp_configs, home_dir, install_mcp_client,
-    install_shell_path_for, migrate_project_mcp_entries, repair_claude_settings, setup, McpClient,
-    Outcome,
+    already_on_path, ensure_project_mcp_configs, home_dir, install_claude_code_entries,
+    install_mcp_client, install_shell_path_for, repair_claude_settings, McpClient, Outcome,
 };
 use serde_json::{json, Value};
 use std::fs;
 
 mod common;
 
-/// Setup's Claude Code step: register at user scope, then repair settings.json.
-fn claude_code_step() -> Outcome {
-    let outcome = install_mcp_client(&McpClient::ClaudeCodeUser);
-    repair_claude_settings(outcome.is_in_place());
-    outcome
+/// Setup's Claude Code step: the per-project entries, then the settings.json repair. Returns
+/// whether the entries are in place.
+fn claude_code_step() -> bool {
+    let complete = install_claude_code_entries().is_complete();
+    repair_claude_settings(complete);
+    complete
 }
-
-/// A fake `claude` CLI in `<home>/bin`: logs its arguments to `<home>/claude-calls.log`, then runs
-/// `script_body`.
-#[cfg(unix)]
-fn fake_claude(home: &std::path::Path, script_body: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    let bin = home.join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    let script = bin.join("claude");
-    fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> \"$HOME/claude-calls.log\"\n{script_body}\n")).unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-/// Writes ~/.claude.json the way `claude mcp add -s user` does (with an empty `env`).
-#[cfg(unix)]
-const FAKE_CLAUDE_OK: &str = r#"case "$2" in
-  add) printf '{"mcpServers":{"graphmind":{"type":"stdio","command":"%s","args":["mcp"],"env":{}}}}' "$7" > "$HOME/.claude.json" ;;
-  remove) printf '{"mcpServers":{}}' > "$HOME/.claude.json" ;;
-esac"#;
 
 // ---------------------------------------------------------------------------
 // 1. Shell PATH
@@ -185,32 +166,7 @@ fn setup_claude_desktop_mcp_rewrites_stale_entry() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Claude Code MCP — user scope in ~/.claude.json
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_claude_code_mcp_written() {
-    with_home(|home| {
-        let claude_dir = home.join(".claude");
-        fs::create_dir_all(&claude_dir).unwrap();
-
-        assert_eq!(claude_code_step(), Outcome::Written);
-
-        // User scope, where `claude mcp add -s user` puts servers.
-        let content = fs::read_to_string(home.join(".claude.json")).unwrap();
-        let json: Value = serde_json::from_str(&content).expect("valid JSON");
-        let entry = &json["mcpServers"]["graphmind"];
-        assert_eq!(entry["type"], "stdio");
-        // Issue #105: the MCP entry must not pin PATH.
-        assert!(entry["env"].is_null(), "MCP entry must carry no env block, got: {entry}");
-
-        // Nothing to change in settings.json: it isn't created, so it gets no env.PATH.
-        assert!(!claude_dir.join("settings.json").exists());
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 4b. Issue #105 — a legacy env.PATH is repaired in place, the old entry moves to user scope
+// 4. Issue #105 — a legacy env.PATH is repaired in place, the old settings.json entry removed
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -257,17 +213,15 @@ fn setup_repairs_legacy_env_path() {
             "user-added nvm path must be preserved, got: {global_path}"
         );
 
-        // The stale settings.json entry is gone; the user-scope one has no env and the real binary.
+        // The settings.json entry (which Claude Code doesn't read) is gone, and no user-scope entry
+        // replaces it: Claude Code reads graphmind per project.
         assert!(json["mcpServers"].is_null(), "emptied mcpServers removed, got: {json}");
-        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-        let entry = &user["mcpServers"]["graphmind"];
-        assert!(entry["env"].is_null(), "no env block, got: {entry}");
-        assert_ne!(entry["command"].as_str(), Some("/stale/path/graphmind"));
+        assert!(!home.join(".claude.json").exists(), "nothing written to ~/.claude.json");
     });
 }
 
 // ---------------------------------------------------------------------------
-// 4c. Issue #105 — repair drops env.PATH entirely when only the old default remains
+// 4b. Issue #105 — repair drops env.PATH entirely when only the old default remains
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -303,50 +257,11 @@ fn setup_removes_env_path_when_only_legacy_default_remains() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Claude Code MCP — idempotent
+// 5. Claude Code MCP — the settings.json entry stays while the entries can't be brought up to date
 // ---------------------------------------------------------------------------
 
 #[test]
-fn setup_claude_code_mcp_idempotent() {
-    with_home(|home| {
-        fs::create_dir_all(home.join(".claude")).unwrap();
-
-        assert_eq!(claude_code_step(), Outcome::Written);
-        let first = fs::read_to_string(home.join(".claude.json")).unwrap();
-        assert_eq!(claude_code_step(), Outcome::Unchanged);
-        let second = fs::read_to_string(home.join(".claude.json")).unwrap();
-
-        assert_eq!(first, second, "a second run must not rewrite ~/.claude.json");
-        assert_eq!(backups_of(&home.join(".claude.json")), 0);
-        let json: Value = serde_json::from_str(&second).expect("valid JSON");
-        assert!(json["mcpServers"]["graphmind"].is_object());
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 5b. Claude Code MCP — settings repair and registration are independent
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_registers_user_scope_even_if_settings_json_is_broken() {
-    with_home(|home| {
-        let settings = home.join(".claude").join("settings.json");
-        fs::create_dir_all(settings.parent().unwrap()).unwrap();
-        let broken = "{\n  \"mcpServers\": {\"graphmind\": {\"command\": \"/old\"}},\n}\n"; // trailing comma
-        fs::write(&settings, broken).unwrap();
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 7}"#).unwrap();
-
-        assert_eq!(claude_code_step(), Outcome::Written);
-
-        assert_eq!(fs::read_to_string(&settings).unwrap(), broken, "unparseable settings.json untouched");
-        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-        assert!(user["mcpServers"]["graphmind"]["command"].is_string(), "{user}");
-        assert_eq!(user["numStartups"], 7, "rest of ~/.claude.json kept");
-    });
-}
-
-#[test]
-fn setup_keeps_legacy_entries_when_user_scope_registration_fails() {
+fn setup_keeps_legacy_entries_when_claude_json_is_unparseable() {
     with_home(|home| {
         let settings = home.join(".claude").join("settings.json");
         fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -356,104 +271,11 @@ fn setup_keeps_legacy_entries_when_user_scope_registration_fails() {
         let half_written = r#"{"projects": {"/p": {"mcpServers": {"graphmind": {"command": "/old/graphmind"}}}"#;
         fs::write(&claude_json, half_written).unwrap();
 
-        let outcome = claude_code_step();
-        migrate_project_mcp_entries(outcome.is_in_place());
+        assert!(!claude_code_step());
 
-        assert!(matches!(outcome, Outcome::LeftAlone(_)), "{outcome:?}");
         assert_eq!(fs::read_to_string(&claude_json).unwrap(), half_written, "~/.claude.json untouched");
         let json: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        assert_eq!(json, legacy, "the only working entry stays until its replacement is in place");
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 5c. Claude Code MCP — stale project-scope entries removed once user scope is in place
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_migrates_project_scope_entries_to_user_scope() {
-    with_home(|home| {
-        let claude_json = home.join(".claude.json");
-        fs::write(
-            &claude_json,
-            serde_json::to_string_pretty(&json!({
-                "numStartups": 3,
-                "projects": {
-                    "/repo/a": {
-                        "allowedTools": [],
-                        "mcpServers": {
-                            "graphmind": { "type": "stdio", "command": "/old/graphmind", "args": ["mcp"] },
-                            "other": { "command": "other" }
-                        }
-                    },
-                    "/repo/b": { "mcpServers": { "graphmind": { "command": "/old/graphmind", "env": { "PATH": "/usr/bin" } } } },
-                    "/repo/c": { "mcpServers": {} }
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        // Not yet confirmed: nothing is removed.
-        migrate_project_mcp_entries(false);
-        let json: Value = serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
-        assert!(json["projects"]["/repo/a"]["mcpServers"]["graphmind"].is_object());
-
-        let outcome = claude_code_step();
-        assert_eq!(outcome, Outcome::Written);
-        migrate_project_mcp_entries(outcome.is_in_place());
-
-        let json: Value = serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
-        assert!(json["projects"]["/repo/a"]["mcpServers"]["graphmind"].is_null(), "{json}");
-        assert!(json["projects"]["/repo/b"]["mcpServers"]["graphmind"].is_null(), "{json}");
-        assert_eq!(json["projects"]["/repo/a"]["mcpServers"]["other"]["command"], "other");
-        assert!(json["projects"]["/repo/a"]["allowedTools"].is_array());
-        assert_eq!(json["numStartups"], 3);
-        assert!(json["mcpServers"]["graphmind"]["command"].is_string(), "user-scope entry in place");
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 5d. Claude Code MCP — the `claude` CLI does the write when it is on PATH
-// ---------------------------------------------------------------------------
-
-#[cfg(unix)]
-#[test]
-fn setup_registers_through_claude_cli_when_available() {
-    with_home(|home| {
-        fake_claude(home, FAKE_CLAUDE_OK);
-        // A stale entry: the CLI refuses to add over it, so it is removed first.
-        fs::write(home.join(".claude.json"), r#"{"mcpServers": {"graphmind": {"command": "/old/graphmind"}}}"#).unwrap();
-
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Written);
-
-        let log = fs::read_to_string(home.join("claude-calls.log")).unwrap();
-        let bin = home.join(".graphmind/bin/graphmind");
-        assert_eq!(
-            log,
-            format!("mcp remove -s user graphmind\nmcp add -s user graphmind -- {} mcp\n", bin.display())
-        );
-        assert_eq!(backups_of(&home.join(".claude.json")), 0, "the CLI wrote the file, not graphmind");
-
-        // What the CLI wrote (with an empty `env`) counts as current: no second call.
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Unchanged);
-        assert_eq!(fs::read_to_string(home.join("claude-calls.log")).unwrap(), log);
-    });
-}
-
-#[cfg(unix)]
-#[test]
-fn setup_falls_back_to_direct_write_when_claude_cli_fails() {
-    with_home(|home| {
-        fake_claude(home, "echo 'config locked' >&2\nexit 1");
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 7}"#).unwrap();
-
-        assert_eq!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::Written);
-
-        assert!(fs::read_to_string(home.join("claude-calls.log")).unwrap().starts_with("mcp add"));
-        let user: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-        assert!(user["mcpServers"]["graphmind"]["command"].is_string(), "{user}");
-        assert_eq!(user["numStartups"], 7);
+        assert_eq!(json, legacy, "kept while the Claude Code entries are not in place");
     });
 }
 
@@ -601,8 +423,9 @@ fn setup_never_replaces_unparseable_json() {
 
         let claude_json = home.join(".claude.json");
         fs::write(&claude_json, "{\"projects\": {").unwrap(); // mid-write
-        assert!(matches!(install_mcp_client(&McpClient::ClaudeCodeUser), Outcome::LeftAlone(_)));
-        migrate_project_mcp_entries(true);
+        assert!(!install_claude_code_entries().is_complete());
+        let project = tempfile::tempdir().unwrap();
+        ensure_project_mcp_configs(project.path().to_str().unwrap());
         assert_eq!(fs::read_to_string(&claude_json).unwrap(), "{\"projects\": {");
 
         fs::create_dir_all(home.join(".cursor")).unwrap();
@@ -661,7 +484,7 @@ fn setup_cursor_global_mcp_idempotent() {
 }
 
 // ---------------------------------------------------------------------------
-// 10. ensure_project_mcp_configs — VS Code only, and only in projects that use it
+// 10. ensure_project_mcp_configs — Claude Code, and VS Code only in projects that use it
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -673,12 +496,16 @@ fn ensure_project_mcp_configs_written() {
 
         ensure_project_mcp_configs(project_path);
 
-        // Claude Code: nothing per project, the user-scope entry covers it.
-        assert!(!home.join(".claude.json").exists(), "no project-scope entry in ~/.claude.json");
-
         let abs_path = std::path::Path::new(project_path)
             .canonicalize()
             .unwrap_or_else(|_| std::path::PathBuf::from(project_path));
+        // Claude Code: the project's entry in ~/.claude.json, nothing at user scope.
+        let claude: Value = serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+        let entry = &claude["projects"][abs_path.to_str().unwrap()]["mcpServers"]["graphmind"];
+        assert_eq!(entry["type"], "stdio", "{claude}");
+        assert!(entry["env"].is_null());
+        assert!(claude["mcpServers"].is_null());
+
         let vscode_mcp = abs_path.join(".vscode").join("mcp.json");
         assert!(vscode_mcp.exists(), ".vscode/mcp.json should be created");
         let content = fs::read_to_string(&vscode_mcp).unwrap();
@@ -772,53 +599,5 @@ fn setup_shell_path_writes_nothing_for_a_linked_binary() {
 
         install_shell_path_for(&exe, &format!("/usr/bin:{}", linked.display()), "/bin/zsh");
         assert!(!home.join(".zshenv").exists(), "the versioned Cellar dir must not be added");
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 12. Setup version — stamped only once the Claude Code entry is in place
-// ---------------------------------------------------------------------------
-
-#[test]
-fn setup_version_waits_for_the_claude_code_entry() {
-    with_home(|home| {
-        let setup_version = || graphmind_config::read_config().unwrap().setup_version;
-        // Claude Code caught mid-write: the user-scope entry can't be added.
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 3,"#).unwrap();
-        setup();
-        assert_eq!(setup_version(), 0, "auto-setup must retry while the entry is missing");
-
-        fs::write(home.join(".claude.json"), r#"{"numStartups": 3}"#).unwrap();
-        setup();
-        assert_eq!(setup_version(), graphmind_config::SETUP_VERSION);
-    });
-}
-
-// ---------------------------------------------------------------------------
-// 13. CLAUDE_CONFIG_DIR — where Claude Code (and `claude mcp add`) keeps ~/.claude.json then
-// ---------------------------------------------------------------------------
-
-#[test]
-fn claude_code_entry_follows_claude_config_dir() {
-    with_home(|home| {
-        let config_dir = home.join("claude-config");
-        fs::create_dir_all(&config_dir).unwrap();
-        let claude_json = config_dir.join(".claude.json");
-        fs::write(
-            &claude_json,
-            r#"{"projects": {"/repo/a": {"mcpServers": {"graphmind": {"command": "/old/graphmind"}}}}}"#,
-        )
-        .unwrap();
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &config_dir) };
-
-        let outcome = claude_code_step();
-        migrate_project_mcp_entries(outcome.is_in_place());
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
-
-        assert_eq!(outcome, Outcome::Written);
-        let json: Value = serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
-        assert!(json["mcpServers"]["graphmind"]["command"].is_string(), "{json}");
-        assert!(json["projects"]["/repo/a"]["mcpServers"]["graphmind"].is_null(), "migrated in the same file: {json}");
-        assert!(!home.join(".claude.json").exists(), "no second entry in ~/.claude.json");
     });
 }

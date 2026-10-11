@@ -57,7 +57,11 @@ pub struct LicenseConfig {
 ///
 /// v6 — the main skill is named `gm` (`name: gm`), so `/gm` exists; it was listed as `/graphmind`
 /// after its directory. Setup rewrites the skill and the CLAUDE.md block (`Skill(skill: "gm")`).
-pub const SETUP_VERSION: u32 = 6;
+///
+/// v7 — Claude Code's MCP entries live per project (`projects.<path>.mcpServers.graphmind` in
+/// .claude.json): setup rewrites the stale ones of registered projects and replaces the
+/// user-scope graphmind entry that v5 and v6 wrote with entries for the registered projects.
+pub const SETUP_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {

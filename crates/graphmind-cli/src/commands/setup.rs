@@ -1,5 +1,6 @@
 use colored::Colorize;
 use graphmind_config::claude_settings::{self, PathRepair};
+use graphmind_config::claude_code::{self, ClaudeCodeSync};
 use graphmind_config::mcp_clients::{self, graphmind_binary};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,11 +38,11 @@ pub fn setup() {
     print_step(4, 10, "Claude Desktop MCP config");
     let desktop = install_mcp_client(&McpClient::ClaudeDesktop);
 
-    print_step(5, 10, "Claude Code MCP server (user scope)");
-    let claude_code = install_mcp_client(&McpClient::ClaudeCodeUser);
-    // Separate from the registration: a settings.json that doesn't parse must not block it, and
-    // the old settings.json entry goes only once the user-scope one is in place.
-    repair_claude_settings(claude_code.is_in_place());
+    print_step(5, 10, "Claude Code MCP entries (per project)");
+    let claude_code = install_claude_code_entries();
+    // Separate from the entries: a settings.json that doesn't parse must not block them, and the
+    // old settings.json entry goes only once they are in place.
+    repair_claude_settings(claude_code.is_complete());
 
     print_step(6, 10, "OpenCode MCP config");
     let opencode = install_mcp_client(&McpClient::OpenCode);
@@ -49,8 +50,8 @@ pub fn setup() {
     print_step(7, 10, "Cursor global MCP config");
     let cursor = install_mcp_client(&McpClient::Cursor);
 
-    print_step(8, 10, "Project MCP entries (Claude Code project scope, VS Code)");
-    migrate_project_mcp_entries(claude_code.is_in_place());
+    print_step(8, 10, "VS Code MCP entries of registered projects");
+    refresh_vscode_entries();
 
     print_step(9, 10, "Git hooks of registered projects");
     match super::hooks::refresh_installed() {
@@ -61,9 +62,9 @@ pub fn setup() {
     print_step(10, 10, "CLAUDE.md instruction");
     let claude_md = install_claude_md_block();
 
-    // Stamp setup version so CLI/desktop can detect outdated config. Not while the Claude Code
-    // entry is missing: auto-setup must retry it, and the project-scope migration waits for it.
-    if claude_code.is_in_place() {
+    // Stamp setup version so CLI/desktop can detect outdated config. Not while a Claude Code entry
+    // couldn't be brought up to date: auto-setup must retry it.
+    if claude_code.is_complete() {
         if let Ok(mut config) = graphmind_config::read_config() {
             config.setup_version = graphmind_config::SETUP_VERSION;
             graphmind_config::save_config(&config);
@@ -75,12 +76,20 @@ pub fn setup() {
     println!("  {} PATH configured in shell profiles", "✓".green());
     println!("  {} 3 hooks registered (PreToolUse, SessionStart, UserPromptSubmit)", "✓".green());
     println!("  {} /gm skill + 19 sub-skills installed", "✓".green());
-    print_mcp_summary(&[
-        (McpClient::ClaudeDesktop.label(), &desktop),
-        (McpClient::ClaudeCodeUser.label(), &claude_code),
-        (McpClient::Cursor.label(), &cursor),
-        (McpClient::OpenCode.label(), &opencode),
-    ]);
+    let claude_code_summary = claude_code_outcome(&claude_code);
+    let mut results = vec![(McpClient::ClaudeDesktop.label(), &desktop)];
+    if let Some(outcome) = &claude_code_summary {
+        results.push(("Claude Code (per project)", outcome));
+    }
+    results.extend([(McpClient::Cursor.label(), &cursor), (McpClient::OpenCode.label(), &opencode)]);
+    print_mcp_summary(&results);
+    if claude_code_summary.is_none() {
+        println!(
+            "  {} Claude Code: no project registered: run {} in a project",
+            "⊘".yellow(),
+            "graphmind init".cyan()
+        );
+    }
     match claude_md {
         Outcome::Written => println!("  {} CLAUDE.md instruction block updated", "✓".green()),
         Outcome::Unchanged => println!("  {} CLAUDE.md instruction block already current", "✓".green()),
@@ -88,9 +97,9 @@ pub fn setup() {
             println!("  {} CLAUDE.md instruction block left as is (see above)", "⊘".yellow())
         }
     }
-    if !claude_code.is_in_place() {
+    if !claude_code.is_complete() {
         println!(
-            "  {} setup not marked complete: it runs again until the Claude Code MCP entry is in place",
+            "  {} setup not marked complete: it runs again until the Claude Code MCP entries are in place",
             "⊘".yellow()
         );
     }
@@ -111,9 +120,9 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     );
 
     print_step(1, 4, &format!("Register project ({})", project_path));
-    super::register::register(project_path, None, &[]);
+    super::register::add(project_path, None, &[]);
 
-    print_step(2, 4, "VS Code MCP config (projects with a .vscode/ folder)");
+    print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
     ensure_project_mcp_configs(project_path);
 
     print_step(3, 4, "Git hooks (commit, merge, rebase, checkout, push)");
@@ -137,7 +146,7 @@ fn print_step(n: u8, total: u8, label: &str) {
 }
 
 /// Add or update graphmind's MCP entry for `client` and say what happened. Claude Code goes
-/// through `claude mcp add -s user` when the CLI is available.
+/// through `claude mcp add` when the CLI is available.
 #[doc(hidden)]
 pub fn install_mcp_client(client: &McpClient) -> Outcome {
     let outcome = mcp_clients::upsert(client, &graphmind_binary(), &mut print_cli_fallback);
@@ -150,7 +159,7 @@ pub fn install_mcp_client(client: &McpClient) -> Outcome {
 pub fn uninstall_mcp_client(client: &McpClient) -> Outcome {
     let outcome = mcp_clients::remove(client, &mut print_cli_fallback);
     match &outcome {
-        Outcome::Written => println!("    {} removed from {}", "✓".green(), client.config_path().display()),
+        Outcome::Written => println!("    {} removed from {}", "✓".green(), mcp_clients::describe(client)),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
         Outcome::Unchanged | Outcome::NotInstalled => {}
     }
@@ -162,10 +171,10 @@ fn print_cli_fallback(reason: &str) {
 }
 
 fn print_install(client: &McpClient, outcome: &Outcome) {
-    let path = client.config_path();
+    let path = mcp_clients::describe(client);
     match outcome {
-        Outcome::Unchanged => println!("    {} already configured ({})", "✓".green(), path.display()),
-        Outcome::Written => println!("    {} configured at {}", "✓".green(), path.display()),
+        Outcome::Unchanged => println!("    {} already configured ({path})", "✓".green()),
+        Outcome::Written => println!("    {} configured at {path}", "✓".green()),
         Outcome::NotInstalled => println!("    {} {} not installed, skipped", "⊘".yellow(), client.label()),
         Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
     }
@@ -194,9 +203,68 @@ fn print_mcp_summary(results: &[(&str, &Outcome)]) {
     }
 }
 
+/// Setup's Claude Code step. Claude Code reads graphmind per project, from
+/// `projects.<key>.mcpServers` in .claude.json, one entry per repository (see
+/// `claude_code::claude_code_key`; registering a project adds the entry): stale entries of registered projects are rewritten,
+/// and a user-scope entry that runs graphmind is replaced by entries for the registered projects
+/// (see `claude_code::sync_claude_code_projects`).
+#[doc(hidden)]
+pub fn install_claude_code_entries() -> ClaudeCodeSync {
+    let user = McpClient::ClaudeCodeUser;
+    let replace_user_scope = mcp_clients::has_graphmind_entry(&user);
+    let sync = claude_code::sync_claude_code_projects(&graphmind_binary(), replace_user_scope, &mut print_cli_fallback);
+    for key in &sync.written {
+        println!("    {} configured for {}", "✓".green(), key.display());
+    }
+    for project in &sync.moved {
+        println!(
+            "    {} removed the entry under {}: Claude Code reads its repository's entry",
+            "✓".green(),
+            project.display()
+        );
+    }
+    for key in &sync.hand_made {
+        println!("    {} {}: left alone: hand-made graphmind entry", "⊘".yellow(), key.display());
+    }
+    for reason in &sync.left_alone {
+        println!("    {} {reason}", "✗".red());
+    }
+    match &sync.user_scope {
+        Outcome::Written => println!(
+            "    {} removed the user-scope entry from {} (graphmind is registered per project)",
+            "✓".green(),
+            user.config_path().display()
+        ),
+        Outcome::LeftAlone(reason) if sync.left_alone.is_empty() => println!("    {} {reason}", "✗".red()),
+        Outcome::LeftAlone(reason) if !sync.left_alone.contains(reason) => println!("    {} {reason}", "⊘".yellow()),
+        Outcome::LeftAlone(_) => {}
+        Outcome::Unchanged | Outcome::NotInstalled => {}
+    }
+    if sync.keys == 0 {
+        println!("    {} no project registered: run {} in a project", "⊘".yellow(), "graphmind init".cyan());
+    } else if sync.written.is_empty() && sync.moved.is_empty() && sync.is_complete() && sync.user_scope == Outcome::Unchanged {
+        let n = sync.current;
+        println!("    {} {n} project entr{} up to date", "✓".green(), if n == 1 { "y" } else { "ies" });
+    }
+    sync
+}
+
+/// The Claude Code step as one outcome, for the summary. `None` when no project is registered:
+/// Claude Code has no graphmind entry then.
+fn claude_code_outcome(sync: &ClaudeCodeSync) -> Option<Outcome> {
+    if !sync.is_complete() {
+        Some(Outcome::LeftAlone(String::new()))
+    } else if sync.keys == 0 {
+        None
+    } else if !sync.written.is_empty() || !sync.moved.is_empty() || sync.user_scope == Outcome::Written {
+        Some(Outcome::Written)
+    } else {
+        Some(Outcome::Unchanged)
+    }
+}
+
 /// Repair ~/.claude/settings.json (see `claude_settings::repair_claude_settings`) and say what
-/// changed. Setup sets `remove_legacy_entry` only once the user-scope entry is in place, so Claude
-/// Code is never left without one.
+/// changed. Setup sets `remove_legacy_entry` only once the Claude Code entries are in place.
 #[doc(hidden)]
 pub fn repair_claude_settings(remove_legacy_entry: bool) {
     let repair = match claude_settings::repair_claude_settings(remove_legacy_entry) {
@@ -243,33 +311,10 @@ pub fn repair_claude_settings(remove_legacy_entry: bool) {
     }
 }
 
-/// Per-project MCP entries of registered projects.
-///
-/// - Claude Code: older versions wrote `projects.<path>.mcpServers.graphmind` into
-///   ~/.claude.json on every `init`. A project entry takes precedence over the user-scope one,
-///   so a stale `command` there would win. They are removed, but only once the user-scope entry
-///   is in place (`user_scope_in_place`).
-/// - VS Code: an existing `.vscode/mcp.json` entry that isn't current (a pre-#105 `env.PATH`, a
-///   moved binary) is rewritten. Projects without one are left alone.
+/// VS Code entries of registered projects: an existing `.vscode/mcp.json` entry that isn't current
+/// (an `env.PATH` block, a moved binary) is rewritten. Projects without one are left alone.
 #[doc(hidden)]
-pub fn migrate_project_mcp_entries(user_scope_in_place: bool) {
-    if user_scope_in_place {
-        match mcp_clients::remove_claude_project_entries(None) {
-            Ok(0) => println!("    {} no project-scope Claude Code entries", "✓".green()),
-            Ok(n) => println!(
-                "    {} removed {n} project-scope Claude Code entr{} (the user-scope entry covers every project)",
-                "✓".green(),
-                if n == 1 { "y" } else { "ies" }
-            ),
-            Err(reason) => println!("    {} {reason}", "✗".red()),
-        }
-    } else {
-        println!(
-            "    {} project-scope Claude Code entries kept until the user-scope entry is in place",
-            "⊘".yellow()
-        );
-    }
-
+pub fn refresh_vscode_entries() {
     let bin = graphmind_binary();
     let mut updated = 0usize;
     for project in graphmind_config::Registry::list() {
@@ -283,22 +328,43 @@ pub fn migrate_project_mcp_entries(user_scope_in_place: bool) {
             Outcome::Unchanged | Outcome::NotInstalled => {}
         }
     }
-    if updated > 0 {
-        println!("    {} updated the VS Code entry in {updated} project(s)", "✓".green());
+    match updated {
+        0 => println!("    {} up to date", "✓".green()),
+        n => println!("    {} updated the VS Code entry in {n} project(s)", "✓".green()),
     }
 }
 
-/// VS Code reads MCP servers per project, from `<project>/.vscode/mcp.json`. The entry is written
-/// only in projects that already use VS Code (have a `.vscode/` folder): elsewhere it would leave
-/// an untracked folder, or a committed file pointing at this machine's binary. Claude Code needs
-/// nothing here: setup registers graphmind at user scope, which covers every project.
+/// The project's MCP entries: Claude Code's in .claude.json (see [`install_claude_code_project`]),
+/// and VS Code's `<project>/.vscode/mcp.json`. The VS Code entry is written only in projects that
+/// already use VS Code (have a `.vscode/` folder): elsewhere it would leave an untracked folder,
+/// or a committed file pointing at this machine's binary.
 #[doc(hidden)]
 pub fn ensure_project_mcp_configs(project_path: &str) {
-    let client = McpClient::VsCode(canonical_project_path(project_path));
+    let project = canonical_project_path(project_path);
+    install_claude_code_project(&project);
+    let client = McpClient::VsCode(project);
     let outcome = mcp_clients::upsert(&client, &graphmind_binary(), &mut print_cli_fallback);
     if outcome != Outcome::NotInstalled {
         print_install(&client, &outcome);
     }
+}
+
+/// The Claude Code entry `project` uses: `projects.<key>.mcpServers.graphmind` in .claude.json,
+/// through `claude mcp add -s local` when the CLI is on PATH. The key is the folder Claude Code
+/// reads for the project's repository, usually its main checkout (see
+/// `claude_code::claude_code_key`); when that isn't the project's own folder (a worktree, a
+/// subfolder), one line says which key was used.
+#[doc(hidden)]
+pub fn install_claude_code_project(project: &Path) -> Outcome {
+    let key = claude_code::claude_code_key(project);
+    if key != canonical_project_path(&project.to_string_lossy()) {
+        println!(
+            "    {} Claude Code entry under {}: Claude Code reads it there from every worktree and subfolder",
+            "→".cyan(),
+            key.display()
+        );
+    }
+    install_mcp_client(&McpClient::ClaudeCodeProject(key))
 }
 
 fn canonical_project_path(project_path: &str) -> PathBuf {
@@ -307,26 +373,46 @@ fn canonical_project_path(project_path: &str) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(project_path))
 }
 
-/// Remove the user-scope Claude Code entry, plus what older versions left in
-/// ~/.claude/settings.json (the MCP entry and the `env.PATH` segment).
+/// Remove graphmind from Claude Code (see `claude_code::uninstall_claude_code`), then graphmind's
+/// MCP entry and `env.PATH` segment in ~/.claude/settings.json.
 #[doc(hidden)]
 pub fn unregister_mcp_in_claude_code() {
-    uninstall_mcp_client(&McpClient::ClaudeCodeUser);
-    // Reuse the #105 repair so uninstall and setup converge on identical results.
+    let path = McpClient::ClaudeCodeUser.config_path();
+    let removal = claude_code::uninstall_claude_code(&mut print_cli_fallback);
+    match removal.projects {
+        Ok(0) => {}
+        Ok(n) => println!(
+            "    {} removed {n} project entr{} from {}",
+            "✓".green(),
+            if n == 1 { "y" } else { "ies" },
+            path.display()
+        ),
+        Err(reason) => println!("    {} {reason}", "✗".red()),
+    }
+    match removal.user_scope {
+        Outcome::Written => println!("    {} removed the user-scope entry from {}", "✓".green(), path.display()),
+        Outcome::LeftAlone(reason) => println!("    {} {reason}", "✗".red()),
+        Outcome::Unchanged | Outcome::NotInstalled => {}
+    }
     repair_claude_settings(true);
 }
 
-/// Remove graphmind from one project's MCP configs: the project-scope entry older versions wrote
-/// to `~/.claude.json`, and `<project>/.vscode/mcp.json`. Parent entries and files stay.
+/// The Claude Code entry of an unregistered project (see `claude_code::remove_claude_code_project`)
+/// and say what happened. A `graphmind` entry set up by hand, or one another registered project
+/// uses, stays.
 #[doc(hidden)]
-pub fn uninstall_project_mcp_configs(project_path: &str) {
-    let abs_path = canonical_project_path(project_path);
-    match mcp_clients::remove_claude_project_entries(Some(&abs_path.to_string_lossy())) {
-        Ok(0) => {}
-        Ok(_) => println!("    {} removed from ~/.claude.json (project scope)", "✓".green()),
-        Err(reason) => println!("    {} {reason}", "✗".red()),
+pub fn uninstall_claude_code_project(project: &Path) -> Outcome {
+    let outcome = claude_code::remove_claude_code_project(project, &mut print_cli_fallback);
+    match &outcome {
+        Outcome::Written => println!(
+            "    {} removed the Claude Code entry from {}",
+            "✓".green(),
+            McpClient::ClaudeCodeUser.config_path().display()
+        ),
+        Outcome::LeftAlone(reason) => println!("    {} {reason}", "⊘".yellow()),
+        Outcome::Unchanged | Outcome::NotInstalled => {}
     }
-    uninstall_mcp_client(&McpClient::VsCode(abs_path));
+    outcome
 }
 
 /// Reverse everything `setup()` and `init()` did, across every registered project.
@@ -363,11 +449,12 @@ pub fn uninstall_all(purge: bool, yes: bool) {
     print_step(8, 10, "Shell PATH configuration");
     uninstall_shell_path();
 
-    print_step(9, 10, "Per-project git hooks + MCP configs");
+    // Step 4 removed every Claude Code project entry: only VS Code's are per project here.
+    print_step(9, 10, "Per-project git hooks + VS Code MCP configs");
     let projects = graphmind_config::Registry::list();
     for project in &projects {
         super::hooks::uninstall(Some(&project.slug));
-        uninstall_project_mcp_configs(&project.path);
+        uninstall_mcp_client(&McpClient::VsCode(canonical_project_path(&project.path)));
     }
 
     let mut config = graphmind_config::load_config();

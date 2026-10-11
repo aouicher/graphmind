@@ -149,7 +149,7 @@ fn auto_setup_runs_without_a_terminal() {
     };
     std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
     // The detached `setup` inherits this PATH: system directories only (as in setup_e2e.rs), so
-    // the machine's own `claude` CLI never runs and setup writes the temp HOME's ~/.claude.json.
+    // the machine's own `claude` CLI never runs and setup writes into the temp HOME.
     let (path, _) = offline_curl(&env);
     let own_output = env.run(&["list"]).stdout;
 
@@ -182,5 +182,5 @@ fn auto_setup_runs_without_a_terminal() {
         assert!(Instant::now() < deadline, "background setup didn't finish within 60 s (setup_version {setup_version:?})");
         std::thread::sleep(Duration::from_millis(100));
     }
-    assert!(env.home.path().join(".claude.json").exists(), "setup didn't register Claude Code in the temp HOME");
+    assert!(env.home.path().join(".claude/CLAUDE.md").exists(), "setup didn't write the temp HOME's CLAUDE.md");
 }

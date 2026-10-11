@@ -91,6 +91,9 @@ pub struct WorkTree {
     /// True for a `git worktree add` checkout, false for a repo's main checkout
     /// (and for submodules, whose git dir is not a `worktrees/` entry).
     pub linked: bool,
+    /// The repository's common git directory (`git rev-parse --git-common-dir`), canonicalized:
+    /// the main checkout's `.git` for a linked worktree of a regular repository.
+    pub common_dir: PathBuf,
 }
 
 /// The work tree containing `path`, in one git call. `None` outside a git repo.
@@ -106,7 +109,7 @@ pub fn work_tree(path: &Path) -> Option<WorkTree> {
     let root = canon(lines.next()?);
     let git_dir = canon(lines.next()?);
     let common = canon(lines.next()?);
-    Some(WorkTree { root, linked: git_dir != common })
+    Some(WorkTree { root, linked: git_dir != common, common_dir: common })
 }
 
 /// The branch checked out at `path`, `None` when detached or outside a repo.

@@ -99,10 +99,10 @@ Configures your machine so all AI tools can use graphmind:
 2. Claude Code hooks (session context, prompt pre-fetch, and a once-per-session nudge from grep/find searches and Explore agents to graphmind)
 3. Claude Code skill (`/gm` + 19 sub-skills)
 4. Claude Desktop MCP (`claude_desktop_config.json`; the location per OS is under [Manual setup](#manual-setup-if-you-prefer-granular-control))
-5. Claude Code MCP, user scope (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set)
+5. Claude Code MCP entries, one per repository (`projects.<path>.mcpServers.graphmind` in `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set, under the path Claude Code reads for the repository, usually its main checkout; see [MCP server for Claude Code](#mcp-server-for-claude-code)): rewrites an entry that points at a moved binary or carries an `env` block, moves an entry earlier versions wrote under a worktree's or a subfolder's own path (which Claude Code never reads) to the repository's, and replaces a user-scope `graphmind` entry that runs graphmind with entries for the registered projects, in one write. Entries are added when a project is registered (`graphmind init`, `graphmind register`, the desktop app); a `.claude.json` that doesn't parse is left as is, and setup runs again later
 6. OpenCode MCP (`~/.config/opencode/opencode.jsonc`)
 7. Cursor global MCP (`~/.cursor/mcp.json`) — available in all Cursor projects
-8. Project MCP entries — once the user-scope entry is in place, removes the per-project Claude Code entries (`projects.<path>.mcpServers.graphmind` in `~/.claude.json`) that older versions wrote, and updates the entry in `.vscode/mcp.json` of registered projects that already have one
+8. VS Code MCP entries — updates the entry in `.vscode/mcp.json` of registered projects that already have one
 9. Git hooks of registered projects — after an upgrade, adds hooks introduced since they were installed (only where graphmind's hooks already are)
 10. CLAUDE.md instruction block (`~/.claude/CLAUDE.md`)
 
@@ -112,7 +112,7 @@ Configures your machine so all AI tools can use graphmind:
 
 Registers and indexes a project:
 1. Registers current directory in the graphmind registry
-2. VS Code MCP config (`<project>/.vscode/mcp.json`), only in projects that already have a `.vscode/` folder. Claude Code needs nothing per project: `setup` registers graphmind at user scope.
+2. MCP project configs: the Claude Code entry of the project's repository (`projects.<path>.mcpServers.graphmind` in `~/.claude.json`, through `claude mcp add -s local` when the `claude` CLI is on PATH), and VS Code's (`<project>/.vscode/mcp.json`), only in projects that already have a `.vscode/` folder
 3. Git hooks (rebuild after commit, merge, rebase and branch switch — new worktrees included; impact check on push)
 4. Builds the code graph
 
@@ -131,22 +131,39 @@ Both commands are idempotent — safe to re-run.
 
 #### MCP server for Claude Code
 
-`graphmind setup` registers graphmind at user scope, so it is available in every project. By hand:
+Claude Code gets graphmind per project, with one entry per repository, under the path Claude Code reads for it when started anywhere in the repository:
+
+- a repository's main checkout, for the checkout, its linked worktrees and their subfolders;
+- the bare repository (`repo.git`), for the worktrees of a bare repository;
+- the submodule's root, for a submodule and its subfolders, and `<superproject>/.git/modules/<name>` for a worktree of a submodule;
+- the work tree's root, for a repository created with `--separate-git-dir`;
+- the folder itself, outside git.
+
+- Registering a project (`graphmind init`, `graphmind register`, or adding it in the desktop app) writes or confirms that entry. From a worktree or a subfolder, it says which path it used.
+- Unregistering a project removes the entry, unless another registered project uses it. For a project whose folder was deleted, the entry is the graphmind entry under its path or a parent that no registered project uses; when more than one could be, all are left and graphmind says so.
+- A `graphmind` entry you set up by hand (its command isn't a graphmind binary) is left alone.
+- A `.claude.json` that doesn't parse is left as is and the reason shown; the project is registered anyway.
+
+By hand, in that path (the main checkout, for most repositories):
 
 ```bash
-claude mcp remove -s user graphmind   # only to replace an existing entry: `claude mcp add` refuses a name that exists
-claude mcp add -s user graphmind -- "$(command -v graphmind)" mcp
+claude mcp remove -s local graphmind   # only to replace an existing entry: `claude mcp add` refuses a name that exists
+claude mcp add -s local graphmind -- "$(command -v graphmind)" mcp
 ```
 
-which writes this to `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set):
+which writes this to `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when that is set), under that path:
 ```json
 {
-  "mcpServers": {
-    "graphmind": {
-      "type": "stdio",
-      "command": "/home/user/.local/bin/graphmind",
-      "args": ["mcp"],
-      "env": {}
+  "projects": {
+    "/home/user/projects/myapp": {
+      "mcpServers": {
+        "graphmind": {
+          "type": "stdio",
+          "command": "/home/user/.local/bin/graphmind",
+          "args": ["mcp"],
+          "env": {}
+        }
+      }
     }
   }
 }
@@ -278,6 +295,10 @@ conventions, bugs) is shared by all of them: it is repo-wide knowledge.
   a worktree of a registered repo, commands fail with an explicit error
   instead of answering from another project. Outside any git repo, a single
   registered project is still used as before.
+- **Claude Code MCP entry**: one per repository, under the main checkout,
+  which is where Claude Code reads it in every worktree. `graphmind init` in
+  a worktree writes or confirms the main checkout's entry, and a worktree
+  never gets an entry of its own.
 - **Cleanup**: worktrees that were registered automatically are forgotten
   once their directory is gone. `graphmind clean --stale` prunes the rest.
 
@@ -431,8 +452,8 @@ graphmind init --skip-build       # per-project without building
 
 ### Registry
 ```bash
-graphmind register [path]     # register current dir
-graphmind unregister <slug>   # remove project
+graphmind register [path]     # register current dir (and its Claude Code MCP entry)
+graphmind unregister <slug>   # remove project (and its Claude Code MCP entry)
 graphmind list                # all projects
 graphmind status              # health check
 ```
