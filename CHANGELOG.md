@@ -5,9 +5,15 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-11
+
 ### Fixed
 
 - **A removed worktree no longer lingers.** After `git worktree remove`, the next `graphmind list` or `graphmind build --all` (and the desktop app's project list and "build all") forgets the worktree and deletes its graph, so `build --all` no longer fails on its missing folder. Before, it stayed until another worktree of the repo was registered or `graphmind clean --stale` ran. Projects registered by hand are not affected.
+
+### Upgrading
+
+Nothing to do. Worktrees removed before this version are forgotten by the first `graphmind list` or `graphmind build --all`.
 
 ## [0.3.5] - 2026-10-11
 
