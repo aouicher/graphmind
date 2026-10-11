@@ -10,6 +10,21 @@ struct Cli {
     command: Commands,
 }
 
+/// The project of a command: the positional SLUG or `--slug` (alias `--in`), not both.
+#[derive(clap::Args)]
+struct ProjectArg {
+    slug: Option<String>,
+    /// Project slug (same as the SLUG argument)
+    #[arg(long = "slug", alias = "in", value_name = "SLUG", conflicts_with = "slug")]
+    slug_flag: Option<String>,
+}
+
+impl ProjectArg {
+    fn slug(&self) -> Option<&str> {
+        self.slug.as_deref().or(self.slug_flag.as_deref())
+    }
+}
+
 #[derive(clap::Subcommand)]
 enum Commands {
     /// Register a project
@@ -29,14 +44,16 @@ enum Commands {
     List,
     /// Show project status
     Status {
-        slug: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
     },
     /// Print the slug of the registered project containing the current directory (exit 1 if none).
     /// Fast: reads config only, no notices, no database. Used by the Claude Code hooks.
     Which,
     /// Build the code graph
     Build {
-        slug: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
         #[arg(long)]
         all: bool,
         #[arg(long)]
@@ -118,11 +135,13 @@ enum Commands {
     },
     /// Show graph map overview
     Map {
-        slug: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
     },
     /// Detect dependency cycles
     Cycles {
-        slug: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
     },
     /// Search symbols by text
     Search {
@@ -258,7 +277,8 @@ enum Commands {
     },
     /// Export graph in various formats
     Export {
-        slug: Option<String>,
+        #[command(flatten)]
+        project: ProjectArg,
         #[arg(short, long, default_value = "json")]
         format: String,
         #[arg(long)]
@@ -569,14 +589,14 @@ fn main() {
         Commands::List => {
             commands::register::list();
         }
-        Commands::Status { slug } => {
-            commands::register::status(slug.as_deref());
+        Commands::Status { project } => {
+            commands::register::status(project.slug());
         }
         Commands::Which => {
             commands::register::which();
         }
         Commands::Build {
-            slug,
+            project,
             all,
             full,
             reset,
@@ -584,9 +604,9 @@ fn main() {
             changed,
         } => {
             if let Some(refs) = changed {
-                commands::build::build_changed_between(slug.as_deref(), &refs[0], &refs[1]);
+                commands::build::build_changed_between(project.slug(), &refs[0], &refs[1]);
             } else {
-                commands::build::build(slug.as_deref(), all, full, reset, watch);
+                commands::build::build(project.slug(), all, full, reset, watch);
             }
         }
         Commands::Query { name, slug, file, kind, limit, offset } => {
@@ -620,11 +640,11 @@ fn main() {
         Commands::FnImpact { name, slug, depth, file } => {
             commands::query::fn_impact(&name, slug.as_deref(), depth, file.as_deref());
         }
-        Commands::Map { slug } => {
-            commands::query::map(slug.as_deref());
+        Commands::Map { project } => {
+            commands::query::map(project.slug());
         }
-        Commands::Cycles { slug } => {
-            commands::query::cycles(slug.as_deref());
+        Commands::Cycles { project } => {
+            commands::query::cycles(project.slug());
         }
         Commands::Search { query, slug, limit, kind, offset, include_content, code_only } => {
             commands::search::search(&query, slug.as_deref(), limit, kind.as_deref(), offset, include_content, code_only);
@@ -781,12 +801,12 @@ fn main() {
             }
         },
         Commands::Export {
-            slug,
+            project,
             format,
             cross,
             obsidian,
         } => {
-            commands::export::export(slug.as_deref(), &format, cross, obsidian.as_deref());
+            commands::export::export(project.slug(), &format, cross, obsidian.as_deref());
         }
         Commands::Setup => {
             commands::setup::setup();
@@ -827,7 +847,7 @@ mod tests {
 
     #[test]
     fn background_follows_terminal_env_and_command() {
-        let status = Commands::Status { slug: None };
+        let status = Commands::Status { project: ProjectArg { slug: None, slug_flag: None } };
         assert_eq!(background(&status, false, true), Background::All);
         // Hooks and scripts: no terminal, no env var needed.
         assert_eq!(background(&status, false, false), Background::AutoSetupOnly);

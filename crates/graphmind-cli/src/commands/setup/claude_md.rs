@@ -102,12 +102,9 @@ pub fn uninstall_claude_md_block() {
     }
 }
 
-fn gm_block() -> String {
-    let version = env!("CARGO_PKG_VERSION");
-    format!(r#"<!-- GM:START -->
-<!-- GM:VERSION:{version} -->
-
-## Mandatory: Code exploration via graphmind
+/// The instructions of the GM block, shared by the global block (setup) and the per-project
+/// section (`graphmind sync`).
+pub(crate) const GM_INSTRUCTIONS: &str = r#"## Mandatory: Code exploration via graphmind
 
 In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY code exploration, architecture understanding, or symbol lookup. This applies to:
 - Answering questions about how something works
@@ -123,6 +120,8 @@ Only fall back to grep for: string literals, config values, env vars, non-code p
 
 Invoke: `Skill(skill: "gm", args: "<your query>")`
 
+Outside a registered project (`graphmind which` prints nothing and exits with code 1), use `/gm` for questions about a registered project: it lists the registered projects (`graphmind list`) and targets the one the question is about with `--slug`. For a question about the current folder when it is not registered, use your normal tools (and suggest `graphmind init` to index it).
+
 **Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory **during** and after every session, without waiting for the user to ask. Save immediately when something is decided or discovered — do not wait for the end of the session.
 
 Categories and commands:
@@ -133,18 +132,21 @@ Categories and commands:
 - Cross-project or user-level facts → add `--global`
 
 In a registered project: save without `--global` by default (project-scoped).
-Outside a registered project: always use `--global`.
+Outside a registered project: save with `--slug <project>` when the fact is about that project; use `--global` only for cross-project or personal facts.
 
-Be selective — only facts useful in a future session. Skip task details and temporary state.
+Be selective — only facts useful in a future session. Skip task details and temporary state."#;
 
-<!-- GM:END -->"#)
+fn gm_block() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!("<!-- GM:START -->\n<!-- GM:VERSION:{version} -->\n\n{GM_INSTRUCTIONS}\n\n<!-- GM:END -->")
 }
 
-/// `gm_fingerprint(gm_block_body(..))` of every stock block text graphmind wrote before blocks
-/// carried a fingerprint (0.2.77 to 0.3.2, oldest first; from the history of `gm_block`). A block
-/// without a fingerprint is replaced only when its whole text is one of these: any other text was
-/// written or edited by the person.
-const STOCK_BLOCK_FINGERPRINTS: [&str; 7] = [
+/// `gm_fingerprint(gm_block_body(..))` of every earlier stock block text, oldest first, from the
+/// history of `gm_block`: 0.2.77 to 0.3.2, written before blocks carried a fingerprint, then the
+/// text that invokes `Skill(skill: "gm")` without the outside-a-project line. A block without a
+/// fingerprint is replaced only when its whole text is one of these: any other text was written
+/// or edited by the person.
+const STOCK_BLOCK_FINGERPRINTS: [&str; 8] = [
     "f3ddd91a594a5fd8",
     "6e566843a79d888f",
     "762c74aa1f1dca65",
@@ -152,6 +154,7 @@ const STOCK_BLOCK_FINGERPRINTS: [&str; 7] = [
     "52a140c2072244b5",
     "c5869b2212e82172",
     "cd767b14b681f9cf",
+    "a3525aa0ac26eaef",
 ];
 
 /// Lines of a GM block without its marker comments (START, VERSION, HASH, END).

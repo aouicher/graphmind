@@ -98,7 +98,10 @@ fn memory_add_accepts_only_registered_projects() {
     for project in [absolute.as_str(), "../../escaped", "not-registered"] {
         let resp = dispatch_tool("gm_memory_add", &json!({ "content": "a fact", "project": project }));
         assert!(is_error(&resp), "{project:?} accepted: {}", text(&resp));
-        assert!(text(&resp).contains(SLUG), "the error lists registered projects: {}", text(&resp));
+        assert_eq!(
+            text(&resp),
+            format!("Project '{project}' is not registered (see `graphmind list`) Registered: {SLUG}"),
+        );
     }
 
     assert_eq!(home.files(), before, "no file was created under HOME");

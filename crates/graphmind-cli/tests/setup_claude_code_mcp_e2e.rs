@@ -211,6 +211,24 @@ fn register_adds_the_project_entry_and_unregister_removes_it() {
     assert_eq!(config["numStartups"], 7);
 }
 
+/// `unregister <typo>` inside a registered project fails and removes nothing: not the project,
+/// not its entry.
+#[test]
+fn unregister_of_an_unknown_slug_keeps_the_project_and_its_entry() {
+    let env = CliTestEnv::new();
+    let project = repo(&env, "app");
+    graphmind_ok(&env, env.home.path(), &["register", project.to_str().unwrap(), "--slug", "app"]);
+    let before = fs::read_to_string(claude_json(&env)).unwrap();
+
+    let out = graphmind(&env, &project, &["unregister", "nosuch"], &[]);
+
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Project 'nosuch' is not registered (see `graphmind list`)"), "{stderr}");
+    assert_eq!(fs::read_to_string(claude_json(&env)).unwrap(), before);
+    assert!(graphmind_ok(&env, env.home.path(), &["list"]).contains("app"));
+}
+
 #[test]
 fn an_unparseable_claude_json_does_not_block_registration() {
     let env = CliTestEnv::new();

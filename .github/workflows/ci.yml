@@ -122,6 +122,7 @@ jobs:
             --test cli_background_e2e \
             --test cli_claude_hooks_e2e \
             --test cli_memory_promotion_e2e \
+            --test cli_skill_e2e \
             -- --test-threads=1 &
           PID2=$!
 

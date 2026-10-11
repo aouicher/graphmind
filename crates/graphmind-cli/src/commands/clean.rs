@@ -1,4 +1,5 @@
-use graphmind_config::{git_identity, paths, Registry, resolve_project_slug};
+use graphmind_config::{git_identity, paths, Registry};
+use super::resolve_project_slug;
 use colored::Colorize;
 use std::path::Path;
 

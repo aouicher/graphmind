@@ -4,23 +4,14 @@ use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType,
 use serde_json::Value;
 
 use crate::formatting::{err_text, text_content};
-use crate::graph_helpers::unknown_project_message;
+use crate::graph_helpers::explicit_project;
 use crate::search_helpers::load_embed_engine;
 
 /// The key the `project` argument's memory is stored under: the primary project's for a
-/// linked worktree, else the slug (see `Registry::memory_key`). `project` is a registered slug
-/// or a directory path `resolve_path` maps to a registered project or worktree; `Ok(None)`
-/// without one, and an error response listing the registered projects for anything else.
+/// linked worktree, else the slug (see `Registry::memory_key`). `Ok(None)` without a
+/// `project`; the unknown-project error response when it names no registered project.
 fn memory_project(args: &Value) -> Result<Option<String>, Value> {
-    let Some(project) = args.get("project").and_then(|v| v.as_str()).filter(|p| !p.is_empty()) else {
-        return Ok(None);
-    };
-    let slug = graphmind_config::resolve_path(project)
-        .or_else(|| graphmind_config::Registry::get(project).map(|p| p.slug));
-    match slug {
-        Some(slug) => Ok(Some(graphmind_config::Registry::memory_key(&slug))),
-        None => Err(err_text(&unknown_project_message(project))),
-    }
+    Ok(explicit_project(args)?.map(|slug| graphmind_config::Registry::memory_key(&slug)))
 }
 
 pub(crate) fn handle_memory_search(args: &Value) -> Value {

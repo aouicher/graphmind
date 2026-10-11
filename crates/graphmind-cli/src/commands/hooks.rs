@@ -1,4 +1,5 @@
-use graphmind_config::{Registry, resolve_project_slug};
+use graphmind_config::Registry;
+use super::resolve_project_slug;
 use colored::Colorize;
 use std::fs;
 #[cfg(unix)]

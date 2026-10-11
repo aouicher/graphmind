@@ -1,4 +1,5 @@
-use graphmind_config::{paths, Registry, resolve_project_slug};
+use graphmind_config::{paths, Registry};
+use super::resolve_project_slug;
 use graphmind_config::config::{EmbeddingMode, load_config};
 use colored::Colorize;
 use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};

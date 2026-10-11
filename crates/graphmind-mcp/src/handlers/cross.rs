@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::formatting::{err_text, json_text};
-use crate::graph_helpers::{all_project_slugs, resolve_project};
+use crate::graph_helpers::{all_project_slugs, explicit_project, resolve_project};
 
 pub(crate) fn handle_cross_query(args: &Value) -> Value {
     let symbol = match args.get("symbol").and_then(|v| v.as_str()) {
@@ -45,13 +45,14 @@ pub(crate) fn handle_cross_query(args: &Value) -> Value {
 }
 
 pub(crate) fn handle_cross_deps(args: &Value) -> Value {
-    let project = match args.get("project").and_then(|v| v.as_str()) {
-        Some(p) => p,
-        None => return err_text("Missing required parameter: project"),
+    let project = match explicit_project(args) {
+        Ok(Some(p)) => p,
+        Ok(None) => return err_text("Missing required parameter: project"),
+        Err(e) => return e,
     };
 
     let cl_store = CrossLinkStore::new(&graphmind_config::paths::cross_links_path());
-    let links = cl_store.find_by_project(project);
+    let links = cl_store.find_by_project(&project);
 
     json_text(&json!({
         "project": project,
@@ -60,11 +61,23 @@ pub(crate) fn handle_cross_deps(args: &Value) -> Value {
     }))
 }
 
-pub(crate) fn handle_cross_links(_args: &Value) -> Value {
+/// Every cross-project link, or only those of the `project` argument when given.
+pub(crate) fn handle_cross_links(args: &Value) -> Value {
+    let project = match explicit_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let cl_store = CrossLinkStore::new(&graphmind_config::paths::cross_links_path());
-    let links = cl_store.list();
-
+    let Some(project) = project else {
+        let links = cl_store.list();
+        return json_text(&json!({
+            "links": links,
+            "count": links.len()
+        }));
+    };
+    let links = cl_store.find_by_project(&project);
     json_text(&json!({
+        "project": project,
         "links": links,
         "count": links.len()
     }))
@@ -74,8 +87,8 @@ pub(crate) fn handle_diff_impact(args: &Value) -> Value {
     let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
-        Some(p) => p,
-        None => return err_text(&crate::graph_helpers::no_project_message()),
+        Ok(p) => p,
+        Err(e) => return err_text(&e),
     };
 
     // Get changed files from git

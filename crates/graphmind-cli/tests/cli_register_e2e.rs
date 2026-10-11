@@ -86,3 +86,84 @@ fn list_empty_on_fresh_home() {
         "fresh home should show no projects, got: {out}"
     );
 }
+
+const NOT_REGISTERED: &str = "Project 'nosuch' is not registered (see `graphmind list`)";
+
+/// Inside a registered project, an unknown slug is an error, never that project: `unregister`
+/// in particular must not remove it.
+#[test]
+fn unknown_slug_fails_from_inside_a_project() {
+    let env = CliTestEnv::new();
+    let fixture = env.fixture_path();
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "inside"]);
+
+    for command in [
+        vec!["map", "--slug", "nosuch"],
+        vec!["status", "nosuch"],
+        vec!["search", "main", "--slug", "nosuch"],
+        vec!["memory", "search", "anything", "--slug", "nosuch"],
+        vec!["unregister", "nosuch"],
+    ] {
+        let out = env.run_in(&fixture, &command);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{command:?} succeeded:\n{}", String::from_utf8_lossy(&out.stdout));
+        assert!(stderr.contains(NOT_REGISTERED), "{command:?}: {stderr}");
+    }
+    assert!(env.run_ok(&["list"]).contains("inside"), "the project must still be registered");
+}
+
+/// Outside every project, an unknown slug or an unregistered directory names what was given
+/// rather than "No project specified".
+#[test]
+fn unknown_slug_or_directory_fails_from_outside_every_project() {
+    let env = CliTestEnv::new();
+    let fixture = env.fixture_path();
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "only"]);
+    let outside = tempfile::tempdir().unwrap();
+
+    for command in [vec!["map", "--slug", "nosuch"], vec!["status", "--slug", "nosuch"], vec!["fn", "main", "--slug", "nosuch"]] {
+        let out = env.run_in(outside.path(), &command);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{command:?} succeeded");
+        assert!(stderr.contains(NOT_REGISTERED), "{command:?}: {stderr}");
+    }
+
+    let dir = outside.path().to_str().unwrap();
+    let out = env.run_in(outside.path(), &["status", "--slug", dir]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains(&format!("Project '{dir}' is not registered (see `graphmind list`)")), "{stderr}");
+}
+
+/// A registered slug, the project's path and a directory inside it all resolve from outside.
+#[test]
+fn registered_slug_or_path_resolves_from_outside() {
+    let env = CliTestEnv::new();
+    let fixture = env.fixture_path();
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "by-path"]);
+    let outside = tempfile::tempdir().unwrap();
+    let src = fixture.join("src");
+    for given in ["by-path", fixture.to_str().unwrap(), src.to_str().unwrap()] {
+        let out = env.run_ok_in(outside.path(), &["status", "--slug", given]);
+        assert!(out.contains("Project: by-path"), "{given}: {out}");
+    }
+}
+
+/// `.` and `..` are directory paths taken from the current directory, like `./src`.
+#[test]
+fn dot_and_dot_dot_name_the_current_and_parent_directory() {
+    let env = CliTestEnv::new();
+    let fixture = env.fixture_path();
+    env.run_ok(&["register", fixture.to_str().unwrap(), "--slug", "dots"]);
+    let src = fixture.join("src");
+    for (dir, given) in [(&fixture, "."), (&src, "."), (&src, ".."), (&src, "../src")] {
+        let out = env.run_ok_in(dir, &["status", "--slug", given]);
+        assert!(out.contains("Project: dots"), "{given} in {dir:?}: {out}");
+    }
+
+    let outside = tempfile::tempdir().unwrap();
+    let out = env.run_in(outside.path(), &["status", "--slug", "."]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("Project '.' is not registered (see `graphmind list`)"), "{stderr}");
+}

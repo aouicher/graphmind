@@ -10,7 +10,8 @@ name: gm
 description: >
   Code intelligence via graphmind. Use /gm <query> for ALL code exploration:
   find symbols, trace callers, view dependencies, file outlines, impact analysis.
-  Replaces grep/find/Explore agents in any graphmind-registered project.
+  Replaces grep/find/Explore agents in any graphmind-registered project, and
+  answers questions about a registered project from outside it (with --slug).
 allowed-tools: Bash, Read
 ---
 
@@ -32,7 +33,7 @@ Examples:
 - `/gm project overview` → map
 - `/gm dead code` → unused functions
 - `/gm circular deps` → cycles
-- `/gm export dispatch_tool as mermaid` → graph export
+- `/gm export the graph as mermaid` → graph export
 - `/gm listeners for order_created` → event handlers
 
 ## Routing logic
@@ -56,13 +57,29 @@ When you receive a `/gm` query, route as follows:
 | Dead code / unused functions | `graphmind dead-code` |
 | Circular dependencies | `graphmind cycles` |
 | Similar/duplicate functions | `graphmind similar <symbol>` |
-| Export graph (Mermaid/DOT) | `graphmind export --symbol <name>` |
+| Export graph (Mermaid/DOT) | `graphmind export --format mermaid` |
 | Event listeners | `graphmind listeners <event>` |
 | Project status/health | `graphmind status` |
 | Rebuild index | `graphmind build` |
-| Raw file content | `graphmind file <file>` |
 
 If ambiguous, default to `graphmind search`.
+
+## Outside an indexed project
+
+Commands default to the project containing the current directory. Check where you are with `graphmind which` before the first command: inside a registered project it prints the project's slug (exit code 0); outside every registered project it prints nothing and exits with code 1. Don't wait for a command to fail: outside a project, `graphmind memory search` without `--slug` exits 0 and searches global memory only.
+
+Outside a registered project:
+
+1. Run `graphmind list` to see the registered projects (slug and path).
+2. Pick the project the question is about. If the question is about the current folder and no registered project matches, use your normal tools (and suggest `graphmind init` to index the folder). Ask the user only when several registered projects could match.
+3. Pass it to every command with `--slug <project>`, for example:
+   - `graphmind search "retry policy" --limit 15 --slug myapp`
+   - `graphmind fn dispatch_tool --slug myapp`
+   - `graphmind memory search "retry policy" --slug myapp`
+
+Every command above takes `--slug` except `graphmind list` and `graphmind cross query`, which span all projects. A slug that isn't registered fails with "Project '<slug>' is not registered (see `graphmind list`)". `graphmind diff-impact` reads the git changes of the current directory, so it only works from inside the project's checkout.
+
+When a registered project matches the question, never fall back to grep or find across unrelated folders.
 
 ## Execution
 
@@ -90,17 +107,37 @@ const SUB_SKILLS: &[(&str, &str)] = &[
     ("gm-who-calls", "---\ndescription: >\n  Trace transitive callers of a symbol up to N depth (BFS).\n  Answers \"how do we reach this function?\" across the call graph.\nallowed-tools: Bash\n---\n\n# /gm-who-calls — Transitive caller chain\n\nUsage: `/gm-who-calls <symbol> [depth]`\n\nRuns `graphmind who-calls <symbol>` to trace all paths leading to a function.\n\nDefault depth: 3. Pass a number to increase: `/gm-who-calls handle_request 5`\n\n## Execution\n\nRun via Bash: `graphmind who-calls <symbol> --depth <N>`\n"),
     ("gm-map", "---\ndescription: >\n  Project overview: top connected files ranked by importance.\n  Use to understand project architecture at a glance.\nallowed-tools: Bash\n---\n\n# /gm-map — Project map\n\nUsage: `/gm-map`\n\nRuns `graphmind map` to show the most connected files.\n\n## Execution\n\nRun via Bash: `graphmind map`\n"),
     ("gm-memory", "---\ndescription: >\n  Search or save to graphmind persistent memory (decisions, patterns, conventions).\n  Use to recall context or save important facts across sessions.\nallowed-tools: Bash\n---\n\n# /gm-memory — Persistent memory\n\nUsage:\n- `/gm-memory search <query>` — recall relevant facts\n- `/gm-memory add <fact>` — save a decision/pattern/convention\n- `/gm-memory add --priority <fact>` — save as always-injected\n\n## Execution\n\nRun via Bash:\n- Search: `graphmind memory search \"<query>\"`\n- Add: `graphmind memory add \"<content>\"`\n- Add priority: `graphmind memory add --priority \"<content>\"`\n"),
-    ("gm-diff", "---\ndescription: >\n  Analyze git diff impact on the code graph. Shows which symbols and files\n  are affected by current uncommitted changes.\nallowed-tools: Bash\n---\n\n# /gm-diff — Git diff impact\n\nUsage: `/gm-diff`\n\nRuns `graphmind diff-impact` to show symbols affected by current git changes.\n\n## Execution\n\nRun via Bash: `graphmind diff-impact`\n"),
+    ("gm-diff", "---\ndescription: >\n  Analyze git diff impact on the code graph. Shows which symbols and files\n  are affected by current uncommitted changes.\nallowed-tools: Bash\n---\n\n# /gm-diff — Git diff impact\n\nUsage: `/gm-diff`\n\nRuns `graphmind diff-impact` to show symbols affected by current git changes.\n\nIt reads the git changes of the current directory, so run it from inside the project's checkout.\n\n## Execution\n\nRun via Bash: `graphmind diff-impact`\n"),
     ("gm-cross", "---\ndescription: >\n  Cross-project search: find symbols across all registered graphmind projects.\n  Use when a symbol might be defined in another repo.\nallowed-tools: Bash\n---\n\n# /gm-cross — Cross-project search\n\nUsage: `/gm-cross <symbol>`\n\nRuns `graphmind cross query <symbol>` to search across all projects.\n\n## Execution\n\nRun via Bash: `graphmind cross query <symbol>`\n"),
     ("gm-dead-code", "---\ndescription: >\n  Find symbols with no incoming edges — likely dead code candidates.\n  Use to audit, clean up, or understand which parts of the codebase are unused.\nallowed-tools: Bash\n---\n\n# /gm-dead-code — Dead code detection\n\nUsage: `/gm-dead-code`\n\nRuns `graphmind dead-code` to find functions/methods with no callers.\n\n## Execution\n\nRun via Bash: `graphmind dead-code`\n"),
     ("gm-cycles", "---\ndescription: >\n  Detect circular dependencies between files.\n  Use to understand architecture, spot coupling, or validate module boundaries.\nallowed-tools: Bash\n---\n\n# /gm-cycles — Circular dependencies\n\nUsage: `/gm-cycles`\n\nRuns `graphmind cycles` to detect circular file dependencies.\n\n## Execution\n\nRun via Bash: `graphmind cycles`\n"),
     ("gm-similar", "---\ndescription: >\n  Find structurally similar symbols (same kind, similar size and callee count).\n  Use to spot duplication, find related patterns, or discover analogous implementations.\nallowed-tools: Bash\n---\n\n# /gm-similar — Find similar symbols\n\nUsage: `/gm-similar <symbol>`\n\nRuns `graphmind similar <symbol>` to find structurally similar functions.\n\n## Execution\n\nRun via Bash: `graphmind similar <symbol>`\n"),
-    ("gm-export", "---\ndescription: >\n  Export a file or symbol neighborhood as Mermaid flowchart or DOT graph.\n  Use for documentation or visual architecture understanding.\nallowed-tools: Bash\n---\n\n# /gm-export — Export graph visualization\n\nUsage:\n- `/gm-export file <path>` — export file subgraph\n- `/gm-export symbol <name>` — export symbol neighborhood\n\nOutputs Mermaid by default. Add `--format dot` for DOT format.\n\n## Execution\n\nRun via Bash: `graphmind export --file <path>` or `graphmind export --symbol <name>`\n"),
+    ("gm-export", "---\ndescription: >\n  Export the project graph as a Mermaid flowchart, DOT graph or JSON.\n  Use for documentation or visual architecture understanding.\nallowed-tools: Bash\n---\n\n# /gm-export — Export graph visualization\n\nUsage: `/gm-export [mermaid|dot|json]`\n\nExports the whole project graph (default format: JSON). Add `--cross` to include cross-project links.\n\n## Execution\n\nRun via Bash: `graphmind export --format <mermaid|dot|json>`\n"),
     ("gm-listeners", "---\ndescription: >\n  Find all functions/methods that listen to a domain event.\n  Use to trace event-driven architectures and understand side effects.\nallowed-tools: Bash\n---\n\n# /gm-listeners — Event listeners\n\nUsage: `/gm-listeners <event_name>`\n\nRuns `graphmind listeners <event>` to find all handlers for a domain event.\n\nExample: `/gm-listeners order_created`\n\n## Execution\n\nRun via Bash: `graphmind listeners <event>`\n"),
     ("gm-status", "---\ndescription: >\n  Health check: graph stats, symbol/edge count, last build time, languages.\n  Use to verify a project is indexed and up to date.\nallowed-tools: Bash\n---\n\n# /gm-status — Project status\n\nUsage: `/gm-status`\n\nRuns `graphmind status` to show graph stats for the current project.\n\n## Execution\n\nRun via Bash: `graphmind status`\n"),
     ("gm-build", "---\ndescription: >\n  Rebuild the code graph index. Use after adding/removing modules,\n  major refactors, or after git merge with structural changes.\nallowed-tools: Bash\n---\n\n# /gm-build — Rebuild graph\n\nUsage: `/gm-build`\n\nRuns `graphmind build` to reindex the project (fast, SHA256-cached).\n\n## Execution\n\nRun via Bash: `graphmind build`\n"),
     ("gm-file", "---\ndescription: >\n  Read raw source content of an indexed file from a registered project.\n  Use when you need the full file rather than individual symbols.\nallowed-tools: Bash\n---\n\n# /gm-file — Raw file content\n\nUsage: `/gm-file <file>`\n\nRuns `graphmind file <file>` to read an indexed file (one the graph covers) by path relative to the project root.\n\n## Execution\n\nRun via Bash: `graphmind file <file>`\n"),
 ];
+
+/// Appended to every sub-skill whose command takes `--slug`: all but those in `SUB_SKILLS_WITHOUT_PROJECT_NOTE`.
+const SUB_SKILL_PROJECT_NOTE: &str = "\n## Outside an indexed project\n\nIf `graphmind which` prints nothing (exit code 1), you are outside every registered project: run `graphmind list`, pick the project the question is about (ask the user only when several could match) and add `--slug <project>` to the command.\n";
+
+/// Appended to gm-memory's note: memory commands don't fail outside a project.
+const MEMORY_PROJECT_NOTE: &str = "\nOutside a project, `graphmind memory search` without `--slug` exits 0 and searches global memory only. Save a fact about a project with `--slug <project>`, and use `--global` only for cross-project or personal facts.\n";
+
+/// gm-cross searches every project; gm-diff reads the current directory's git changes.
+const SUB_SKILLS_WITHOUT_PROJECT_NOTE: &[&str] = &["gm-cross", "gm-diff"];
+
+/// The SKILL.md text of a sub-skill, with the project note where it applies.
+fn sub_skill_text(name: &str, content: &str) -> String {
+    if SUB_SKILLS_WITHOUT_PROJECT_NOTE.contains(&name) {
+        content.to_string()
+    } else if name == "gm-memory" {
+        format!("{content}{SUB_SKILL_PROJECT_NOTE}{MEMORY_PROJECT_NOTE}")
+    } else {
+        format!("{content}{SUB_SKILL_PROJECT_NOTE}")
+    }
+}
 
 pub fn install_skill() {
     let skills_base = home_dir()
@@ -126,7 +163,7 @@ pub fn install_skill() {
     for (name, content) in SUB_SKILLS {
         let dir = skills_base.join(name);
         fs::create_dir_all(&dir).ok();
-        match fs::write(dir.join("SKILL.md"), content) {
+        match fs::write(dir.join("SKILL.md"), sub_skill_text(name, content)) {
             Ok(_) => installed += 1,
             Err(e) => failed.push(format!("{name}: {e}")),
         }
@@ -192,6 +229,60 @@ mod tests {
     #[test]
     fn main_skill_is_named_gm() {
         assert!(frontmatter(SKILL_CONTENT).lines().any(|l| l.trim() == "name: gm"));
+    }
+
+    /// Skill selection reads the description: it must cover questions asked from outside a project.
+    #[test]
+    fn main_skill_description_covers_use_outside_a_project() {
+        let description = frontmatter(SKILL_CONTENT);
+        assert!(description.contains("from outside it (with --slug)"), "{description}");
+    }
+
+    /// Outside a project the agent checks `graphmind which` up front (memory search doesn't fail),
+    /// uses its normal tools for an unregistered folder, and targets a project with `--slug`.
+    #[test]
+    fn main_skill_explains_use_outside_a_project() {
+        let start = SKILL_CONTENT.find("## Outside an indexed project").expect("section");
+        let end = SKILL_CONTENT.find("## Execution").expect("next section");
+        let section = &SKILL_CONTENT[start..end];
+        for expected in [
+            "`graphmind which`",
+            "prints nothing and exits with code 1",
+            "`graphmind memory search` without `--slug` exits 0 and searches global memory only",
+            "`graphmind list`",
+            "use your normal tools",
+            "Ask the user only when several registered projects could match",
+            "--slug <project>",
+            "except `graphmind list` and `graphmind cross query`",
+            "is not registered (see `graphmind list`)",
+        ] {
+            assert!(section.contains(expected), "missing {expected:?}:\n{section}");
+        }
+        assert!(!section.contains("No project specified"), "{section}");
+    }
+
+    #[test]
+    fn routing_table_lists_each_intent_once() {
+        let rows: Vec<&str> = SKILL_CONTENT.lines().filter(|l| l.starts_with("| ") && l.contains("`graphmind")).collect();
+        let unique: std::collections::HashSet<&str> = rows.iter().copied().collect();
+        assert_eq!(rows.len(), unique.len(), "{rows:#?}");
+    }
+
+    #[test]
+    fn sub_skills_get_the_project_note_unless_they_span_projects() {
+        for (name, content) in SUB_SKILLS {
+            let text = sub_skill_text(name, content);
+            let has_note = text.contains("`graphmind which`") && text.contains("--slug <project>") && text.contains("`graphmind list`");
+            assert_eq!(has_note, !SUB_SKILLS_WITHOUT_PROJECT_NOTE.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn memory_skill_says_search_reads_only_global_memory_without_slug() {
+        let (name, content) = SUB_SKILLS.iter().find(|(name, _)| *name == "gm-memory").expect("gm-memory");
+        let text = sub_skill_text(name, content);
+        assert!(text.contains("without `--slug` exits 0 and searches global memory only"), "{text}");
+        assert!(text.contains("use `--global` only for cross-project or personal facts"), "{text}");
     }
 
     /// Sub-skills are invoked by their directory name (`/gm-fn`), which is what their text says.

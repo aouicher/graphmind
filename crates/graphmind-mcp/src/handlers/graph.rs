@@ -50,7 +50,7 @@ fn handle_symbol_query(args: &Value, default_include_content: bool) -> Value {
         });
     }
 
-    if let Some(proj) = resolve_project(None) {
+    if let Ok(proj) = resolve_project(None) {
         let db_path = graphmind_config::paths::graph_db_path(&proj.slug);
         if db_path.exists() {
             if let Ok(conn) = init_database(&db_path.to_string_lossy()) {

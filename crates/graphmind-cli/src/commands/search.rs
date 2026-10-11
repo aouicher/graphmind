@@ -1,4 +1,5 @@
-use graphmind_config::{paths, resolve_project_slug, Registry};
+use graphmind_config::{paths, Registry};
+use super::resolve_project_slug;
 use graphmind_config::config::EmbeddingMode;
 use graphmind_embeddings::factory::create_engine;
 use graphmind_embeddings::search::semantic_search_excluding;

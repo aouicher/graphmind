@@ -61,7 +61,10 @@ pub struct LicenseConfig {
 /// v7 — Claude Code's MCP entries live per project (`projects.<path>.mcpServers.graphmind` in
 /// .claude.json): setup rewrites the stale ones of registered projects and replaces the
 /// user-scope graphmind entry that v5 and v6 wrote with entries for the registered projects.
-pub const SETUP_VERSION: u32 = 7;
+///
+/// v8 — `/gm` works outside an indexed project: the skill lists the registered projects and
+/// passes `--slug` to every command. Setup rewrites the skills and the CLAUDE.md block.
+pub const SETUP_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {

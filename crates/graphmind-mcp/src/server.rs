@@ -27,7 +27,8 @@ fn make_tool(name: &'static str, description: &'static str, schema: serde_json::
     Tool::new(name, description, input_schema)
 }
 
-fn tool_defs() -> Vec<Tool> {
+/// The tools the server lists, with their input schemas.
+pub fn tool_defs() -> Vec<Tool> {
     vec![
         make_tool("gm_query", "Resolve a symbol to its location + direct callers/callees as compact 5-line snippets (no full source). Use when you need the call graph but not the implementation. For full source, use gm_fn. Use file= or kind= to disambiguate overloaded names.", json!({
             "type": "object",
@@ -181,13 +182,15 @@ fn tool_defs() -> Vec<Tool> {
         make_tool("gm_cross_deps", "Lists all known cross-project dependency links for a specific project (what other projects it references or is referenced by). Use when analyzing inter-repo coupling or planning cross-project refactors. Requires project slug.", json!({
             "type": "object",
             "properties": {
-                "project": { "type": "string", "description": "Project slug" }
+                "project": { "type": "string", "description": "Project slug or absolute checkout path" }
             },
             "required": ["project"]
         })),
-        make_tool("gm_cross_links", "Lists all cross-project dependency links across every registered project in one call. Use for a global view of inter-repo relationships. No parameters. For links scoped to one project, use gm_cross_deps instead.", json!({
+        make_tool("gm_cross_links", "Lists all cross-project dependency links across every registered project in one call. Use for a global view of inter-repo relationships. For links scoped to one project, use gm_cross_deps instead.", json!({
             "type": "object",
-            "properties": {}
+            "properties": {
+                "project": { "type": "string", "description": "Project slug or absolute checkout path (optional — keeps only that project's links)" }
+            }
         })),
         make_tool("gm_diff_impact", "Analyzes the current git diff and returns which symbols and files are affected, plus their transitive dependents. Use before committing or reviewing a PR to understand the real blast radius of staged changes.", json!({
             "type": "object",

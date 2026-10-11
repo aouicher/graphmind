@@ -1,4 +1,5 @@
-use graphmind_config::{paths, resolve_project_slug, Registry};
+use graphmind_config::{paths, Registry};
+use super::resolve_project_slug;
 use colored::Colorize;
 use graphmind_memory::consolidate::{self, Policy, Report};
 use graphmind_memory::search::search as memory_search;
@@ -36,7 +37,7 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
             Some(s) => Some(s),
             None => {
                 eprintln!(
-                    "{} No project specified and none could be resolved. Use --global for unscoped memory.",
+                    "{} No project specified and none could be resolved. Pass --slug <project> (see `graphmind list`), or --global for a cross-project or personal fact.",
                     "Error:".red().bold()
                 );
                 std::process::exit(1);

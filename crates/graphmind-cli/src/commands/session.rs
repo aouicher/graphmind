@@ -1,4 +1,5 @@
-use graphmind_config::{paths, resolve_project_slug};
+use graphmind_config::paths;
+use super::resolve_project_slug;
 use colored::Colorize;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;

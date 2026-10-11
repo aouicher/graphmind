@@ -11,8 +11,8 @@ where
 {
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
-        Some(p) => p,
-        None => return err_text(&no_project_message()),
+        Ok(p) => p,
+        Err(e) => return err_text(&e),
     };
     let db_path = graphmind_config::paths::graph_db_path(&proj.slug);
     if !db_path.exists() {
@@ -34,10 +34,24 @@ where
 /// `project` argument (a slug, or a directory path such as the worktree an agent
 /// works in), else the MCP server's working directory. Never "the first
 /// registered project": with one project per worktree that would answer from
-/// whichever one the map happens to list first.
-pub(crate) fn resolve_project(explicit: Option<&str>) -> Option<ProjectConfig> {
-    let slug = graphmind_config::resolve_project_slug(&[explicit])?;
-    graphmind_config::Registry::get(&slug)
+/// whichever one the map happens to list first. The error is the text to return:
+/// an unknown `project`, or no project for the working directory.
+pub(crate) fn resolve_project(explicit: Option<&str>) -> Result<ProjectConfig, String> {
+    graphmind_config::try_resolve_project_slug(&[explicit])
+        .map_err(|e| unknown_project_message(&e))?
+        .and_then(|slug| graphmind_config::Registry::get(&slug))
+        .ok_or_else(no_project_message)
+}
+
+/// The registered project the `project` argument names (a slug or a directory path),
+/// for tools that work without one: `Ok(None)` when it is absent or empty, and the
+/// unknown-project error response when it names no registered project or worktree.
+pub(crate) fn explicit_project(args: &Value) -> Result<Option<String>, Value> {
+    let Some(project) = args.get("project").and_then(Value::as_str).filter(|p| !p.is_empty()) else {
+        return Ok(None);
+    };
+    graphmind_config::try_resolve_project_slug(&[Some(project)])
+        .map_err(|e| err_text(&unknown_project_message(&e)))
 }
 
 pub(crate) fn no_project_message() -> String {
@@ -52,17 +66,13 @@ pub(crate) fn no_project_message() -> String {
     )
 }
 
-/// Error text for a `project` argument that names no registered project.
-pub(crate) fn unknown_project_message(project: &str) -> String {
+/// Error text for a `project` argument that names no registered project: the CLI's
+/// wording followed by the registered slugs, since an MCP client cannot run `graphmind list`.
+pub(crate) fn unknown_project_message(unknown: &graphmind_config::UnknownProject) -> String {
     let mut slugs = all_project_slugs();
     slugs.sort();
-    if slugs.is_empty() {
-        return format!("Unknown project '{project}'. No project is registered: register one with `graphmind init`.");
-    }
-    format!(
-        "Unknown project '{project}'. Pass project=<slug> or project=<absolute path of a registered checkout>. Registered: {}",
-        slugs.join(", ")
-    )
+    let registered = if slugs.is_empty() { "none".to_string() } else { slugs.join(", ") };
+    format!("{unknown} Registered: {registered}")
 }
 
 pub(crate) fn all_project_slugs() -> Vec<String> {

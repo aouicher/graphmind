@@ -124,6 +124,10 @@ cd ~/projects/lib && graphmind init
 
 Both commands are idempotent — safe to re-run.
 
+### Using `/gm` outside a project
+
+Claude Code's MCP entries are per repository (see [MCP server for Claude Code](#mcp-server-for-claude-code)), so a session opened outside every registered project has no graphmind MCP tools. `/gm` runs the `graphmind` CLI and works there too: in a session opened outside any indexed project (`graphmind which` prints nothing and exits 1), it still answers questions about a registered project. It runs `graphmind list`, picks the project the question is about (asking you only when several could match), and passes it to every command with `--slug <project>`, for example `graphmind fn dispatch_tool --slug myapp`. Every query command takes `--slug`, except `list` and `cross query`, which span all projects. A slug that isn't registered is an error. Questions about an unregistered folder go to the agent's normal tools.
+
 ### Manual setup (if you prefer granular control)
 
 <details>
@@ -433,7 +437,7 @@ Memories are stored as JSONL files in `~/.graphmind/memory/`:
 ### Manual control
 
 ```bash
-graphmind memory add "<fact>" [--project <slug>] [--global]
+graphmind memory add "<fact>" [--slug <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>
@@ -518,7 +522,7 @@ graphmind embed --run --all         # generate embeddings for all projects
 
 ### Memory
 ```bash
-graphmind memory add "<fact>" [--project <slug>] [--global]
+graphmind memory add "<fact>" [--slug <slug>] [--global]
 graphmind memory search "<query>"
 graphmind memory list
 graphmind memory delete <id>

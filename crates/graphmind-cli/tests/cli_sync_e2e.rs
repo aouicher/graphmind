@@ -13,6 +13,10 @@ fn sync_creates_claude_md_if_missing() {
     let content = fs::read_to_string(&claude_md).unwrap();
     assert!(content.contains("<!-- GM:START -->"), "CLAUDE.md should contain GM:START, got: {content}");
     assert!(content.contains("<!-- GM:END -->"), "CLAUDE.md should contain GM:END");
+    assert!(content.contains("use `/gm` for questions about a registered project"), "{content}");
+    assert!(content.contains("save with `--slug <project>` when the fact is about that project"), "{content}");
+    assert!(!content.contains("always use `--global`"), "{content}");
+    assert!(content.contains("| Find symbol | `gm_fn` |"), "{content}");
 }
 
 #[test]

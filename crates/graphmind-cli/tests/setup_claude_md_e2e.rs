@@ -124,6 +124,81 @@ fn setup_keeps_an_edited_block_from_before_fingerprints() {
     });
 }
 
+/// The text of the block that invokes `Skill(skill: "gm")`, before the outside-a-project line.
+const STOCK_BLOCK_GM_SKILL: &str = r#"## Mandatory: Code exploration via graphmind
+
+In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY code exploration, architecture understanding, or symbol lookup. This applies to:
+- Answering questions about how something works
+- Finding symbols, callers, dependencies, outlines
+- Understanding code before making changes
+- Exploring architecture or blast radius
+
+**Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first.
+
+To **read** a symbol's source code, use `/gm-fn <symbol>` — it returns full source + callers + callees in one call. Prefer it over Read when you already know the symbol name.
+
+Only fall back to grep for: string literals, config values, env vars, non-code patterns.
+
+Invoke: `Skill(skill: "gm", args: "<your query>")`
+
+**Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory **during** and after every session, without waiting for the user to ask. Save immediately when something is decided or discovered — do not wait for the end of the session.
+
+Categories and commands:
+- Architectural decisions → `graphmind memory add "<decision>" --type decision`
+- Patterns/conventions → `--type pattern` or `--type convention`
+- Bugs found or fixed → `--type bug`
+- Critical always-needed facts → add `--priority` (injected every session)
+- Cross-project or user-level facts → add `--global`
+
+In a registered project: save without `--global` by default (project-scoped).
+Outside a registered project: always use `--global`.
+
+Be selective — only facts useful in a future session. Skip task details and temporary state."#;
+
+/// That block as setup wrote it (fingerprint `a3525aa0ac26eaef`) and without its fingerprint.
+fn previous_stock_blocks() -> [String; 2] {
+    [
+        format!("<!-- GM:START -->\n<!-- GM:HASH:a3525aa0ac26eaef -->\n<!-- GM:VERSION:0.3.2 -->\n\n{STOCK_BLOCK_GM_SKILL}\n\n<!-- GM:END -->"),
+        format!("<!-- GM:START -->\n<!-- GM:VERSION:0.3.2 -->\n\n{STOCK_BLOCK_GM_SKILL}\n\n<!-- GM:END -->"),
+    ]
+}
+
+#[test]
+fn setup_updates_the_previous_stock_block() {
+    with_home(|home| {
+        let claude_md = home.join(".claude").join("CLAUDE.md");
+        fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
+
+        for previous in previous_stock_blocks() {
+            fs::write(&claude_md, format!("# Mine\n\n{previous}\n\nmore\n")).unwrap();
+            assert_eq!(install_claude_md_block(), Outcome::Written, "{previous}");
+            let content = fs::read_to_string(&claude_md).unwrap();
+            assert!(content.contains("use `/gm` for questions about a registered project"), "{content}");
+            assert!(!content.contains("always use `--global`"), "{content}");
+            assert!(!content.contains("a3525aa0ac26eaef"), "{content}");
+            assert_eq!(content.matches("<!-- GM:START -->").count(), 1);
+            assert!(content.starts_with("# Mine\n\n") && content.ends_with("\n\nmore\n"), "{content}");
+        }
+    });
+}
+
+#[test]
+fn setup_keeps_an_edited_previous_stock_block() {
+    with_home(|home| {
+        let claude_md = home.join(".claude").join("CLAUDE.md");
+        fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
+
+        for previous in previous_stock_blocks() {
+            let edited = previous.replace("ALWAYS use `/gm`", "prefer `/gm`");
+            assert_ne!(edited, previous);
+            let content = format!("# Mine\n\n{edited}\n");
+            fs::write(&claude_md, &content).unwrap();
+            assert!(matches!(install_claude_md_block(), Outcome::LeftAlone(_)), "{edited}");
+            assert_eq!(fs::read_to_string(&claude_md).unwrap(), content);
+        }
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn setup_leaves_an_unreadable_claude_md_alone() {

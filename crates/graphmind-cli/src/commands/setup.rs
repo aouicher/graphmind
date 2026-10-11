@@ -11,6 +11,7 @@ pub use graphmind_config::mcp_clients::{McpClient, Outcome};
 mod claude_md;
 #[doc(hidden)]
 pub use claude_md::{install_claude_md_block, uninstall_claude_md_block};
+pub(crate) use claude_md::GM_INSTRUCTIONS;
 
 mod shell_path;
 #[doc(hidden)]

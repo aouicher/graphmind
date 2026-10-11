@@ -3,7 +3,7 @@ use graphmind_db::schema::init_database;
 use serde_json::{json, Value};
 
 use crate::formatting::{compact_edge_line, compact_symbol_line, err_text, json_text, text_content};
-use crate::graph_helpers::{all_project_slugs, compact_edges};
+use crate::graph_helpers::{all_project_slugs, compact_edges, explicit_project};
 use crate::search_helpers::{fuse_fts_and_semantic, load_embed_engine, FusedResult};
 
 pub(crate) fn handle_search(args: &Value) -> Value {
@@ -34,14 +34,16 @@ pub(crate) fn handle_search(args: &Value) -> Value {
         .get("format")
         .and_then(|v| v.as_str())
         .unwrap_or("compact");
-    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let project_slug = match explicit_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let code_only = args.get("code_only").and_then(|v| v.as_bool()).unwrap_or(false);
     let exclude_languages: &[&str] = if code_only { graphmind_db::builder::DOC_LANGUAGES } else { &[] };
 
-    let slugs = if let Some(slug) = project_slug {
-        vec![slug.to_string()]
-    } else {
-        all_project_slugs()
+    let slugs = match project_slug {
+        Some(slug) => vec![slug],
+        None => all_project_slugs(),
     };
 
     // Load embedding engine if configured
@@ -254,12 +256,14 @@ pub(crate) fn handle_listeners(args: &Value) -> Value {
         Some(e) => e,
         None => return err_text("Missing required parameter: event"),
     };
-    let project_slug = args.get("project").and_then(|v| v.as_str());
+    let project_slug = match explicit_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
 
-    let slugs = if let Some(slug) = project_slug {
-        vec![slug.to_string()]
-    } else {
-        all_project_slugs()
+    let slugs = match project_slug {
+        Some(slug) => vec![slug],
+        None => all_project_slugs(),
     };
 
     let mut all_results: Vec<Value> = Vec::new();

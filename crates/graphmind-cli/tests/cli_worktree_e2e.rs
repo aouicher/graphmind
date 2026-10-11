@@ -248,6 +248,10 @@ fn project_argument_accepts_a_checkout_path() {
     // How an MCP client in a worktree names its project.
     let out = env.run_ok(&["status", wt2.to_str().unwrap()]);
     assert_eq!(status_project(&out), "wt2", "got: {out}");
+
+    // Given with --slug from inside the main checkout, the worktree wins over the current directory.
+    let out = env.run_ok_in(&repo, &["status", "--slug", wt2.to_str().unwrap()]);
+    assert_eq!(status_project(&out), "wt2", "got: {out}");
 }
 
 #[test]

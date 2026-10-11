@@ -50,8 +50,8 @@ pub(crate) fn handle_status(args: &Value) -> Value {
 pub(crate) fn handle_context(args: &Value) -> Value {
     let project_slug = args.get("project").and_then(|v| v.as_str());
     let proj = match resolve_project(project_slug) {
-        Some(p) => p,
-        None => return err_text(&crate::graph_helpers::no_project_message()),
+        Ok(p) => p,
+        Err(e) => return err_text(&e),
     };
 
     // Graph stats

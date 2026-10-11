@@ -1,7 +1,8 @@
 use chrono::{DateTime, Local};
 use colored::Colorize;
-use graphmind_config::{paths, ProjectConfig, Registry, resolve_project_slug};
+use graphmind_config::{paths, ProjectConfig, Registry};
 use std::path::Path;
+use super::resolve_project_slug;
 
 fn fmt_local(utc: &str) -> String {
     DateTime::parse_from_rfc3339(utc)

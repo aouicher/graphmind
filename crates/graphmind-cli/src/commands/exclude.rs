@@ -1,4 +1,5 @@
-use graphmind_config::{load_config, save_config, Registry, resolve_project_slug};
+use graphmind_config::{load_config, save_config, Registry};
+use super::resolve_project_slug;
 use colored::Colorize;
 
 pub fn add(patterns: &[String], in_slug: Option<&str>, global: bool) {

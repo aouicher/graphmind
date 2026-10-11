@@ -16,5 +16,5 @@ pub use config::{
     EmbeddingConfig, EmbeddingMode, Feature, GlobalConfig, LicenseConfig, McpConfig, ProjectConfig,
     Registry, Tier, SETUP_VERSION,
 };
-pub use resolve::{resolve_path, resolve_project_slug};
+pub use resolve::{resolve_path, try_resolve_project_slug, UnknownProject};
 pub use seed::{lock_build, on_worktree_linked, seed_graph, spawn_background_build};
