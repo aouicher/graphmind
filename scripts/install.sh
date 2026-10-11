@@ -6,6 +6,7 @@ INSTALL_DIR="${GRAPHMIND_INSTALL_DIR:-$HOME/.local/bin}"
 BINARY="graphmind"
 
 info()  { printf '\033[1;34m%s\033[0m\n' "$*"; }
+warn()  { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 error() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 detect_platform() {
@@ -88,7 +89,7 @@ download() {
 configure_path() {
     local dir="$1"
     local export_line="export PATH=\"${dir}:\$PATH\""
-    local updated=()
+    local updated=() skipped=()
 
     # zshenv: always ensure (loaded even in non-interactive shells — needed for MCP)
     # zshrc/bashrc: only if the file already exists
@@ -96,18 +97,33 @@ configure_path() {
     for profile in "${profiles[@]}"; do
         local profile_path="$HOME/$profile"
         [ ! -f "$profile_path" ] && [ "$profile" != ".zshenv" ] && continue
+        # A profile this script can't read or write is left as it is.
+        if [ -e "$profile_path" ] && { [ ! -r "$profile_path" ] || [ ! -w "$profile_path" ]; }; then
+            skipped+=("$profile")
+            continue
+        fi
         if grep -qF "$dir" "$profile_path" 2>/dev/null; then
             continue
         fi
-        printf '\n%s\n' "$export_line" >> "$profile_path"
+        if ! printf '\n%s\n' "$export_line" >> "$profile_path" 2>/dev/null; then
+            skipped+=("$profile")
+            continue
+        fi
         updated+=("$profile")
     done
 
-    if [ ${#updated[@]} -eq 0 ]; then
-        info "PATH already configured"
-    else
+    if [ ${#skipped[@]} -gt 0 ]; then
+        for profile in "${skipped[@]}"; do
+            warn "~/${profile} can't be read or written; left as it is."
+        done
+        warn "Add this line to your shell profile yourself: ${export_line}"
+    fi
+
+    if [ ${#updated[@]} -gt 0 ]; then
         info "PATH added to: ${updated[*]}"
         echo "  Restart your shell or run: source ~/${updated[0]}"
+    elif [ ${#skipped[@]} -eq 0 ]; then
+        info "PATH already configured"
     fi
 }
 
