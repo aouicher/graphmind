@@ -1,3 +1,4 @@
+use graphmind_db::paths::indexed_project_file;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 use serde_json::{json, Value};
@@ -192,14 +193,22 @@ pub(crate) fn handle_file(args: &Value) -> Value {
         Some(s) => s,
         None => return err_text("Missing required parameter: file"),
     };
-    with_graph(args, |_gq, proj| {
-        let path = std::path::Path::new(&proj.path).join(file);
+    with_graph(args, |gq, proj| {
+        let path = match indexed_project_file(std::path::Path::new(&proj.path), file, |p| gq.is_indexed_file(p)) {
+            Ok(path) => path,
+            Err(e) => {
+                // An unindexed path gets a pointer to the tools that report indexed ones.
+                let rel = file.strip_prefix("./").unwrap_or(file);
+                let hint = if gq.is_indexed_file(rel) { "" } else { " gm_outline and gm_search report indexed paths." };
+                return err_text(&format!("{e}{hint}"));
+            }
+        };
         match std::fs::read_to_string(&path) {
             Ok(content) => text_content(&format!(
                 "# {file} [{slug}]\n\n```\n{content}\n```",
                 slug = proj.slug
             )),
-            Err(e) => err_text(&format!("Cannot read {}: {e}", path.display())),
+            Err(e) => err_text(&format!("Cannot read {file}: {e}")),
         }
     })
 }

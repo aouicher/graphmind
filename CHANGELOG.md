@@ -27,6 +27,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 - **A build fails when the project directory can't be read.** It used to report 0 files and empty the graph; the graph is now left as it was and `graphmind build` exits non-zero.
 - **Memory tools only accept registered projects.** `project` must be a registered slug or the path of a registered checkout or worktree; anything else returns an error listing the registered projects. Memory files are only ever created in `~/.graphmind/memory`.
 - **`graphmind file` only shows indexed files of the project.**
+- **`gm_file` only serves indexed files of the project.** The path is relative to the project root, as `gm_outline` and `gm_search` report it. Thanks @KennethWKZ.
 
 ### Changed
 

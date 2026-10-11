@@ -198,7 +198,7 @@ fn file_refuses_indexed_path_that_is_now_a_symlink_leading_out() {
     let link = dir.path().join("proj/src/link.rs");
     std::fs::remove_file(&link).unwrap();
     std::os::unix::fs::symlink(dir.path().join("outside.rs"), &link).unwrap();
-    assert_file_refused(&env, "src/link.rs", "outside_secret", "resolves outside the project directory");
+    assert_file_refused(&env, "src/link.rs", "outside_secret", "does not resolve to a regular file inside the project directory");
 }
 
 #[cfg(unix)]
@@ -224,4 +224,49 @@ fn file_refuses_links_to_ignored_files_and_serves_links_to_indexed_ones() {
     assert_file_refused(&env, "conf.toml", "PROD_SECRET", "not an indexed file of this project");
     let out = env.run_ok(&["file", "src/alias.rs", "--in", "file-guard"]);
     assert!(out.contains("inside_fn"), "a link to an indexed file is served, got: {out}");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_refuses_indexed_path_that_is_now_a_symlink_to_an_unindexed_file() {
+    let env = CliTestEnv::new();
+    let dir = file_guard_project(&env);
+    let link = dir.path().join("proj/src/link.rs");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("proj/.env"), &link).unwrap();
+    assert_file_refused(&env, "src/link.rs", "ENV_SECRET", "resolves to a file that is not indexed");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_refuses_indexed_path_that_is_now_a_fifo_without_blocking() {
+    let env = CliTestEnv::new();
+    let dir = file_guard_project(&env);
+    let fifo = dir.path().join("proj/src/link.rs");
+    std::fs::remove_file(&fifo).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo failed");
+
+    let mut child = std::process::Command::new(&env.binary)
+        .args(["file", "src/link.rs", "--in", "file-guard"])
+        .env("HOME", env.home.path())
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to run graphmind");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            child.kill().ok();
+            child.wait().ok();
+            panic!("graphmind file blocked on a FIFO");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert!(!status.success(), "a FIFO must be refused");
 }

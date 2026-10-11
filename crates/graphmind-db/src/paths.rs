@@ -15,16 +15,17 @@ pub fn project_file(canonical_root: &Path, path: &Path) -> Option<PathBuf> {
     std::fs::metadata(&resolved).ok()?.is_file().then_some(resolved)
 }
 
-/// The file a reader may open for `file`: an indexed file of the project at `root` whose real
-/// path, symlinks resolved, is inside the project directory. `file` is relative to the project
-/// root (a leading `./` is accepted); absolute paths, `..`, files the graph doesn't cover and
-/// symlinks that lead out are refused. The indexer skips dotfiles, files in dot-directories
-/// and files that `.gitignore`, `.ignore`, the global gitignore or the exclude patterns match,
-/// and indexes a symlink only when its target is a file it indexes; so as of the last build
-/// none of these is indexed, directly or through a link. A link's target is checked against
-/// those rules at build time; here it is only checked to be inside the project directory.
-/// `is_indexed` answers whether a relative path is in the project's graph, typically
-/// [`crate::queries::GraphQueries::is_indexed_file`].
+/// The file a reader may open for `file`: an indexed file of the project at `root` that resolves,
+/// symlinks followed, to a regular file inside the project directory whose own path relative to
+/// the project root is indexed too. `file` is relative to the project root (a leading `./` is
+/// accepted); absolute paths, `..`, paths the graph doesn't cover, paths that resolve outside the
+/// project or to anything but a regular file (directory, FIFO, socket, device), and paths that
+/// resolve to a file the graph doesn't cover are refused. The indexer skips dotfiles, files in
+/// dot-directories and files that `.gitignore`, `.ignore`, the global gitignore or the exclude
+/// patterns match, and indexes a symlink only when its target is a file it indexes; so a link to
+/// an indexed file is served, and none of the skipped files is, directly or through a link or a
+/// directory component replaced since the last build. `is_indexed` answers whether a relative path
+/// is in the project's graph, typically [`crate::queries::GraphQueries::is_indexed_file`].
 ///
 /// The real path is checked when this is called; the caller then opens it. Swapping a path
 /// component for a symlink in between needs write access to the project directory.
@@ -35,11 +36,20 @@ pub fn indexed_project_file(root: &Path, file: &str, is_indexed: impl Fn(&str) -
         return Err(format!("{file}: not an indexed file of this project (use a path relative to the project root)"));
     }
     let root = std::fs::canonicalize(root).map_err(|e| format!("Cannot read the project directory: {e}"))?;
-    let path = std::fs::canonicalize(root.join(rel)).map_err(|e| format!("Cannot read {file}: {e}"))?;
-    if !path.starts_with(&root) {
-        return Err(format!("{file}: resolves outside the project directory"));
+    let path = project_file(&root, &root.join(rel))
+        .ok_or_else(|| format!("{file}: does not resolve to a regular file inside the project directory"))?;
+    let target = path.strip_prefix(&root).ok().and_then(|t| {
+        t.components()
+            .map(|c| match c {
+                Component::Normal(s) => s.to_str(),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    });
+    match target {
+        Some(parts) if is_indexed(&parts.join("/")) => Ok(path),
+        _ => Err(format!("{file}: resolves to a file that is not indexed")),
     }
-    Ok(path)
 }
 
 #[cfg(test)]
@@ -119,6 +129,6 @@ mod tests {
         let (_d, root, outside) = project_with_outside();
         std::os::unix::fs::symlink(&outside, root.join("src/link.rs")).unwrap();
         let err = indexed_project_file(&root, "src/link.rs", |p| p == "src/link.rs").unwrap_err();
-        assert!(err.contains("outside the project"), "{err}");
+        assert!(err.contains("inside the project directory"), "{err}");
     }
 }
