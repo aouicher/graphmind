@@ -97,7 +97,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(dir.path());
         for f in facts {
-            store.add(f, AddOptions::default());
+            store.add(f, AddOptions::default()).unwrap();
         }
         let entries = store.list(None);
         (dir, entries)

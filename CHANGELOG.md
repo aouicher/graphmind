@@ -17,6 +17,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 - **Dead hooks retired.** The Stop and PostToolUse hooks read fields Claude Code doesn't send, so they never did anything while costing a process per event; setup removes them. Daily memory upkeep runs from the SessionStart hook.
 - **Hook changes reach existing installs.** Auto-setup also runs when the installed hook scripts differ from the binary's, or when settings.json doesn't register them as this version does (an event, matcher or timeout), including from inside a hook.
 - **The search nudge fires for the searches Claude Code runs.** Claude Code's native macOS and Linux builds have no Grep or Glob tools and search through Bash, so the nudge toward `/gm` now also fires for `ugrep`, `bfs`, and `rg`, `grep` and the other search commands after `cd … &&`, `||` or `;`, and for Glob calls and Explore agents where those exist. A command that runs graphmind, or a search whose output is piped on, is left alone.
+- **Indexing stays inside the project.** Files linked from outside the project are no longer indexed, nor links to files the project skips (dotfiles, gitignored or excluded files). Named pipes, sockets and devices are skipped instead of blocking the build.
+- **A build fails when the project directory can't be read.** It used to report 0 files and empty the graph; the graph is now left as it was and `graphmind build` exits non-zero.
+- **Memory tools only accept registered projects.** `project` must be a registered slug or the path of a registered checkout or worktree; anything else returns an error listing the registered projects. Memory files are only ever created in `~/.graphmind/memory`.
+- **`graphmind file` only shows indexed files of the project.**
 
 ### Changed
 

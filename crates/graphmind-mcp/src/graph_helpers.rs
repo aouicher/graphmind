@@ -52,6 +52,19 @@ pub(crate) fn no_project_message() -> String {
     )
 }
 
+/// Error text for a `project` argument that names no registered project.
+pub(crate) fn unknown_project_message(project: &str) -> String {
+    let mut slugs = all_project_slugs();
+    slugs.sort();
+    if slugs.is_empty() {
+        return format!("Unknown project '{project}'. No project is registered: register one with `graphmind init`.");
+    }
+    format!(
+        "Unknown project '{project}'. Pass project=<slug> or project=<absolute path of a registered checkout>. Registered: {}",
+        slugs.join(", ")
+    )
+}
+
 pub(crate) fn all_project_slugs() -> Vec<String> {
     graphmind_config::Registry::list()
         .into_iter()

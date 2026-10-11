@@ -149,7 +149,7 @@ enum Commands {
         #[arg(long, alias = "in")]
         slug: Option<String>,
     },
-    /// Read raw file content from a registered project
+    /// Read the raw content of an indexed file of a registered project (path relative to the project root)
     File {
         file: String,
         #[arg(long, alias = "in")]

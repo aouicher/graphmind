@@ -1,5 +1,6 @@
 use crate::cache::FileHashCache;
 use crate::markdown::parse_markdown;
+use crate::paths::project_file;
 use crate::schema::init_database;
 use graphmind_core::{parse_single, ParsedFile};
 use rusqlite::{params, Connection};
@@ -139,7 +140,10 @@ impl Default for BuildOptions {
 }
 
 struct SourceFile {
+    /// The walked path, the one the graph records.
     full_path: PathBuf,
+    /// The path read for content: `full_path`, or for a symlink its resolved target.
+    read_path: PathBuf,
     language: String,
 }
 
@@ -189,16 +193,18 @@ impl GraphBuilder {
 
     pub fn build(&mut self, project_path: &str, options: &BuildOptions) -> BuildResult {
         let start = std::time::Instant::now();
-        let mut files = self.collect_files(project_path, &options.exclude);
-
         // In only_files mode, restrict to the requested files only
         let only_set: Option<HashSet<String>> = options.only_files.as_ref().map(|v| v.iter().cloned().collect());
-        if let Some(ref only) = only_set {
-            files.retain(|f| {
-                let rel = pathdiff(f.full_path.to_str().unwrap_or(""), project_path);
-                only.contains(&rel)
-            });
-        }
+        // Without the project directory there is no file list to compare the graph with: fail
+        // the build and keep the graph as it is.
+        let files = match self.collect_files(project_path, &options.exclude, only_set.as_ref()) {
+            Ok(files) => files,
+            Err(e) => {
+                let msg = format!("error: cannot read the project directory {project_path}: {e}");
+                eprintln!("{msg}");
+                return BuildResult { duration_ms: start.elapsed().as_millis(), errors: vec![msg], ..BuildResult::default() };
+            }
+        };
 
         let mut processed = 0usize;
         let mut skipped = 0usize;
@@ -277,7 +283,7 @@ impl GraphBuilder {
                 eprintln!("Parsing {}/{}...", idx + 1, files.len());
             }
 
-            let content = match fs::read_to_string(&file.full_path) {
+            let content = match fs::read_to_string(&file.read_path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
@@ -587,14 +593,20 @@ impl GraphBuilder {
         &self.db
     }
 
-    /// Source files under `project_path`, skipping:
+    /// Source files under `project_path` (only those in `only`, when given), skipping:
     /// - anything git ignores: `.gitignore` files at any depth inside the project (not above
     ///   it), `.git/info/exclude` and the global gitignore, with full gitignore semantics
     ///   (`**`, anchoring, `!` negation), and `.ignore` files;
     /// - the project and global `exclude` patterns, which use the same gitignore syntax;
-    /// - dotfiles and dot-directories.
-    fn collect_files(&self, project_path: &str, exclude: &[String]) -> Vec<SourceFile> {
+    /// - dotfiles and dot-directories;
+    /// - whatever is not a regular file (FIFOs, sockets, devices);
+    /// - symlinks, unless they resolve to a regular file inside the project that this walk
+    ///   accepts itself, so a link can't bring in a file the rules above skip.
+    ///
+    /// Fails when the project directory can't be resolved.
+    fn collect_files(&self, project_path: &str, exclude: &[String], only: Option<&HashSet<String>>) -> std::io::Result<Vec<SourceFile>> {
         let root = PathBuf::from(project_path);
+        let canonical_root = fs::canonicalize(&root)?;
         let excludes = build_exclude_matcher(&root, exclude);
         let filter_root = root.clone();
 
@@ -609,6 +621,7 @@ impl GraphBuilder {
             .parents(false)
             // Honour .gitignore even when the project isn't (yet) a git repository, as before.
             .require_git(false)
+            // Entries that are not symlinks are then inside the project by construction.
             .follow_links(false)
             .sort_by_file_name(|a, b| a.cmp(b))
             .filter_entry(move |entry| {
@@ -621,23 +634,46 @@ impl GraphBuilder {
             })
             .build();
 
-        let mut files = Vec::new();
+        // Every regular file the walk accepts, relative to the root: the targets a symlink may
+        // resolve to.
+        let mut accepted: HashSet<PathBuf> = HashSet::new();
+        // (path, language, is a symlink), in walk order.
+        let mut candidates = Vec::new();
         for entry in walker.flatten() {
-            if entry.file_type().is_none_or(|t| t.is_dir()) {
+            let Some(file_type) = entry.file_type() else { continue };
+            let is_link = entry.path_is_symlink();
+            if !is_link && !file_type.is_file() {
                 continue;
+            }
+            if !is_link {
+                accepted.insert(entry.path().strip_prefix(&root).unwrap_or(entry.path()).to_path_buf());
             }
             let name = entry.file_name().to_string_lossy().to_string();
             let ext = Path::new(&name).extension()
                 .map(|e| format!(".{}", e.to_string_lossy()))
                 .unwrap_or_default();
-            if let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) {
-                files.push(SourceFile {
-                    full_path: entry.into_path(),
-                    language: language.to_string(),
-                });
+            let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) else {
+                continue;
+            };
+            if only.is_some_and(|only| !only.contains(&pathdiff(entry.path().to_str().unwrap_or(""), project_path))) {
+                continue;
             }
+            candidates.push((entry.into_path(), language, is_link));
         }
-        files
+
+        let files = candidates
+            .into_iter()
+            .filter_map(|(full_path, language, is_link)| {
+                let read_path = if is_link {
+                    let target = project_file(&canonical_root, &full_path)?;
+                    accepted.contains(target.strip_prefix(&canonical_root).ok()?).then_some(target)?
+                } else {
+                    full_path.clone()
+                };
+                Some(SourceFile { full_path, read_path, language: language.to_string() })
+            })
+            .collect();
+        Ok(files)
     }
 
     fn resolve_import_path(&self, import_source: &str, from_file: &str) -> Option<String> {

@@ -232,6 +232,11 @@ impl<'a> GraphQueries<'a> {
         .collect()
     }
 
+    /// Whether `path` (relative to the project root, as the builder stores it) is an indexed file.
+    pub fn is_indexed_file(&self, path: &str) -> bool {
+        self.db.query_row("SELECT 1 FROM files WHERE path = ?1", [path], |_| Ok(())).is_ok()
+    }
+
     /// Paths of the indexed files whose language is one of `languages`.
     pub fn files_in_languages(&self, languages: &[&str]) -> HashSet<String> {
         if languages.is_empty() {

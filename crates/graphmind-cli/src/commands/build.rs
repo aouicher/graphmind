@@ -118,6 +118,10 @@ pub fn build_changed_between(slug: Option<&str>, old_head: &str, new_head: &str)
     let changed_paths: Vec<PathBuf> = rel_paths.iter().map(|p| project_path.join(p)).collect();
 
     let result = build_changed_files(&slug, &changed_paths);
+    if !result.errors.is_empty() {
+        eprintln!("{} Build of {} failed (see the errors above)", "Error:".red().bold(), slug);
+        std::process::exit(1);
+    }
     println!(
         "{} {} file{} | {} symbols | {} edges | {}ms",
         "OK".green().bold(),
@@ -220,6 +224,13 @@ fn build_single(slug: &str, full: bool, reset: bool, is_all: bool) {
     }
 
     let result = builder.build(&project.path, &options);
+    if !result.errors.is_empty() {
+        eprintln!("{} Build of {} failed (see the errors above)", "Error:".red().bold(), slug);
+        if !is_all {
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // Collect stats for meta.json
     let queries = GraphQueries::new(builder.database());
@@ -539,6 +550,9 @@ fn build_changed_files(slug: &str, changed_paths: &[PathBuf]) -> BuildResult {
     }
 
     let result = builder.build(&project.path, &options);
+    if !result.errors.is_empty() {
+        return result;
+    }
 
     // Update registry + meta.json
     let queries = GraphQueries::new(builder.database());

@@ -468,7 +468,7 @@ graphmind diff-impact --staged
 graphmind map [slug]                              # most-connected files
 graphmind cycles [slug]                           # circular dependencies
 graphmind outline <file>                          # hierarchical symbol tree for a file
-graphmind file <file>                             # raw file content from project root
+graphmind file <file>                             # raw content of an indexed file, path from project root
 graphmind who-calls <symbol>                      # transitive caller chain (BFS)
 graphmind who-calls <symbol> --depth 5            # limit traversal depth
 graphmind dead-code                               # symbols with no incoming edges

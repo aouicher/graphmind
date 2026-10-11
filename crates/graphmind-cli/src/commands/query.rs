@@ -1,5 +1,6 @@
 use graphmind_config::{paths, resolve_project_slug};
 use colored::Colorize;
+use graphmind_db::paths::indexed_project_file;
 use graphmind_db::queries::GraphQueries;
 use graphmind_db::schema::init_database;
 
@@ -512,14 +513,18 @@ pub fn file_content(file: &str, slug: Option<&str>) {
             return;
         }
     };
-    let path = std::path::Path::new(&project.path).join(file);
-    match std::fs::read_to_string(&path) {
+    let db = open_db(&slug);
+    let q = GraphQueries::new(&db);
+    let read = indexed_project_file(std::path::Path::new(&project.path), file, |p| q.is_indexed_file(p))
+        .and_then(|path| std::fs::read_to_string(&path).map_err(|e| format!("Cannot read {file}: {e}")));
+    match read {
         Ok(content) => {
             println!("{} {} [{}]", ">>".cyan().bold(), file.bold(), slug.dimmed());
             println!("{}", content);
         }
         Err(e) => {
-            println!("{} Cannot read {}: {}", "!".yellow(), path.display(), e);
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            std::process::exit(1);
         }
     }
 }

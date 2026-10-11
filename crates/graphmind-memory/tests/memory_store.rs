@@ -17,8 +17,8 @@ fn make_store() -> (MemoryStore, tempfile::TempDir) {
 #[test]
 fn memory_add_and_list() {
     let (store, _dir) = make_store();
-    store.add("entry one", AddOptions::default());
-    store.add("entry two", AddOptions::default());
+    store.add("entry one", AddOptions::default()).unwrap();
+    store.add("entry two", AddOptions::default()).unwrap();
 
     let entries = store.list(None);
     assert_eq!(entries.len(), 2, "expected 2 entries, got {}", entries.len());
@@ -32,8 +32,8 @@ fn memory_add_and_list() {
 #[test]
 fn memory_search_by_keyword() {
     let (store, _dir) = make_store();
-    store.add("authentication JWT token", AddOptions::default());
-    store.add("unrelated database migration", AddOptions::default());
+    store.add("authentication JWT token", AddOptions::default()).unwrap();
+    store.add("unrelated database migration", AddOptions::default()).unwrap();
 
     let all = store.list(None);
     let results = graphmind_memory::search::search(&all, "jwt", 10);
@@ -46,7 +46,7 @@ fn memory_search_by_keyword() {
 #[test]
 fn memory_search_no_results() {
     let (store, _dir) = make_store();
-    store.add("some normal content", AddOptions::default());
+    store.add("some normal content", AddOptions::default()).unwrap();
 
     let all = store.list(None);
     let results = graphmind_memory::search::search(&all, "xyznonexistent", 10);
@@ -58,7 +58,7 @@ fn memory_search_no_results() {
 #[test]
 fn memory_delete_by_id() {
     let (store, _dir) = make_store();
-    let entry = store.add("to be deleted", AddOptions::default());
+    let entry = store.add("to be deleted", AddOptions::default()).unwrap();
     let id = entry.id.clone();
 
     let deleted = store.delete_entry(&id, None).is_ok();
@@ -83,8 +83,8 @@ fn memory_delete_nonexistent_ok() {
 #[test]
 fn memory_list_priority_only() {
     let (store, _dir) = make_store();
-    store.add("normal entry", AddOptions { priority: false, ..Default::default() });
-    store.add("priority entry", AddOptions { priority: true, ..Default::default() });
+    store.add("normal entry", AddOptions { priority: false, ..Default::default() }).unwrap();
+    store.add("priority entry", AddOptions { priority: true, ..Default::default() }).unwrap();
 
     let priority = store.list_priority(None);
     assert_eq!(priority.len(), 1, "expected 1 priority entry, got {}", priority.len());
@@ -99,11 +99,11 @@ fn memory_project_scoped() {
     store.add(
         "proj-a entry",
         AddOptions { project: Some("proj-a".to_string()), ..Default::default() },
-    );
+    ).unwrap();
     store.add(
         "proj-b entry",
         AddOptions { project: Some("proj-b".to_string()), ..Default::default() },
-    );
+    ).unwrap();
 
     // list with project=proj-a should only return proj-a entry
     // (global is empty, proj-a.jsonl has 1 entry)
@@ -126,11 +126,11 @@ fn memory_global_entries() {
     store.add(
         "global fact",
         AddOptions { global: true, ..Default::default() },
-    );
+    ).unwrap();
     store.add(
         "proj-specific fact",
         AddOptions { project: Some("proj-x".to_string()), ..Default::default() },
-    );
+    ).unwrap();
 
     // Global entries appear in any project context (they live in global.jsonl)
     let entries = store.list(Some("proj-y")); // different project
@@ -154,7 +154,7 @@ fn memory_persistence() {
 
     let id = {
         let store1 = MemoryStore::new(&memory_dir);
-        let entry = store1.add("persisted content", AddOptions::default());
+        let entry = store1.add("persisted content", AddOptions::default()).unwrap();
         entry.id.clone()
     };
 
@@ -253,8 +253,8 @@ fn cross_link_infer_requires_two_projects() {
 #[test]
 fn rewrites_keep_lines_this_version_cannot_parse() {
     let (store, _dir) = make_store();
-    let kept = store.add("keep me", AddOptions::default());
-    store.add("delete me", AddOptions::default());
+    let kept = store.add("keep me", AddOptions::default()).unwrap();
+    store.add("delete me", AddOptions::default()).unwrap();
     let path = store.global_path();
     let future = r#"{"id":"future-1","type":"insight","content":"written by a newer graphmind"}"#;
     let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
@@ -273,7 +273,7 @@ fn rewrites_keep_lines_this_version_cannot_parse() {
 #[test]
 fn add_waits_for_a_rewrite_in_progress() {
     let (store, dir) = make_store();
-    store.add("first", AddOptions::default());
+    store.add("first", AddOptions::default()).unwrap();
     let memory_dir = dir.path().join(".graphmind").join("memory");
     let path = store.global_path();
 
@@ -289,7 +289,7 @@ fn add_waits_for_a_rewrite_in_progress() {
         })
     };
     std::thread::sleep(std::time::Duration::from_millis(50));
-    MemoryStore::new(&memory_dir).add("second", AddOptions::default());
+    MemoryStore::new(&memory_dir).add("second", AddOptions::default()).unwrap();
     rewriter.join().unwrap();
 
     let contents: Vec<String> = store.list(None).into_iter().map(|e| e.content).collect();
@@ -301,7 +301,7 @@ fn add_waits_for_a_rewrite_in_progress() {
 fn failed_write_leaves_the_file_intact() {
     use std::os::unix::fs::PermissionsExt;
     let (store, _dir) = make_store();
-    let entry = store.add("original", AddOptions::default());
+    let entry = store.add("original", AddOptions::default()).unwrap();
     let path = store.global_path();
     let before = std::fs::read_to_string(&path).unwrap();
 
@@ -345,7 +345,7 @@ fn unreadable_file_is_not_rewritten() {
 fn update_file_reports_a_failed_write() {
     use std::os::unix::fs::PermissionsExt;
     let (store, _dir) = make_store();
-    store.add("original", AddOptions::default());
+    store.add("original", AddOptions::default()).unwrap();
     let path = store.global_path();
     let mem_dir = path.parent().unwrap().to_path_buf();
     std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -367,7 +367,7 @@ fn update_file_reports_a_failed_write() {
 fn update_keeps_id_created_recall_and_expiry() {
     use graphmind_memory::store::{MemoryType, MemoryUpdate};
     let (store, _dir) = make_store();
-    let e = store.add("old wording", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
+    let e = store.add("old wording", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() }).unwrap();
     store.record_recalls(&[e.id.as_str()], None);
     store.record_recalls(&[e.id.as_str()], None);
     let before = store.list(None).into_iter().find(|x| x.id == e.id).unwrap();
@@ -390,7 +390,7 @@ fn update_keeps_id_created_recall_and_expiry() {
 fn update_toggles_priority_and_type_lifetime() {
     use graphmind_memory::store::{MemoryType, MemoryUpdate};
     let (store, _dir) = make_store();
-    let e = store.add("fact", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() });
+    let e = store.add("fact", AddOptions { entry_type: MemoryType::Bug, ttl_days: Some(90), ..AddOptions::default() }).unwrap();
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
     assert!(u.is_priority());
     let u = store.update(&e.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
@@ -406,8 +406,8 @@ fn update_reports_missing_and_ambiguous_ids() {
     let (store, _dir) = make_store();
     // Any real change: an empty one is rejected before the id is looked up.
     let edit = || MemoryUpdate { priority: Some(true), ..Default::default() };
-    store.add("a", AddOptions::default());
-    store.add("b", AddOptions::default());
+    store.add("a", AddOptions::default()).unwrap();
+    store.add("b", AddOptions::default()).unwrap();
     assert_eq!(store.update("does-not-exist", None, edit()).unwrap_err(), MemoryError::NotFound);
     assert_eq!(store.update("", None, edit()).unwrap_err(), MemoryError::TooShort);
     // Two ids sharing an 8-character prefix: the prefix is ambiguous, each full id still works.
@@ -424,8 +424,8 @@ fn update_reports_missing_and_ambiguous_ids() {
 #[test]
 fn delete_accepts_the_short_id_listings_print() {
     let (store, _dir) = make_store();
-    let keep = store.add("keep", AddOptions::default());
-    let doomed = store.add("doomed", AddOptions::default());
+    let keep = store.add("keep", AddOptions::default()).unwrap();
+    let doomed = store.add("doomed", AddOptions::default()).unwrap();
     assert!(store.delete_entry(&doomed.id[..8], None).is_ok());
     let left: Vec<String> = store.list(None).into_iter().map(|e| e.id).collect();
     assert_eq!(left, [keep.id]);
@@ -436,7 +436,7 @@ fn delete_accepts_the_short_id_listings_print() {
 fn update_and_delete_need_eight_id_characters() {
     use graphmind_memory::store::{MemoryUpdate, MemoryError};
     let (store, _dir) = make_store();
-    let e = store.add("only entry", AddOptions::default());
+    let e = store.add("only entry", AddOptions::default()).unwrap();
     // A short prefix matching the only entry must not touch it.
     assert_eq!(store.delete_entry(&e.id[..1], None), Err(MemoryError::TooShort));
     assert_eq!(
@@ -451,7 +451,7 @@ fn update_and_delete_need_eight_id_characters() {
 fn demotion_resets_recall_count() {
     use graphmind_memory::store::MemoryUpdate;
     let (store, _dir) = make_store();
-    let e = store.add("promoted by recalls", AddOptions { priority: true, ..AddOptions::default() });
+    let e = store.add("promoted by recalls", AddOptions { priority: true, ..AddOptions::default() }).unwrap();
     for _ in 0..5 {
         store.record_recalls(&[e.id.as_str()], None);
     }
@@ -464,7 +464,7 @@ fn demotion_resets_recall_count() {
 fn priority_false_on_a_normal_entry_keeps_its_recall_count() {
     use graphmind_memory::store::MemoryUpdate;
     let (store, _dir) = make_store();
-    let e = store.add("never promoted", AddOptions::default());
+    let e = store.add("never promoted", AddOptions::default()).unwrap();
     for _ in 0..2 {
         store.record_recalls(&[e.id.as_str()], None);
     }
@@ -495,7 +495,7 @@ fn memory_type_parse_rejects_unknown_names() {
 fn an_empty_update_is_rejected_and_writes_nothing() {
     use graphmind_memory::store::{MemoryError, MemoryUpdate};
     let (store, _dir) = make_store();
-    let e = store.add("fact", AddOptions::default());
+    let e = store.add("fact", AddOptions::default()).unwrap();
     let before = std::fs::read_to_string(store.global_path()).unwrap();
     assert_eq!(store.update(&e.id, None, MemoryUpdate::default()).unwrap_err(), MemoryError::NothingToChange);
     assert_eq!(std::fs::read_to_string(store.global_path()).unwrap(), before);
@@ -508,7 +508,7 @@ fn a_failed_update_write_is_an_error() {
     use graphmind_memory::store::{MemoryError, MemoryUpdate};
     use std::os::unix::fs::PermissionsExt;
     let (store, _dir) = make_store();
-    let e = store.add("fact", AddOptions::default());
+    let e = store.add("fact", AddOptions::default()).unwrap();
     let mem_dir = store.global_path().parent().unwrap().to_path_buf();
     std::fs::set_permissions(&mem_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
     let probe = mem_dir.join("write-probe");
@@ -529,7 +529,7 @@ fn a_failed_update_write_is_an_error() {
 #[test]
 fn add_stores_tags_as_given() {
     let (store, _dir) = make_store();
-    let e = store.add("make sure fetchInBatches reads src/a.ts", AddOptions { tags: vec!["Cache".into()], ..AddOptions::default() });
+    let e = store.add("make sure fetchInBatches reads src/a.ts", AddOptions { tags: vec!["Cache".into()], ..AddOptions::default() }).unwrap();
     assert_eq!(e.tags, ["Cache"]);
     assert_eq!(store.list(None)[0].tags, ["Cache"]);
 }
@@ -547,9 +547,9 @@ fn by_content(store: &MemoryStore, project: Option<&str>, content: &str) -> Memo
 #[test]
 fn record_recalls_counts_each_result_once_across_files() {
     let (store, _dir) = make_store();
-    let global = store.add("global fact", AddOptions { global: true, ..AddOptions::default() });
-    let scoped = store.add("project fact", AddOptions { project: Some("proj".into()), ..AddOptions::default() });
-    let untouched = store.add("other fact", AddOptions { global: true, ..AddOptions::default() });
+    let global = store.add("global fact", AddOptions { global: true, ..AddOptions::default() }).unwrap();
+    let scoped = store.add("project fact", AddOptions { project: Some("proj".into()), ..AddOptions::default() }).unwrap();
+    let untouched = store.add("other fact", AddOptions { global: true, ..AddOptions::default() }).unwrap();
 
     store.record_recalls(&[global.id.as_str(), scoped.id.as_str(), "no-such-id"], Some("proj"));
     store.record_recalls(&[scoped.id.as_str()], Some("proj"));
@@ -562,10 +562,10 @@ fn record_recalls_counts_each_result_once_across_files() {
 #[test]
 fn priority_list_puts_pinned_entries_before_promoted_ones() {
     let (store, _dir) = make_store();
-    store.add("pinned old", AddOptions { priority: true, ..AddOptions::default() });
-    let rarely = store.add("auto rarely", AddOptions::default());
-    let often = store.add("auto often", AddOptions::default());
-    store.add("pinned new", AddOptions { priority: true, ..AddOptions::default() });
+    store.add("pinned old", AddOptions { priority: true, ..AddOptions::default() }).unwrap();
+    let rarely = store.add("auto rarely", AddOptions::default()).unwrap();
+    let often = store.add("auto often", AddOptions::default()).unwrap();
+    store.add("pinned new", AddOptions { priority: true, ..AddOptions::default() }).unwrap();
     for _ in 0..3 {
         store.record_recalls(&[rarely.id.as_str(), often.id.as_str()], None);
     }
@@ -587,8 +587,8 @@ fn priority_list_puts_pinned_entries_before_promoted_ones() {
 #[test]
 fn demotion_sticks_and_pins_stay_pinned() {
     let (store, _dir) = make_store();
-    let entry = store.add("often searched", AddOptions::default());
-    let normal = store.add("searched twice", AddOptions::default());
+    let entry = store.add("often searched", AddOptions::default()).unwrap();
+    let normal = store.add("searched twice", AddOptions::default()).unwrap();
     let recall = |id: &str, times: usize| (0..times).for_each(|_| store.record_recalls(&[id], None));
     let edit = |id: &str, f: fn(&mut MemoryEntry) -> bool| {
         store
@@ -649,7 +649,7 @@ fn consolidate_marks_entries_promoted_by_earlier_versions() {
         raw_entry("hand-edited", false, true, 9, promoted_at),
     ];
     std::fs::write(store.global_path(), global.join("\n") + "\n").unwrap();
-    std::fs::write(store.project_path("proj"), raw_entry("auto-in-project", true, false, 3, promoted_at) + "\n").unwrap();
+    std::fs::write(store.project_path("proj").unwrap(), raw_entry("auto-in-project", true, false, 3, promoted_at) + "\n").unwrap();
     let state = |id: &str| by_content(&store, Some("proj"), &format!("fact {id}")).priority();
     let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
 
@@ -720,7 +720,7 @@ fn without_a_cutoff_nothing_is_marked() {
     let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
     std::os::unix::fs::symlink(dir.path().join("nowhere"), &stamp).unwrap();
     std::fs::write(store.global_path(), raw_entry("auto-promoted", true, false, 5, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
-    let pinned = store.add("pinned through update", AddOptions::default());
+    let pinned = store.add("pinned through update", AddOptions::default()).unwrap();
     (0..3).for_each(|_| store.record_recalls(&[pinned.id.as_str()], None));
     store.update(&pinned.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
 
@@ -742,7 +742,7 @@ fn entries_pinned_through_update_are_never_marked_promoted() {
     let pin = || MemoryUpdate { priority: Some(true), ..Default::default() };
     std::fs::write(store.global_path(), raw_entry("auto-promoted", true, false, 4, "2026-02-01T00:00:00+00:00") + "\n").unwrap();
     let recalled = |content: &str| {
-        let e = store.add(content, AddOptions::default());
+        let e = store.add(content, AddOptions::default()).unwrap();
         (0..3).for_each(|_| store.record_recalls(&[e.id.as_str()], None));
         e
     };
@@ -774,11 +774,11 @@ fn entries_pinned_through_update_are_never_marked_promoted() {
 fn dedup_keeps_a_demoted_or_pinned_copy() {
     use graphmind_memory::store::MemoryUpdate;
     let (store, _dir) = make_store();
-    let demoted = store.add("retries use exponential backoff with three attempts", AddOptions { priority: true, ..AddOptions::default() });
+    let demoted = store.add("retries use exponential backoff with three attempts", AddOptions { priority: true, ..AddOptions::default() }).unwrap();
     store.update(&demoted.id, None, MemoryUpdate { priority: Some(false), ..Default::default() }).unwrap();
-    let pinned = store.add("builds run on arm64 runners first", AddOptions { priority: true, ..AddOptions::default() });
+    let pinned = store.add("builds run on arm64 runners first", AddOptions { priority: true, ..AddOptions::default() }).unwrap();
     for content in ["retries use exponential backoff with three attempts", "builds run on arm64 runners first"] {
-        let copy = store.add(content, AddOptions::default());
+        let copy = store.add(content, AddOptions::default()).unwrap();
         (0..5).for_each(|_| store.record_recalls(&[copy.id.as_str()], None));
     }
 
@@ -800,7 +800,7 @@ fn a_stamp_without_a_time_uses_when_it_was_written() {
     let stamp = dir.path().join(".graphmind/memory/.legacy-promotions-marked");
     std::fs::write(&stamp, "").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
-    let pinned = store.add("pinned after the stamp", AddOptions::default());
+    let pinned = store.add("pinned after the stamp", AddOptions::default()).unwrap();
     (0..3).for_each(|_| store.record_recalls(&[pinned.id.as_str()], None));
     store.update(&pinned.id, None, MemoryUpdate { priority: Some(true), ..Default::default() }).unwrap();
 
@@ -808,4 +808,31 @@ fn a_stamp_without_a_time_uses_when_it_was_written() {
     assert_eq!(by_content(&store, None, "fact auto-promoted").priority(), Priority::Promoted);
     assert_eq!(by_content(&store, None, "pinned after the stamp").priority(), Priority::Pinned);
     assert_eq!(std::fs::read_to_string(&stamp).unwrap(), "");
+}
+
+#[test]
+fn project_names_that_are_not_a_single_file_name_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let memory_dir = dir.path().join("memory");
+    let store = MemoryStore::new(&memory_dir);
+    let outside = dir.path().join("outside");
+    let absolute = outside.to_string_lossy().to_string();
+
+    for slug in ["", ".", "..", "../outside", "a/b", "a\\b", "nul\0byte", absolute.as_str()] {
+        assert_eq!(store.project_path(slug), Err(MemoryError::InvalidProject), "{slug:?}");
+        let added = store.add("fact", AddOptions { project: Some(slug.to_string()), ..AddOptions::default() });
+        assert_eq!(added.unwrap_err(), MemoryError::InvalidProject, "{slug:?}");
+        assert!(store.list(Some(slug)).is_empty(), "{slug:?}");
+    }
+    assert!(!dir.path().join("outside.jsonl").exists());
+    let names: Vec<_> = std::fs::read_dir(&memory_dir).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert!(names.is_empty(), "nothing written: {names:?}");
+
+    // A registered-style slug and global memory still work.
+    assert_eq!(store.project_path("my-proj.v2").unwrap(), memory_dir.join("my-proj.v2.jsonl"));
+    assert_eq!(store.project_path("a..b").unwrap(), memory_dir.join("a..b.jsonl"), "dots inside a name are fine");
+    store.add("scoped", AddOptions { project: Some("my-proj.v2".into()), ..AddOptions::default() }).unwrap();
+    store.add("everywhere", AddOptions { global: true, ..AddOptions::default() }).unwrap();
+    let contents: Vec<String> = store.list(Some("my-proj.v2")).into_iter().map(|e| e.content).collect();
+    assert_eq!(contents.len(), 2, "{contents:?}");
 }

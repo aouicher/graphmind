@@ -56,7 +56,11 @@ pub fn add(content: &str, slug: Option<&str>, global: bool, tags: &[String], ent
             confidence: 1.0,
             source: MemorySource::Manual,
         },
-    );
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("{} {e}", "Error:".red().bold());
+        std::process::exit(1);
+    });
 
     let prio_str = if priority { " \u{2605}priority" } else { "" };
     println!(

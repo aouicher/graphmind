@@ -4,14 +4,23 @@ use graphmind_memory::store::{AddOptions, MemorySource, MemoryStore, MemoryType,
 use serde_json::Value;
 
 use crate::formatting::{err_text, text_content};
+use crate::graph_helpers::unknown_project_message;
 use crate::search_helpers::load_embed_engine;
 
-/// Maps a caller-supplied project slug to the key its memory is stored under:
-/// the primary project's for a linked worktree, else the slug. See `Registry::memory_key`.
-fn memory_project(slug: Option<&str>) -> Option<String> {
-    let slug = slug?;
-    let slug = graphmind_config::resolve_path(slug).unwrap_or_else(|| slug.to_string());
-    Some(graphmind_config::Registry::memory_key(&slug))
+/// The key the `project` argument's memory is stored under: the primary project's for a
+/// linked worktree, else the slug (see `Registry::memory_key`). `project` is a registered slug
+/// or a directory path `resolve_path` maps to a registered project or worktree; `Ok(None)`
+/// without one, and an error response listing the registered projects for anything else.
+fn memory_project(args: &Value) -> Result<Option<String>, Value> {
+    let Some(project) = args.get("project").and_then(|v| v.as_str()).filter(|p| !p.is_empty()) else {
+        return Ok(None);
+    };
+    let slug = graphmind_config::resolve_path(project)
+        .or_else(|| graphmind_config::Registry::get(project).map(|p| p.slug));
+    match slug {
+        Some(slug) => Ok(Some(graphmind_config::Registry::memory_key(&slug))),
+        None => Err(err_text(&unknown_project_message(project))),
+    }
 }
 
 pub(crate) fn handle_memory_search(args: &Value) -> Value {
@@ -23,7 +32,10 @@ pub(crate) fn handle_memory_search(args: &Value) -> Value {
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(20) as usize;
-    let project_slug = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project_slug = match memory_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let project_slug = project_slug.as_deref();
 
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
@@ -106,7 +118,10 @@ pub(crate) fn handle_memory_update(args: &Value) -> Value {
     let Some(id) = args.get("id").and_then(|v| v.as_str()) else {
         return err_text("Missing required parameter: id");
     };
-    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project = match memory_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let changes = graphmind_memory::store::MemoryUpdate {
         content: args.get("content").and_then(|v| v.as_str()).map(String::from),
         tags: args.get("tags").and_then(|v| v.as_array()).map(|arr| {
@@ -139,7 +154,10 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
         Some(c) => c,
         None => return err_text("Missing required parameter: content"),
     };
-    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project = match memory_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
     let tags: Vec<String> = args
         .get("tags")
@@ -161,7 +179,7 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
 
     let ttl_days = default_ttl_for_type(&entry_type);
     let store = MemoryStore::new(&graphmind_config::paths::memory_dir());
-    let entry = store.add(
+    let entry = match store.add(
         content,
         AddOptions {
             project,
@@ -173,7 +191,10 @@ pub(crate) fn handle_memory_add(args: &Value) -> Value {
             confidence: 1.0,
             source: MemorySource::Manual,
         },
-    );
+    ) {
+        Ok(entry) => entry,
+        Err(e) => return err_text(&e.to_string()),
+    };
 
     // Vectorize and store embedding for semantic search (best-effort)
     if let Some(engine) = load_embed_engine() {
@@ -195,7 +216,10 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
         Some(f) => f,
         None => return err_text("Missing required parameter: facts (array)"),
     };
-    let project = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project = match memory_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let global = args.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // Check every fact's type first, so one typo doesn't leave a batch half-saved.
@@ -242,7 +266,7 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
             .unwrap_or_default();
         let ttl_days = default_ttl_for_type(&entry_type);
 
-        let entry = store.add(content, AddOptions {
+        let entry = match store.add(content, AddOptions {
             project: project.clone(),
             global,
             entry_type,
@@ -251,7 +275,10 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
             ttl_days,
             confidence: 1.0,
             source: MemorySource::Consolidate,
-        });
+        }) {
+            Ok(entry) => entry,
+            Err(e) => return err_text(&e.to_string()),
+        };
 
         // Vectorize (best-effort)
         if let Some(ref eng) = engine {
@@ -271,7 +298,10 @@ pub(crate) fn handle_session_analyze(args: &Value) -> Value {
 }
 
 pub(crate) fn handle_memory_list(args: &Value) -> Value {
-    let project_slug = memory_project(args.get("project").and_then(|v| v.as_str()));
+    let project_slug = match memory_project(args) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
     let project_slug = project_slug.as_deref();
     let limit = args
         .get("limit")

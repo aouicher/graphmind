@@ -101,6 +101,8 @@ pub enum MemoryError {
     NothingToChange,
     /// The memory file couldn't be read or written; it is unchanged.
     NotWritten,
+    /// The project name can't be a memory file name (see `MemoryStore::project_path`).
+    InvalidProject,
 }
 
 impl std::fmt::Display for MemoryError {
@@ -111,6 +113,7 @@ impl std::fmt::Display for MemoryError {
             MemoryError::TooShort => write!(f, "use at least {MIN_ID_PREFIX} characters of the id (as listings print it)"),
             MemoryError::NothingToChange => write!(f, "nothing to change"),
             MemoryError::NotWritten => write!(f, "the memory file could not be updated; it is unchanged"),
+            MemoryError::InvalidProject => write!(f, "invalid project name for a memory file"),
         }
     }
 }
@@ -282,7 +285,13 @@ impl MemoryStore {
         }
     }
 
-    pub fn add(&self, content: &str, options: AddOptions) -> MemoryEntry {
+    /// Appends a new entry to the global file, or to its project's file. Fails only for a
+    /// project name `project_path` refuses; nothing is written then.
+    pub fn add(&self, content: &str, options: AddOptions) -> Result<MemoryEntry, MemoryError> {
+        let file_path = match options.project.as_deref() {
+            Some(proj) if !options.global => self.project_path(proj)?,
+            _ => self.global_path(),
+        };
         let now = chrono::Utc::now().to_rfc3339();
 
         // Compute expires_at from ttl_days if provided
@@ -311,19 +320,11 @@ impl MemoryStore {
             demoted: false,
         };
 
-        let file_path = if entry.global {
-            self.global_path()
-        } else if let Some(ref proj) = entry.project {
-            self.project_path(proj)
-        } else {
-            self.global_path()
-        };
-
         // Under the lock: an append between another process's read and its rename (recall
         // count, delete, consolidate) would otherwise be overwritten by that rewrite.
         let line = serde_json::to_string(&entry).unwrap_or_default();
         self.with_file_lock(&file_path, || self.atomic_append(&file_path, &line));
-        entry
+        Ok(entry)
     }
 
     pub fn list(&self, project: Option<&str>) -> Vec<MemoryEntry> {
@@ -334,8 +335,7 @@ impl MemoryStore {
             entries.extend(self.read_jsonl(&global_path));
         }
 
-        if let Some(proj) = project {
-            let proj_path = self.project_path(proj);
+        if let Some(Ok(proj_path)) = project.map(|p| self.project_path(p)) {
             if proj_path.exists() {
                 entries.extend(self.read_jsonl(&proj_path));
             }
@@ -361,11 +361,12 @@ impl MemoryStore {
         entries
     }
 
-    /// The memory files `project` reads: the global file, then the project's.
+    /// The memory files `project` reads: the global file, then the project's (none for a
+    /// name `project_path` refuses).
     pub(crate) fn files(&self, project: Option<&str>) -> Vec<PathBuf> {
         let mut paths = vec![self.global_path()];
-        if let Some(proj) = project {
-            paths.push(self.project_path(proj));
+        if let Some(Ok(proj_path)) = project.map(|p| self.project_path(p)) {
+            paths.push(proj_path);
         }
         paths
     }
@@ -531,8 +532,18 @@ impl MemoryStore {
         self.memory_dir.join("global.jsonl")
     }
 
-    pub fn project_path(&self, slug: &str) -> PathBuf {
-        self.memory_dir.join(format!("{slug}.jsonl"))
+    /// `<memory_dir>/<slug>.jsonl`, the one place a project's memory file path is built.
+    /// Refuses a slug that could name a file anywhere else: anything but a single normal path
+    /// component (empty, absolute, `.`, `..`), or a slug containing `/`, `\` or NUL.
+    pub fn project_path(&self, slug: &str) -> Result<PathBuf, MemoryError> {
+        let single_name = matches!(
+            Path::new(slug).components().collect::<Vec<_>>().as_slice(),
+            [std::path::Component::Normal(_)]
+        );
+        if !single_name || slug.contains(['/', '\\', '\0']) {
+            return Err(MemoryError::InvalidProject);
+        }
+        Ok(self.memory_dir.join(format!("{slug}.jsonl")))
     }
 
     fn read_jsonl(&self, file_path: &Path) -> Vec<MemoryEntry> {
