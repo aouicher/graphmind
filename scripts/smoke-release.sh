@@ -36,7 +36,8 @@ expect() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else ko "$1" "expected \"$
 lacks()  { if grep -qF -- "$2" <<<"$3"; then ko "$1" "unexpected \"$2\" in:"$'\n'"$3"; else ok "$1"; fi; }
 # with_timeout SECS CMD...
 with_timeout() { perl -e 'alarm shift; exec @ARGV or exit 127' "$@"; }
-fingerprint() { if [ -r "$1" ]; then shasum "$1" | cut -d' ' -f1; else stat -f '%m %z %p' "$1"; fi; }
+# A missing file has no fingerprint, so comparing two of them never passes.
+fingerprint() { if [ -r "$1" ]; then shasum "$1" | cut -d' ' -f1; elif [ -e "$1" ]; then stat -f '%m %z %p' "$1"; else echo "missing $RANDOM"; fi; }
 
 # --- prerequisites and versions (real HOME: gh needs its login) -------------------------------
 
@@ -233,7 +234,7 @@ if install_version "$PREVIOUS"; then
     mkdir -p "$HOME/p/src" && printf 'pub fn f() {}\n' > "$HOME/p/src/lib.rs" && git -C "$HOME/p" init -q && commit_all "$HOME/p"
     (cd "$HOME/p" && graphmind init >/dev/null 2>&1)
     echo '{ not json' > "$HOME/.claude/settings.json"
-    echo '{ not json' > "$HOME/.cursor/mcp.json"
+    mkdir -p "$HOME/.cursor" && echo '{ not json' > "$HOME/.cursor/mcp.json"
     awk '{ print } /GM:VERSION/ { print "My own note inside the graphmind block." }' "$HOME/.claude/CLAUDE.md" > "$HOME/c.md" && mv "$HOME/c.md" "$HOME/.claude/CLAUDE.md"
     printf '# my profile\n' > "$HOME/.zshrc" && chmod 000 "$HOME/.zshrc"
     WATCHED=(.claude/settings.json .cursor/mcp.json .claude/CLAUDE.md .zshrc)
