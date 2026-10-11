@@ -7,6 +7,7 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ### Fixed
 
+- `graphmind build --all` exits non-zero when a project's build fails, naming the projects that failed; the other projects are still built. Thanks @KennethWKZ.
 - **The install script no longer fails on a shell profile it can't read or write.** That profile is left as it is, and the script prints the PATH line to add yourself; before, it stopped with an error after installing the binary.
 
 ## [0.3.4] - 2026-10-11
