@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Update checks use `rtk bypass` on rtk 1.0 and later.** rtk 1.0 renamed `rtk proxy` to `rtk bypass` and keeps `proxy` only as an alias. graphmind now reads `rtk --version` and uses `bypass` on rtk 1.0 or later, and `proxy` on older or unreadable versions. If rtk can't run curl at all, the check runs curl directly.
+
 ## [0.3.6] - 2026-10-11
 
 ### Fixed

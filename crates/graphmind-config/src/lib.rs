@@ -7,6 +7,7 @@ pub mod git_identity;
 pub mod mcp_clients;
 pub mod paths;
 pub mod resolve;
+pub mod rtk;
 pub mod seed;
 
 pub use atomic::{back_up, write_atomic};

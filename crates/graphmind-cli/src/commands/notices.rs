@@ -77,21 +77,10 @@ fn fetch_latest_version() -> Option<String> {
     let failed = UpdateCache { fetched_at: now, latest_version: String::new() };
     write_cache(&path, &failed);
 
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
     let timeout_str = FETCH_TIMEOUT_SECS.to_string();
-    let output = if use_rtk {
-        std::process::Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", &timeout_str,
-                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
-            .output()
-            .ok()?
-    } else {
-        std::process::Command::new("curl")
-            .args(["-fsSL", "--max-time", &timeout_str,
-                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
-            .output()
-            .ok()?
-    };
+    let output = graphmind_config::rtk::curl(&["-fsSL", "--max-time", &timeout_str,
+                                               "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
+        .ok()?;
     if !output.status.success() {
         return None;
     }

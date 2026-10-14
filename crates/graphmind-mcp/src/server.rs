@@ -376,19 +376,8 @@ fn refresh_update_cache() {
         }
     }
 
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
-
-    let output = if use_rtk {
-        std::process::Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", "5",
-                   "-H", "Accept: application/vnd.github+json", URL])
-            .output()
-    } else {
-        std::process::Command::new("curl")
-            .args(["-fsSL", "--max-time", "5",
-                   "-H", "Accept: application/vnd.github+json", URL])
-            .output()
-    };
+    let output = graphmind_config::rtk::curl(&["-fsSL", "--max-time", "5",
+                                               "-H", "Accept: application/vnd.github+json", URL]);
 
     let Ok(output) = output else { return };
     if !output.status.success() { return; }

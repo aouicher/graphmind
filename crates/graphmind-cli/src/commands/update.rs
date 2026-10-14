@@ -13,19 +13,10 @@ fn current_version() -> &'static str {
 }
 
 fn get_latest_version() -> Result<String, String> {
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
-    let output = if use_rtk {
-        Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", "10",
-                   "-H", "Accept: application/vnd.github+json", &url])
-            .output()
-    } else {
-        Command::new("curl")
-            .args(["-fsSL", "--max-time", "10",
-                   "-H", "Accept: application/vnd.github+json", &url])
-            .output()
-    }.map_err(|e| format!("Failed to check for updates: {e}"))?;
+    let output = graphmind_config::rtk::curl(&["-fsSL", "--max-time", "10",
+                                               "-H", "Accept: application/vnd.github+json", &url])
+        .map_err(|e| format!("Failed to check for updates: {e}"))?;
 
     if !output.status.success() {
         return Err("Failed to fetch latest release info".to_string());
