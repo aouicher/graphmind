@@ -416,19 +416,38 @@ fn write_json(path: &Path, config: &Value, back_up_first: bool) -> Result<(), St
         .map_err(|e| format!("failed to write {} ({e}); left unchanged", path.display()))
 }
 
+/// Folders graphmind is installed to that a process may not have on PATH: an app started from the
+/// Finder gets only the system's, so it doesn't see the install script's ~/.local/bin or Homebrew's.
+/// The desktop app looks in the same places for the CLI it runs.
+const UNLISTED_BIN_DIRS: &[&str] = if cfg!(unix) { &["/usr/local/bin", "/opt/homebrew/bin"] } else { &[] };
+
 /// The graphmind binary MCP entries point at: the install location (~/.graphmind/bin) when it
-/// exists, so the entry doesn't depend on PATH; else the first `graphmind` on PATH; else the
-/// install location anyway (an install in progress).
+/// exists, so the entry doesn't depend on PATH; else the first `graphmind` on PATH; else one in a
+/// folder PATH may lack (~/.local/bin, /usr/local/bin, /opt/homebrew/bin); else the install
+/// location anyway (an install in progress).
 pub fn graphmind_binary() -> String {
+    let unlisted: Vec<&Path> = UNLISTED_BIN_DIRS.iter().map(Path::new).collect();
+    graphmind_binary_from(&home_dir(), find_on_path("graphmind"), &unlisted)
+}
+
+/// [`graphmind_binary`] for a given home folder, PATH result and extra system folders.
+fn graphmind_binary_from(home: &Path, on_path: Option<PathBuf>, unlisted: &[&Path]) -> String {
     let bin_name = if cfg!(target_os = "windows") { "graphmind.exe" } else { "graphmind" };
-    let local_path = home_dir().join(".graphmind").join("bin").join(bin_name);
-    if local_path.exists() {
-        return local_path.to_string_lossy().to_string();
+    let install = home.join(".graphmind").join("bin").join(bin_name);
+    if install.exists() {
+        return install.to_string_lossy().to_string();
     }
-    if let Some(path) = find_on_path("graphmind") {
+    if let Some(path) = on_path {
         return path.to_string_lossy().to_string();
     }
-    local_path.to_string_lossy().to_string()
+    let local_bin = cfg!(unix).then(|| home.join(".local").join("bin"));
+    let found = local_bin
+        .iter()
+        .map(PathBuf::as_path)
+        .chain(unlisted.iter().copied())
+        .map(|dir| dir.join(bin_name))
+        .find(|candidate| candidate.is_file());
+    found.unwrap_or(install).to_string_lossy().to_string()
 }
 
 /// The graphmind entry `client`'s config holds now. `Err` when the file can't be read or parsed.
@@ -520,6 +539,49 @@ mod tests {
 
     fn backups_in(dir: &Path) -> usize {
         fs::read_dir(dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".bak")).count()
+    }
+
+    /// A file called graphmind in `dir`, created with its parents; its path as a string.
+    #[cfg(unix)]
+    fn binary_in(dir: &Path) -> String {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("graphmind"), "").unwrap();
+        dir.join("graphmind").to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graphmind_binary_finds_one_in_a_folder_path_lacks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let homebrew = tmp.path().join("homebrew-bin");
+        let install = home.join(".graphmind/bin/graphmind").to_string_lossy().into_owned();
+
+        // Nothing anywhere: the install location, as before.
+        assert_eq!(graphmind_binary_from(&home, None, &[&homebrew]), install);
+
+        // Only in a folder PATH lacks (the app started from the Finder): that one.
+        let brewed = binary_in(&homebrew);
+        assert_eq!(graphmind_binary_from(&home, None, &[&homebrew]), brewed);
+        let local = binary_in(&home.join(".local/bin"));
+        assert_eq!(graphmind_binary_from(&home, None, &[&homebrew]), local, "~/.local/bin before system folders");
+
+        // One on PATH wins over those, and the install location over everything.
+        let on_path = tmp.path().join("on-path/graphmind");
+        assert_eq!(graphmind_binary_from(&home, Some(on_path.clone()), &[&homebrew]), on_path.to_string_lossy());
+        binary_in(&home.join(".graphmind/bin"));
+        assert_eq!(graphmind_binary_from(&home, Some(on_path), &[&homebrew]), install);
+    }
+
+    /// A folder called graphmind is not a binary.
+    #[cfg(unix)]
+    #[test]
+    fn graphmind_binary_skips_a_folder_named_graphmind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".local/bin/graphmind")).unwrap();
+        let install = home.join(".graphmind/bin/graphmind").to_string_lossy().into_owned();
+        assert_eq!(graphmind_binary_from(&home, None, &[]), install);
     }
 
     #[test]

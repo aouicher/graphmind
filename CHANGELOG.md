@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP entries point at a graphmind that exists when it's installed in `~/.local/bin` or Homebrew's folder and the process doesn't have that folder on PATH, as in the desktop app started from the Finder. Thanks @KennethWKZ.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed

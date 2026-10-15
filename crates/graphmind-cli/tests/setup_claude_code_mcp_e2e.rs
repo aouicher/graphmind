@@ -130,6 +130,37 @@ fn init_registers_the_project_for_claude_code() {
     assert_eq!(backups_of(&claude_json(&env)), 1, "one backup, for the first write");
 }
 
+/// graphmind installed only in ~/.local/bin (the install script's folder) and run by its path
+/// with a PATH that lacks that folder, as the desktop app runs it: the entry points at that copy,
+/// not at a ~/.graphmind/bin/graphmind that doesn't exist.
+#[cfg(unix)]
+#[test]
+fn init_points_the_entry_at_a_local_bin_install_missing_from_path() {
+    let env = CliTestEnv::new();
+    let project = repo(&env, "app");
+    fs::remove_file(env.home.path().join(".graphmind/bin/graphmind")).unwrap();
+    let local_bin = env.home.path().join(".local/bin");
+    fs::create_dir_all(&local_bin).unwrap();
+    let exe = local_bin.join("graphmind");
+    fs::copy(&env.binary, &exe).unwrap();
+
+    let out = Command::new(&exe)
+        .args(["init", "--skip-build"])
+        .current_dir(&project)
+        .env("HOME", env.home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1")
+        .output()
+        .expect("failed to run graphmind");
+    assert!(out.status.success(), "init failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    let config = read(&claude_json(&env));
+    let command = project_entry(&config, &project)["command"].as_str().unwrap_or_default().to_string();
+    assert_eq!(command, exe.to_string_lossy(), "{config}");
+}
+
 #[test]
 fn init_writes_where_claude_config_dir_points() {
     let env = CliTestEnv::new();
