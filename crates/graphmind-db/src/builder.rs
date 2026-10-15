@@ -191,6 +191,48 @@ impl GraphBuilder {
         map
     }
 
+    /// Whether an earlier build stored anything for `file`: a file row or a hash-cache entry.
+    fn is_indexed(&self, file: &str) -> bool {
+        self.cache.contains(file)
+            || self
+                .db
+                .query_row("SELECT 1 FROM files WHERE path = ?1", params![file], |_| Ok(()))
+                .is_ok()
+    }
+
+    /// Removes everything stored for `file`: its edges (both ways), symbols, file row and
+    /// hash-cache entry. Failures are printed and added to `errors`.
+    fn forget_file(&mut self, file: &str, errors: &mut Vec<String>) {
+        if let Err(e) = self.db.execute(
+            "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
+            params![file],
+        ) {
+            let msg = format!("error: failed to delete stale edges for {}: {}", file, e);
+            eprintln!("{}", msg);
+            errors.push(msg);
+        }
+        if let Err(e) = self.db.execute("DELETE FROM symbols WHERE file = ?1", params![file]) {
+            let msg = format!("error: failed to delete stale symbols for {}: {}", file, e);
+            eprintln!("{}", msg);
+            errors.push(msg);
+        }
+        if let Err(e) = self.db.execute("DELETE FROM files WHERE path = ?1", params![file]) {
+            let msg = format!("error: failed to delete stale file record for {}: {}", file, e);
+            eprintln!("{}", msg);
+            errors.push(msg);
+        }
+        self.cache.remove(file);
+    }
+
+    /// `forget_file` for a file an earlier build stored; true when there was something to remove.
+    fn forget_if_indexed(&mut self, file: &str, errors: &mut Vec<String>) -> bool {
+        if !self.is_indexed(file) {
+            return false;
+        }
+        self.forget_file(file, errors);
+        true
+    }
+
     pub fn build(&mut self, project_path: &str, options: &BuildOptions) -> BuildResult {
         let start = std::time::Instant::now();
         // In only_files mode, restrict to the requested files only
@@ -246,25 +288,7 @@ impl GraphBuilder {
 
             for stale in &all_known {
                 if !current_paths.contains(stale) && !under_unreadable(stale) {
-                    if let Err(e) = self.db.execute(
-                        "DELETE FROM edges WHERE from_id IN (SELECT id FROM symbols WHERE file = ?1) OR to_id IN (SELECT id FROM symbols WHERE file = ?1)",
-                        params![stale],
-                    ) {
-                        let msg = format!("error: failed to delete stale edges for {}: {}", stale, e);
-                        eprintln!("{}", msg);
-                        errors.push(msg);
-                    }
-                    if let Err(e) = self.db.execute("DELETE FROM symbols WHERE file = ?1", params![stale]) {
-                        let msg = format!("error: failed to delete stale symbols for {}: {}", stale, e);
-                        eprintln!("{}", msg);
-                        errors.push(msg);
-                    }
-                    if let Err(e) = self.db.execute("DELETE FROM files WHERE path = ?1", params![stale]) {
-                        let msg = format!("error: failed to delete stale file record for {}: {}", stale, e);
-                        eprintln!("{}", msg);
-                        errors.push(msg);
-                    }
-                    self.cache.remove(stale);
+                    self.forget_file(stale, &mut errors);
                     deleted += 1;
                 }
             }
@@ -290,17 +314,37 @@ impl GraphBuilder {
                 eprintln!("Parsing {}/{}...", idx + 1, files.len());
             }
 
-            let content = match fs::read_to_string(&file.read_path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
             let rel_path = pathdiff(file.full_path.to_str().unwrap_or(""), project_path);
 
-            // Skip minified/bundled files: avg line > 500 chars with significant size
+            // A file that isn't UTF-8 is skipped and named, and, like a minified file below, loses
+            // what an earlier build stored for it. One that can't be read now (permissions) is
+            // skipped with a warning and, like an unreadable folder, keeps what the graph has.
+            let content = match fs::read_to_string(&file.read_path) {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    eprintln!("Skipped {}: not UTF-8", rel_path);
+                    if self.forget_if_indexed(&rel_path, &mut errors) {
+                        deleted += 1;
+                    }
+                    skipped += 1;
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("warn: cannot read {rel_path}: {e}; its records stay in the graph as they were");
+                    skipped += 1;
+                    continue;
+                }
+            };
+
+            // Skip minified/bundled files: avg line > 500 chars with significant size. One indexed
+            // before it was minified (or before this check) is still found on disk, so the stale
+            // scan above keeps it: drop what an earlier build stored for it here.
             if content.len() > 5000 {
                 let line_count = content.lines().count().max(1);
                 if content.len() / line_count > 500 {
+                    if self.forget_if_indexed(&rel_path, &mut errors) {
+                        deleted += 1;
+                    }
                     skipped += 1;
                     continue;
                 }
