@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -50,37 +51,84 @@ pub async fn install_app_update(app: AppHandle) -> Result<String, String> {
 }
 
 
-/// Find graphmind binary: check known install paths first, then PATH.
-pub fn find_graphmind_binary() -> String {
-    // Resolve via PATH (same as the shell would) — handles all install locations
+/// The graphmind binary the app runs: the first one on PATH, then in the install locations the
+/// app's PATH may not include (an app started from the Finder gets a minimal PATH). `None` when
+/// there is none.
+pub fn find_graphmind_binary() -> Option<PathBuf> {
     let path_env = std::env::var("PATH").unwrap_or_default();
-    let mut candidates: Vec<std::path::PathBuf> = path_env
+    first_graphmind_in(&search_dirs(&path_env, dirs::home_dir().as_deref()))
+}
+
+/// `find_graphmind_binary` for commands that run graphmind, with the error they report when
+/// there is none.
+pub fn require_graphmind_binary() -> Result<PathBuf, String> {
+    find_graphmind_binary().ok_or_else(|| {
+        "graphmind CLI not found: install it with Update CLI in Settings".to_string()
+    })
+}
+
+/// The folders `find_graphmind_binary` looks in, in order.
+fn search_dirs(path_env: &str, home: Option<&Path>) -> Vec<PathBuf> {
+    // An empty PATH entry means the working directory, which is no install location.
+    let mut dirs: Vec<PathBuf> = path_env
         .split(':')
-        .map(|dir| std::path::Path::new(dir).join("graphmind"))
-        .filter(|p| p.exists())
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
         .collect();
-
-    // Also inject known locations that the app's PATH may not include
-    if let Some(home) = dirs::home_dir() {
-        for extra in [
-            home.join(".local").join("bin").join("graphmind"),
-            home.join(".graphmind").join("bin").join("graphmind"),
-        ] {
-            if extra.exists() && !candidates.contains(&extra) {
-                candidates.push(extra);
-            }
-        }
+    if let Some(home) = home {
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".graphmind").join("bin"));
     }
-    for extra in ["/usr/local/bin/graphmind", "/opt/homebrew/bin/graphmind"] {
-        let p = std::path::PathBuf::from(extra);
-        if p.exists() && !candidates.contains(&p) {
-            candidates.push(p);
-        }
+    dirs.extend(["/usr/local/bin", "/opt/homebrew/bin"].map(PathBuf::from));
+    dirs
+}
+
+fn first_graphmind_in(dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter().map(|dir| dir.join("graphmind")).find(|p| p.exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_dirs_lists_path_then_install_locations() {
+        let home = Path::new("/home/me");
+        let expected: Vec<PathBuf> = [
+            "/a",
+            "/b",
+            "/home/me/.local/bin",
+            "/home/me/.graphmind/bin",
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+        ]
+        .map(PathBuf::from)
+        .into();
+        assert_eq!(search_dirs("/a::/b:", Some(home)), expected);
     }
 
-    candidates
-        .into_iter()
-        .next()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "graphmind".to_string())
+    #[test]
+    fn first_graphmind_in_returns_the_first_one_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let [empty, first, second] = ["empty", "first", "second"].map(|d| dir.path().join(d));
+        for d in [&empty, &first, &second] {
+            std::fs::create_dir(d).unwrap();
+        }
+        for d in [&first, &second] {
+            std::fs::write(d.join("graphmind"), "").unwrap();
+        }
+
+        assert_eq!(
+            first_graphmind_in(&[empty, first.clone(), second]),
+            Some(first.join("graphmind"))
+        );
+    }
+
+    #[test]
+    fn first_graphmind_in_returns_none_when_there_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+
+        assert_eq!(first_graphmind_in(&[dir.path().to_path_buf(), missing]), None);
+    }
 }

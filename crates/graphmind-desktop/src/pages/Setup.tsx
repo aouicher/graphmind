@@ -166,8 +166,7 @@ function StepInstallCli({
         setError("Installation failed. Please try again.");
         return;
       }
-      const path = await api.ensureCliInPath();
-      setCliPath(path);
+      setCliPath(result.path);
       setStatus("done");
     } catch (e) {
       setStatus("error");
@@ -197,7 +196,7 @@ function StepInstallCli({
               graphmind CLI
             </p>
             <p className="text-xs text-text-muted">
-              ~10 MB binary → <code className="text-text-secondary">~/.graphmind/bin/</code>
+              ~10 MB binary → <code className="text-text-secondary">~/.local/bin/</code>
             </p>
           </div>
           {status === "done" && (

@@ -126,7 +126,6 @@ export const api = {
   uninstallMcp: (clientId: string) => invoke<void>("uninstall_mcp_for_client", { clientId }),
   checkCliInstalled: () => invoke<CliStatus>("check_cli_installed"),
   installCli: () => invoke<CliStatus>("install_cli"),
-  ensureCliInPath: () => invoke<string>("ensure_cli_in_path"),
   checkCliUpdate: () => invoke<UpdateInfo>("check_cli_update"),
   updateCli: () => invoke<CliStatus>("update_cli"),
   getCliPath: () => invoke<string>("get_cli_path"),
