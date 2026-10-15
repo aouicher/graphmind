@@ -12,35 +12,6 @@ fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-fn get_latest_version() -> Result<String, String> {
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
-    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
-    let output = if use_rtk {
-        Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", "10",
-                   "-H", "Accept: application/vnd.github+json", &url])
-            .output()
-    } else {
-        Command::new("curl")
-            .args(["-fsSL", "--max-time", "10",
-                   "-H", "Accept: application/vnd.github+json", &url])
-            .output()
-    }.map_err(|e| format!("Failed to check for updates: {e}"))?;
-
-    if !output.status.success() {
-        return Err("Failed to fetch latest release info".to_string());
-    }
-
-    let body = String::from_utf8_lossy(&output.stdout);
-    let tag = body
-        .split("\"tag_name\"")
-        .nth(1)
-        .and_then(|s| s.split('"').nth(1))
-        .ok_or_else(|| "Could not parse release tag".to_string())?;
-
-    Ok(tag.trim_start_matches('v').to_string())
-}
-
 fn get_current_binary_path() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("graphmind"))
 }
@@ -178,7 +149,7 @@ pub fn update(check_only: bool) {
 
     println!("  {} v{current}", "Current:".dimmed());
 
-    let latest = match get_latest_version() {
+    let latest = match graphmind_config::releases::fetch_latest_version(10) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("  {} {e}", "Error:".red());

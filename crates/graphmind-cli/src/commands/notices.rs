@@ -4,10 +4,8 @@ use std::path::PathBuf;
 
 const ANNOUNCEMENTS_URL: &str =
     "https://github.com/aouicher/graphmind/releases/latest/download/announcements.json";
-const LATEST_VERSION_URL: &str =
-    "https://api.github.com/repos/aouicher/graphmind/releases/latest";
 const CACHE_TTL_SECS: u64 = 86400;
-const FETCH_TIMEOUT_SECS: u32 = 2;
+const FETCH_TIMEOUT_SECS: u64 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Announcement {
@@ -38,19 +36,9 @@ struct DismissedList {
     ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct UpdateCache {
-    fetched_at: u64,
-    latest_version: String,
-}
-
-fn update_cache_path() -> PathBuf {
-    graphmind_config::paths::graphmind_dir().join("update-check.json")
-}
-
 pub fn check_cli_update() {
     let current = env!("CARGO_PKG_VERSION");
-    let Some(latest) = fetch_latest_version() else { return };
+    let Some(latest) = graphmind_config::releases::check_latest_version(FETCH_TIMEOUT_SECS) else { return };
 
     if version_cmp(&latest, current) > 0 {
         eprintln!(
@@ -58,54 +46,6 @@ pub fn check_cli_update() {
             current, latest
         );
     }
-}
-
-fn fetch_latest_version() -> Option<String> {
-    let path = update_cache_path();
-    let now = now_secs();
-
-    if let Ok(raw) = fs::read_to_string(&path) {
-        if let Ok(cache) = serde_json::from_str::<UpdateCache>(&raw) {
-            if now.saturating_sub(cache.fetched_at) < CACHE_TTL_SECS {
-                // An empty version is a cached failure: don't retry until the TTL expires.
-                return (!cache.latest_version.is_empty()).then_some(cache.latest_version);
-            }
-        }
-    }
-    // Record the attempt first, so an offline machine pays the timeout once a day, not on
-    // every command.
-    let failed = UpdateCache { fetched_at: now, latest_version: String::new() };
-    write_cache(&path, &failed);
-
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
-    let timeout_str = FETCH_TIMEOUT_SECS.to_string();
-    let output = if use_rtk {
-        std::process::Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", &timeout_str,
-                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
-            .output()
-            .ok()?
-    } else {
-        std::process::Command::new("curl")
-            .args(["-fsSL", "--max-time", &timeout_str,
-                   "-H", "Accept: application/vnd.github+json", LATEST_VERSION_URL])
-            .output()
-            .ok()?
-    };
-    if !output.status.success() {
-        return None;
-    }
-    let body = String::from_utf8_lossy(&output.stdout);
-    let latest = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| v.get("tag_name").and_then(|v| v.as_str()).map(|s| s.trim_start_matches('v').to_string()))?;
-    if latest.is_empty() {
-        return None;
-    }
-
-    write_cache(&path, &UpdateCache { fetched_at: now, latest_version: latest.clone() });
-
-    Some(latest)
 }
 
 /// Cache files are read by every interactive command, so they are replaced, never truncated.

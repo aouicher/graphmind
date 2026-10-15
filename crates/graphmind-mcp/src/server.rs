@@ -332,8 +332,8 @@ impl ServerHandler for GraphmindServer {
 
 pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     graphmind_config::on_worktree_linked(graphmind_config::spawn_background_build);
-    // Refresh update cache in background so MCP-only users get update notices
-    std::thread::spawn(refresh_update_cache);
+    // Check for a new release in the background, so MCP-only users get update notices.
+    std::thread::spawn(|| graphmind_config::releases::check_latest_version(5));
 
     let (stdin, mut stdout) = stdio();
     let mut stdin = tokio::io::BufReader::new(stdin);
@@ -351,59 +351,4 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     let service = GraphmindServer.serve((input, stdout)).await?;
     service.waiting().await?;
     Ok(())
-}
-
-fn refresh_update_cache() {
-    #[derive(serde::Serialize, serde::Deserialize, Default)]
-    struct UpdateCache { fetched_at: u64, latest_version: String }
-
-    const TTL: u64 = 86400;
-    const URL: &str = "https://api.github.com/repos/aouicher/graphmind/releases/latest";
-
-    let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    // Skip if cache is fresh
-    if let Ok(raw) = std::fs::read_to_string(&path) {
-        if let Ok(cache) = serde_json::from_str::<UpdateCache>(&raw) {
-            if now - cache.fetched_at < TTL && !cache.latest_version.is_empty() {
-                return;
-            }
-        }
-    }
-
-    let use_rtk = graphmind_config::paths::find_on_path("rtk").is_some();
-
-    let output = if use_rtk {
-        std::process::Command::new("rtk")
-            .args(["proxy", "curl", "-fsSL", "--max-time", "5",
-                   "-H", "Accept: application/vnd.github+json", URL])
-            .output()
-    } else {
-        std::process::Command::new("curl")
-            .args(["-fsSL", "--max-time", "5",
-                   "-H", "Accept: application/vnd.github+json", URL])
-            .output()
-    };
-
-    let Ok(output) = output else { return };
-    if !output.status.success() { return; }
-
-    let body = String::from_utf8_lossy(&output.stdout);
-    let latest = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| v.get("tag_name").and_then(|v| v.as_str())
-            .map(|s| s.trim_start_matches('v').to_string()));
-
-    let Some(latest) = latest else { return };
-    if latest.is_empty() { return; }
-
-    let cache = UpdateCache { fetched_at: now, latest_version: latest };
-    if let Ok(json) = serde_json::to_string(&cache) {
-        std::fs::write(&path, json).ok();
-    }
 }

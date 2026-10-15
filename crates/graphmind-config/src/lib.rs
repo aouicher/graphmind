@@ -6,6 +6,7 @@ pub mod config;
 pub mod git_identity;
 pub mod mcp_clients;
 pub mod paths;
+pub mod releases;
 pub mod resolve;
 pub mod seed;
 

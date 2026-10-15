@@ -14,23 +14,8 @@ use serde_json::Value;
 // ---------------------------------------------------------------------------
 
 pub fn update_notice() -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct UpdateCache { latest_version: String, fetched_at: u64 }
-
-    const CACHE_TTL_SECS: u64 = 86400;
     const CURRENT: &str = env!("CARGO_PKG_VERSION");
-
-    let path = graphmind_config::paths::graphmind_dir().join("update-check.json");
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let cache: UpdateCache = serde_json::from_str(&raw).ok()?;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    if now - cache.fetched_at > CACHE_TTL_SECS || cache.latest_version.is_empty() {
-        return None;
-    }
+    let latest = graphmind_config::releases::last_known_latest_version()?;
 
     fn parse(v: &str) -> (u64, u64, u64) {
         let mut p = v.trim_start_matches('v').splitn(3, '.');
@@ -40,12 +25,12 @@ pub fn update_notice() -> Option<String> {
         (a, b, c)
     }
 
-    if parse(&cache.latest_version) > parse(CURRENT) {
+    if parse(&latest) > parse(CURRENT) {
         let mut msg = format!(
             "⚠ graphmind update available: {} → {} — run `graphmind update`",
-            CURRENT, cache.latest_version
+            CURRENT, latest
         );
-        if graphmind_config::update_crosses_breaking(CURRENT, &cache.latest_version) {
+        if graphmind_config::update_crosses_breaking(CURRENT, &latest) {
             msg.push_str(
                 " — then run `graphmind build --reset --all` (graph schema changed)"
             );

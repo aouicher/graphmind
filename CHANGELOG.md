@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Update checks call curl directly, not through rtk.** rtk 1.0 renamed `rtk proxy`, which graphmind used for its update checks; once rtk drops the old name, those checks would have failed. They never needed rtk. The CLI and the MCP server now share one daily check, so a failed check isn't retried by every MCP server start, and `graphmind update` reads the release tag from GitHub's JSON. Thanks @KennethWKZ for spotting the rename.
+
 ## [0.3.6] - 2026-10-11
 
 ### Fixed
