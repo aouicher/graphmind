@@ -5,6 +5,11 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Files that aren't UTF-8 are reported.** The build dropped a source file it couldn't read as UTF-8 (a Latin-1 PHP file, say) without a word: it wasn't in the skipped count, and whatever an earlier build stored for it stayed. The build now names it (`Skipped src/legacy.php: not UTF-8`), counts it as skipped, and removes its earlier records. A file that can't be read (permissions) is skipped with a warning instead and keeps what the graph has, like a folder that can't be read. Files the parser refuses are named and skipped like files that aren't UTF-8 (`Skipped config.yml: Unsupported language: yaml`); before, such a file kept its old symbols without their outgoing edges.
+- **Minified files leave nothing behind.** A file indexed before it became minified (more than 5,000 characters, lines averaging over 500), or before graphmind skipped such files, kept its old symbols and file record forever: the file was still on disk, so cleanup never removed them, and the minified check meant it was never parsed again. The build now removes them the first time it skips the file, and counts them as deleted once.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed
