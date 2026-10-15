@@ -1,5 +1,6 @@
 //! gm_file serves only indexed files of the project, given relative to the project root, that
-//! resolve to a regular, indexed file inside the project directory.
+//! resolve to a regular, indexed file inside the project directory. Its paging parameters are
+//! tested here too.
 
 use graphmind_mcp::handlers::dispatch_tool;
 use serde_json::{json, Value};
@@ -15,7 +16,8 @@ const IGNORED_MARKER: &str = "GM_IGNORED_MARKER";
 const HIDDEN_MARKER: &str = "GM_HIDDEN_MARKER";
 
 /// A HOME with one registered and built project, `alpha`, at `<home>/alpha`:
-/// - `src/a.ts` and `b.ts`, indexed, and `src/alias.ts`, an indexed symlink to `src/a.ts`;
+/// - `src/a.ts`, `src/lines.ts` (three lines) and `b.ts`, indexed, and `src/alias.ts`, an indexed
+///   symlink to `src/a.ts`;
 /// - `.env`, the gitignored `secret.ts` and `.hidden/a.ts`, not indexed;
 /// - `src/env.ts` and `src/secret_link.ts`, symlinks to `.env` and `secret.ts`;
 /// - `src/outside.ts`, a symlink to `<home>/outside.ts`, outside the project.
@@ -29,6 +31,11 @@ fn with_built_project(f: impl FnOnce(&Path, &Path)) {
     std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(project.join("src/a.ts"), "export function alpha() { return 1; }\n").unwrap();
     std::fs::write(project.join("b.ts"), "export function beta() { return 2; }\n").unwrap();
+    std::fs::write(
+        project.join("src/lines.ts"),
+        "export function one() { return 1; }\nexport function two() { return 2; }\nexport function three() { return 3; }\n",
+    )
+    .unwrap();
     std::fs::create_dir_all(project.join(".hidden")).unwrap();
     std::fs::write(project.join(".hidden/a.ts"), format!("export const h = '{HIDDEN_MARKER}';\n")).unwrap();
     std::fs::write(project.join(".env"), format!("SECRET={ENV_MARKER}\n")).unwrap();
@@ -101,6 +108,50 @@ fn assert_refused(file: &str) -> String {
         assert!(!text.contains(marker), "{file} leaked {marker}: {text}");
     }
     text
+}
+
+/// gm_file's paging wiring: `offset`, `limit` and `column` reach the pager, a partial page ends
+/// with the note after the closing fence, and invalid values are errors. The paging rules
+/// themselves are unit-tested in `handlers/file_page.rs`.
+#[test]
+fn gm_file_pages_with_offset_limit_and_column() {
+    with_built_project(|project, _| {
+        let file = "src/lines.ts";
+        let content = std::fs::read_to_string(project.join(file)).unwrap();
+        let lines: Vec<&str> = content.split_inclusive('\n').collect();
+        let header = format!("# {file} [alpha]\n\n```\n");
+        let read = |extra: Value| {
+            let mut args = json!({ "file": file, "project": "alpha" });
+            args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            dispatch_tool("gm_file", &args)
+        };
+
+        // A file under the cap comes back whole, without a note.
+        assert_eq!(text(&read(json!({}))), format!("{header}{content}\n```"));
+
+        assert_eq!(
+            text(&read(json!({ "offset": 2, "limit": 1 }))),
+            format!(
+                "{header}{}\n```\n\n[graphmind: showing lines 2-2 of 3; call gm_file again with offset=3 to continue]",
+                lines[1]
+            )
+        );
+
+        // Column 8 of line 1 is byte 7: the page starts after "export ".
+        assert_eq!(
+            text(&read(json!({ "column": 8, "limit": 1 }))),
+            format!(
+                "{header}{}\n```\n\n[graphmind: showing lines 1-1 of 3; call gm_file again with offset=2 to continue]",
+                &lines[0][7..]
+            )
+        );
+
+        for (name, bad) in [("offset", json!("4")), ("column", json!(0)), ("limit", json!(-1))] {
+            let resp = read(json!({ name: bad }));
+            assert!(is_error(&resp), "{name}={bad} must be an error");
+            assert!(text(&resp).starts_with(&format!("Invalid parameter {name}:")), "{}", text(&resp));
+        }
+    });
 }
 
 #[test]

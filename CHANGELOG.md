@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gm_file` returns large files in pages.** It returned the whole file in one result. MCP clients save a result over their output limit to a file and give the model the path instead, which costs an extra hop and a read of the oversized file. It now returns pages of about 10k tokens, capped in bytes so non-Latin text stays under the limit too, cut after the last whole line that fits, and ends a partial page with where to continue. New parameters read any range: `offset` (1-based line number), `limit` (lines) and `column` (1-based byte column within the `offset` line, for lines longer than a page); a value that isn't a valid integer is an error instead of silently returning the first page. MCP results cut to size no longer panic when the cut falls inside a multi-byte character.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed
