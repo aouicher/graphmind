@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- Setup and `graphmind uninstall all` also remove the `~/.graphmind/bin` PATH line that desktop app versions 0.2.56 to 0.2.87 could add to `.bash_profile`. Thanks @KennethWKZ.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed

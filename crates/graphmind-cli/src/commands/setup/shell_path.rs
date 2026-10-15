@@ -34,8 +34,8 @@ pub fn install_shell_path() -> ShellPath {
 /// Marks PATH lines written by setup, so uninstall removes exactly what setup added.
 const PATH_MARKER: &str = "# added by graphmind setup";
 
-/// The PATH line graphmind <= 0.2.215 wrote, for `~/.graphmind/bin`, to .zshenv, .zshrc and
-/// .bashrc — whether or not the binary was installed there.
+/// The PATH line older CLI versions (<= 0.2.215) and desktop app versions wrote for
+/// `~/.graphmind/bin`. Matched in every profile `remove_profile_lines` scans.
 fn legacy_export_line() -> String {
     let dir = home_dir().join(".graphmind").join("bin");
     format!("export PATH=\"{}:$PATH\"", dir.to_string_lossy())
@@ -291,7 +291,7 @@ fn uninstall_shell_path_unix() {
 /// collapsing a blank line left orphaned. Returns the profiles changed, and the reasons for those
 /// left unchanged (can't be read or backed up).
 fn remove_profile_lines(matches: &dyn Fn(&str) -> bool) -> (Vec<&'static str>, Vec<String>) {
-    let profiles: &[&'static str] = &[".zshenv", ".zshrc", ".bashrc", ".profile"];
+    let profiles: &[&'static str] = &[".zshenv", ".zshrc", ".bashrc", ".bash_profile", ".profile"];
     let mut updated = Vec::new();
     let mut left_alone = Vec::new();
     for profile in profiles {

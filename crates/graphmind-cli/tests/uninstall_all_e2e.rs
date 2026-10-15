@@ -104,6 +104,30 @@ fn uninstall_shell_path_noop_when_absent() {
     });
 }
 
+/// Older desktop app versions appended the unmarked `~/.graphmind/bin` line to `.bash_profile`
+/// too: uninstall removes it there as well, after a backup, and collapses the blank line it leaves.
+#[test]
+fn uninstall_shell_path_removes_the_desktop_apps_bash_profile_line() {
+    with_home(|home| {
+        let bash_profile = home.join(".bash_profile");
+        let legacy = format!("export PATH=\"{}:$PATH\"", home.join(".graphmind").join("bin").display());
+        let original = format!("export EDITOR=vim\n\n{legacy}\n\nexport FOO=bar\n");
+        fs::write(&bash_profile, &original).unwrap();
+
+        uninstall_shell_path();
+
+        assert_eq!(fs::read_to_string(&bash_profile).unwrap(), "export EDITOR=vim\n\nexport FOO=bar\n");
+        let backups: Vec<_> = fs::read_dir(home)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().ends_with(".bak"))
+            .collect();
+        assert_eq!(backups.len(), 1, "{backups:?}");
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 2. Claude Code MCP settings.json — removes mcpServers.graphmind + PATH prefix,
 //    unrelated mcpServers entry AND unrelated top-level key survive
