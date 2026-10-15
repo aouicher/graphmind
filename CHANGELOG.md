@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Minified files leave nothing behind.** A file indexed before it became minified (more than 5,000 characters, lines averaging over 500), or before graphmind skipped such files, kept its old symbols and file record forever: the file was still on disk, so cleanup never removed them, and the minified check meant it was never parsed again. The build now removes them the first time it skips the file, and counts them as deleted once.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed

@@ -453,3 +453,63 @@ fn incremental_build_updates_stats() {
         stats_after.symbols
     );
 }
+
+// ── Minified files ────────────────────────────────────────────────
+
+/// A file indexed before it was minified keeps nothing in the graph once the minified-file check
+/// skips it: no symbols, edges, file row or hash-cache entry, counted as deleted once.
+#[test]
+fn minified_file_drops_what_an_earlier_build_stored() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("src/lib.ts"),
+        "export function helper(): number {\n  return 1;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/app.ts"),
+        "import { helper } from './lib';\n\nexport function main(): number {\n  return helper();\n}\n",
+    )
+    .unwrap();
+    let db_path = tmp.path().join("test.db");
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    let project_root = project.to_str().unwrap();
+    let mut builder = GraphBuilder::new(db_path.to_str().unwrap(), cache_dir.to_str().unwrap());
+
+    let count = |b: &GraphBuilder, sql: &str| -> i64 {
+        b.database().query_row(sql, ["src/lib.ts"], |r| r.get(0)).unwrap()
+    };
+    const SYMBOLS: &str = "SELECT COUNT(*) FROM symbols WHERE file = ?1";
+    const FILES: &str = "SELECT COUNT(*) FROM files WHERE path = ?1";
+    const EDGES_IN: &str = "SELECT COUNT(*) FROM edges WHERE to_id IN (SELECT id FROM symbols WHERE file = ?1)";
+
+    builder.build(project_root, &BuildOptions { full: true, ..Default::default() });
+    assert_eq!(count(&builder, SYMBOLS), 1, "helper is indexed");
+    assert_eq!(count(&builder, FILES), 1);
+    assert!(count(&builder, EDGES_IN) > 0, "main -> helper edge exists");
+
+    // The same file, minified: one line well over 500 characters.
+    let minified = "export function helper(){return 1};".repeat(200);
+    std::fs::write(project.join("src/lib.ts"), &minified).unwrap();
+
+    // An incremental build skips it and forgets it.
+    let result = builder.build(project_root, &BuildOptions::default());
+    assert_eq!(result.skipped, 2, "lib.ts (minified) and app.ts (unchanged)");
+    assert_eq!(result.deleted, 1, "lib.ts's old records count as deleted");
+    assert_eq!(count(&builder, SYMBOLS), 0, "no stale symbols");
+    assert_eq!(count(&builder, FILES), 0, "no stale file row");
+    assert_eq!(count(&builder, EDGES_IN), 0, "no edges into the old symbols");
+    let hashes = std::fs::read_to_string(cache_dir.join("hashes.json")).unwrap();
+    assert!(!hashes.contains("src/lib.ts"), "hash cache forgets it: {hashes}");
+    assert!(hashes.contains("src/app.ts"), "other files stay cached");
+
+    // Later builds, full or not, still skip it but have nothing left to delete.
+    for full in [false, true] {
+        let again = builder.build(project_root, &BuildOptions { full, ..Default::default() });
+        assert_eq!(again.deleted, 0, "nothing to delete the second time (full = {full})");
+        assert_eq!(count(&builder, FILES), 0);
+    }
+}
