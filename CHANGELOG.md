@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Generator functions are indexed.** In TypeScript and JavaScript, `function* name() {}` was never stored as a symbol, so `outline`, `fn` and `who-calls` didn't know it, and calls to it or from it were dropped without a warning. Generator functions are now functions like any other, with their callers and callees. Run `graphmind build --full` once to pick up generators in files that haven't changed. Reported in #187.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed

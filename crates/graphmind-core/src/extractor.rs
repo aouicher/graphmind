@@ -57,7 +57,7 @@ pub fn extract_call_sites(root: Node, source: &str) -> Vec<CallSite> {
 
 fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
     match node.kind() {
-        "function_declaration" | "function" => {
+        "function_declaration" | "generator_function_declaration" | "function" => {
             if let Some(sym) = extract_function(node, source) {
                 symbols.push(sym);
             }
@@ -324,9 +324,9 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
 
 fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, current_fn: Option<&str>) {
     let fn_name = match node.kind() {
-        "function_declaration" | "method_definition" => {
-            node.child_by_field_name("name").map(|n| node_text(n, source))
-        }
+        "function_declaration" | "generator_function_declaration" | "method_definition" => node
+            .child_by_field_name("name")
+            .map(|n| node_text(n, source)),
         _ => None,
     };
     let active_fn = fn_name.as_deref().or(current_fn);
@@ -459,5 +459,64 @@ mod object_literal_tests {
         assert!(names.iter().any(|n| n.contains("refreshToken")), "refreshToken not found in {:?}", names);
         assert!(names.iter().any(|n| n.contains("authenticate")), "authenticate not found in {:?}", names);
         assert_eq!(names.iter().filter(|n| n.contains("refreshToken")).count(), 1, "duplicate refreshToken");
+    }
+}
+
+#[cfg(test)]
+mod generator_tests {
+    use crate::extractor::SymbolKind;
+    use crate::parser::parse;
+
+    const SOURCE: &str = r#"export function* genFn(n: number): Generator<number> {
+  for (let i = 0; i < n; i++) yield helper(i);
+}
+
+function* plainGen() {
+  yield* genFn(2);
+}
+
+export function main(): number {
+  return [...genFn(3)].length;
+}
+"#;
+
+    #[test]
+    fn generator_functions_are_symbols_and_callers() {
+        for language in ["typescript", "javascript"] {
+            let source = if language == "javascript" {
+                SOURCE
+                    .replace("(n: number): Generator<number>", "(n)")
+                    .replace("(): number", "()")
+            } else {
+                SOURCE.to_string()
+            };
+            let result = parse("gen.ts", &source, language).unwrap();
+
+            let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+            let gen = result.symbols.iter().find(|s| s.name == "genFn");
+            let gen = gen.unwrap_or_else(|| panic!("{language}: genFn missing from {names:?}"));
+            assert_eq!(gen.kind, SymbolKind::Function, "{language}");
+            assert_eq!((gen.line_start, gen.line_end), (1, 3), "{language}");
+            assert!(
+                names.contains(&"plainGen"),
+                "{language}: plainGen missing from {names:?}"
+            );
+
+            let calls: Vec<(&str, &str)> = result
+                .call_sites
+                .iter()
+                .map(|c| (c.caller.as_str(), c.callee.as_str()))
+                .collect();
+            for expected in [
+                ("genFn", "helper"),
+                ("plainGen", "genFn"),
+                ("main", "genFn"),
+            ] {
+                assert!(
+                    calls.contains(&expected),
+                    "{language}: {expected:?} not in {calls:?}"
+                );
+            }
+        }
     }
 }
