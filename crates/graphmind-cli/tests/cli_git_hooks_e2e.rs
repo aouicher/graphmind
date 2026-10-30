@@ -197,3 +197,31 @@ fn auto_setup_after_an_upgrade_finishes_after_the_command_exits() {
     }
     assert!(hooks.join("post-checkout").exists(), "setup should complete on its own");
 }
+
+/// `graphmind init <PATH>` hooks and builds `<PATH>`, whatever the current directory: outside any
+/// repo (#183), and inside another registered repo, which it must leave alone.
+#[test]
+fn init_with_a_path_targets_that_path() {
+    let env = CliTestEnv::new();
+    let target = new_repo(&env, "target");
+    let other = new_repo(&env, "other");
+    env.run_ok(&["register", other.to_str().unwrap(), "--slug", "other"]);
+
+    let out = env.run_ok_in(env.home.path(), &["init", "--skip-build", target.to_str().unwrap()]);
+    for name in HOOK_NAMES {
+        let body = std::fs::read_to_string(target.join(".git/hooks").join(name)).unwrap_or_default();
+        assert!(body.contains("graphmind"), "{name} not installed in target: {out}");
+    }
+
+    let target2 = new_repo(&env, "target2");
+    env.run_ok_in(&other, &["init", target2.to_str().unwrap()]);
+    assert!(target2.join(".git/hooks/post-commit").exists(), "target2 not hooked");
+    assert!(!other.join(".git/hooks/post-commit").exists(), "init hooked the cwd's project");
+    let outline = env.run_ok(&["outline", "src/a.ts", "--slug", "target2"]);
+    assert!(outline.contains("Function a"), "target2 not built: {outline}");
+    let other_outline = env.run(&["outline", "src/a.ts", "--slug", "other"]);
+    assert!(
+        !String::from_utf8_lossy(&other_outline.stdout).contains("Function a"),
+        "init built the cwd's project"
+    );
+}
