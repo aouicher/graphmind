@@ -75,3 +75,28 @@ fn build_all_exits_non_zero_when_a_project_fails() {
     env.run_ok(&["unregister", "all-gone"]);
     env.run_ok(&["build", "--all"]);
 }
+
+/// The build names each file the minified check skips, with its average line length. Markdown
+/// with long lines is prose: indexed, not named.
+#[test]
+fn build_names_minified_files_and_keeps_long_line_markdown() {
+    let env = CliTestEnv::new();
+    let project = env.home.path().join("minified-project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::create_dir_all(project.join("docs")).unwrap();
+    std::fs::write(project.join("src/app.ts"), "export function main(): number {\n  return 1;\n}\n").unwrap();
+    let bundle = "export function helper(){return 1};".repeat(200);
+    std::fs::write(project.join("src/bundle.ts"), &bundle).unwrap();
+    let paragraph = "The service reads the queue and writes the ledger. ".repeat(60);
+    std::fs::write(project.join("docs/notes.md"), format!("## Notes\n\n{paragraph}\n\n## More\n\n{paragraph}\n")).unwrap();
+    env.run_ok(&["register", project.to_str().unwrap(), "--slug", "minified"]);
+
+    let out = env.run(&["build", "minified", "--full"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let expected = format!("Skipped src/bundle.ts: minified (average line {} bytes)", bundle.len());
+    assert!(stderr.contains(&expected), "expected `{expected}` in:\n{stderr}");
+    assert!(!stderr.contains("Skipped docs/notes.md"), "markdown isn't skipped:\n{stderr}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("| 1 skipped |"), "only the bundle is skipped:\n{stdout}");
+}
