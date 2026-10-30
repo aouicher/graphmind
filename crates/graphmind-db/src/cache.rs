@@ -34,6 +34,10 @@ impl FileHashCache {
         self.cache.remove(file_path);
     }
 
+    pub fn contains(&self, file_path: &str) -> bool {
+        self.cache.contains_key(file_path)
+    }
+
     pub fn known_files(&self) -> Vec<String> {
         self.cache.keys().cloned().collect()
     }
