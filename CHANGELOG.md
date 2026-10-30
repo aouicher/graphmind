@@ -5,6 +5,12 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Minified files leave nothing behind.** A file indexed before it became minified (more than 5,000 characters, lines averaging over 500), or before graphmind skipped such files, kept its old symbols and file record forever: the file was still on disk, so cleanup never removed them, and the minified check meant it was never parsed again. The build now removes them the first time it skips the file, and counts them as deleted once.
+- **Skipped minified files are named.** The build prints `Skipped <path>: minified (average line N bytes)` for each one, instead of only counting them.
+- **Markdown isn't skipped as minified.** A document written one paragraph per line averages over 500 characters a line, like a minified file, and was left out of the graph. Markdown is now always indexed.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed
