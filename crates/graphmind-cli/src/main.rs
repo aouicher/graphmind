@@ -42,6 +42,15 @@ enum Commands {
     },
     /// List registered projects
     List,
+    /// Turn automatic registration of the project's other git worktrees on or off
+    /// (prints the setting without a state)
+    LinkWorktrees {
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+        /// Project slug (default: the current directory's project)
+        #[arg(long = "slug", alias = "in", value_name = "SLUG")]
+        slug: Option<String>,
+    },
     /// Show project status
     Status {
         #[command(flatten)]
@@ -587,6 +596,9 @@ fn main() {
         }
         Commands::Unregister { slug } => {
             commands::register::unregister(slug.as_deref());
+        }
+        Commands::LinkWorktrees { state, slug } => {
+            commands::register::link_worktrees(state.as_deref(), slug.as_deref());
         }
         Commands::List => {
             commands::register::list();

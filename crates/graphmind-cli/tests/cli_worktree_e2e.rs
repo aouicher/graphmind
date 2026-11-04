@@ -340,8 +340,9 @@ fn build_all_succeeds_after_a_worktree_is_removed() {
     assert!(!env.run_ok(&["list"]).contains("wt2"));
 }
 
-/// A project registered by hand stays listed when its folder is gone: only worktrees graphmind
-/// registered itself are forgotten on their own; `clean --stale` handles the rest.
+/// A project without a `primary` (here, registered by hand outside any git repo) stays listed when
+/// its folder is gone: only worktrees, projects with a `primary` however they were registered, are
+/// forgotten on their own; `clean --stale` handles the rest.
 #[test]
 fn list_keeps_a_missing_project_registered_by_hand() {
     let env = CliTestEnv::new();
@@ -449,4 +450,116 @@ fn clean_stale_keeps_projects_registered_below_a_checkout_root() {
     let out = env.run_ok(&["clean", "--stale"]);
     assert!(!out.contains("Pruned"), "a monorepo package is not a removed worktree: {out}");
     assert!(env.run_ok(&["list"]).contains("api"));
+}
+
+fn which_fails_in(env: &CliTestEnv, dir: &Path) {
+    // Several runs: a choice made in HashMap order would differ between processes.
+    for _ in 0..5 {
+        let out = env.run_in(dir, &["which"]);
+        assert!(
+            !out.status.success(),
+            "an opted-out repo's worktree must not resolve: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+    assert!(project_at(env, dir).is_none(), "{dir:?} must not be registered");
+}
+
+#[test]
+fn link_worktrees_off_leaves_new_worktrees_unregistered() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    let out = env.run_ok_in(&repo, &["link-worktrees", "off"]);
+    assert!(out.contains("link-worktrees off for main-wt"), "got: {out}");
+    assert_eq!(project_at(&env, &repo).unwrap()["link_worktrees"], false);
+
+    // `which` is what the Claude Code hooks run in every session and tool call.
+    which_fails_in(&env, &wt2);
+    assert!(!env.run_in(&wt2, &["build"]).status.success(), "build must find no project");
+    assert!(project_at(&env, &wt2).is_none());
+
+    // Claude Code's nested worktrees must not fall back to the main checkout either.
+    let nested = repo.join(".claude/worktrees/feat");
+    git(&repo, &["worktree", "add", "-q", nested.to_str().unwrap(), "-b", "feat"]);
+    which_fails_in(&env, &nested);
+
+    let list = env.run_ok(&["list"]);
+    assert!(list.contains("[worktrees not linked]"), "got: {list}");
+    assert_eq!(env.run_ok_in(&repo, &["link-worktrees"]).trim(), "main-wt: link-worktrees off");
+    // Asked from inside the worktree: answers for the repo without registering it.
+    assert_eq!(env.run_ok_in(&wt2, &["link-worktrees"]).trim(), "main-wt: link-worktrees off");
+    assert!(project_at(&env, &wt2).is_none());
+}
+
+#[test]
+fn link_worktrees_off_run_inside_a_new_worktree_does_not_register_it() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+
+    let out = env.run_ok_in(&wt2, &["link-worktrees", "off"]);
+    assert!(out.contains("link-worktrees off for main-wt"), "got: {out}");
+    assert!(project_at(&env, &wt2).is_none(), "the command must not register the worktree it runs in");
+    assert_eq!(project_at(&env, &repo).unwrap()["link_worktrees"], false);
+    which_fails_in(&env, &wt2);
+}
+
+#[test]
+fn link_worktrees_opt_out_survives_reregistering_and_can_be_undone() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok(&["link-worktrees", "off", "--slug", "main-wt"]);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    assert_eq!(project_at(&env, &repo).unwrap()["link_worktrees"], false);
+
+    env.run_ok(&["link-worktrees", "on", "--slug", "main-wt"]);
+    // `true` is the default and isn't written to config.json.
+    assert!(project_at(&env, &repo).unwrap().get("link_worktrees").is_none());
+    assert_eq!(env.run_ok_in(&wt2, &["which"]).trim(), "wt2");
+    assert_eq!(project_at(&env, &wt2).unwrap()["primary"], "main-wt");
+}
+
+#[test]
+fn link_worktrees_off_set_on_a_linked_worktree_applies_to_the_repo() {
+    let env = CliTestEnv::new();
+    let (repo, wt2) = init_repo_with_worktree(&env);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok_in(&wt2, &["which"]); // links wt2 while linking is on
+    assert!(project_at(&env, &wt2).is_some());
+
+    // Set on the worktree: stored on its main project, and the note names wt2 as
+    // registered before (it keeps building until unregistered).
+    let out = env.run_ok(&["link-worktrees", "off", "--slug", "wt2"]);
+    assert!(out.contains("link-worktrees off for main-wt"), "got: {out}");
+    assert!(out.contains("graphmind unregister") && out.contains("wt2"), "got: {out}");
+    assert_eq!(project_at(&env, &repo).unwrap()["link_worktrees"], false);
+
+    let wt3 = env.home.path().join("wt3");
+    git(&repo, &["worktree", "add", "-q", wt3.to_str().unwrap(), "-b", "third"]);
+    which_fails_in(&env, &wt3);
+
+    // `on` from any project of the repo clears it repo-wide.
+    env.run_ok(&["link-worktrees", "on", "--slug", "wt2"]);
+    assert_eq!(env.run_ok_in(&wt3, &["which"]).trim(), "wt3");
+}
+
+#[test]
+fn link_worktrees_off_on_the_repo_root_covers_a_registered_subfolder() {
+    let env = CliTestEnv::new();
+    let repo = init_repo(&env, "repo");
+    std::fs::create_dir_all(repo.join("packages/api")).unwrap();
+    std::fs::write(repo.join("packages/api/api.rs"), "pub fn api_fn() {}\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "api"]);
+    env.run_ok_in(&repo, &["register", ".", "--slug", "main-wt"]);
+    env.run_ok_in(&repo.join("packages/api"), &["register", ".", "--slug", "api"]);
+    env.run_ok(&["link-worktrees", "off", "--slug", "main-wt"]);
+
+    let wt2 = env.home.path().join("wt2");
+    git(&repo, &["worktree", "add", "-q", wt2.to_str().unwrap(), "-b", "feature"]);
+    // family_match would pick `api` (the deepest project), which has the default `true`.
+    which_fails_in(&env, &wt2.join("packages/api"));
+    which_fails_in(&env, &wt2);
 }
