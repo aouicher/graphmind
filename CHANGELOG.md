@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Added
+
+- **Opt a repo out of automatic worktree registration.** graphmind registers a new worktree of a registered repo the first time any command runs in it, the Claude Code hooks included, then builds its graph, which embeds its symbols when semantic search is on. `graphmind link-worktrees off` (in the repo, or with `--slug <project>`) stops that for the whole repo; `on` turns it back on, and `graphmind link-worktrees` prints the setting. Worktrees registered before stay registered; `graphmind unregister <slug>` drops one. In an opted-out worktree, commands, MCP tools and the Claude Code hooks find no project, so they give no memory or code context there. `graphmind list` marks the project `[worktrees not linked]`. Thanks @KennethWKZ.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed
