@@ -6,6 +6,13 @@ use std::sync::{Mutex, OnceLock};
 
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// The `graphmind` binary cargo built for these tests. Cargo sets `CARGO_BIN_EXE_graphmind` for
+/// integration tests and builds the binary first, wherever the target dir is (`CARGO_TARGET_DIR`,
+/// `--target-dir`, a cross target): a fixed `<workspace>/target/debug` path misses all of those.
+pub fn graphmind_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_graphmind"))
+}
+
 /// For suites that call setup functions in-process: create a fresh temp HOME, point `HOME` at it,
 /// run `f`, then drop. PATH holds the system directories plus `<home>/bin` (empty unless a test
 /// puts a fake CLI there), so the `claude` and `opencode` installed on the machine running the
@@ -59,12 +66,7 @@ impl CliTestEnv {
         // A `claude` subprocess would write to CLAUDE_CONFIG_DIR instead of the temp HOME.
         unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 
-        let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap() // crates/
-            .parent()
-            .unwrap() // workspace root
-            .join("target/debug/graphmind");
+        let binary = graphmind_bin();
 
         let bin_dir = home.path().join(".graphmind").join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
@@ -179,10 +181,7 @@ impl SharedProject {
     pub fn get() -> &'static SharedProject {
         SHARED_PROJECT.get_or_init(|| {
             let dir = tempfile::tempdir().unwrap();
-            let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent().unwrap()
-                .parent().unwrap()
-                .join("target/debug/graphmind");
+            let binary = graphmind_bin();
 
             let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .parent().unwrap()
@@ -262,10 +261,7 @@ impl QueryTestEnv {
         // A `claude` subprocess would write to CLAUDE_CONFIG_DIR instead of the temp HOME.
         unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 
-        let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap()
-            .parent().unwrap()
-            .join("target/debug/graphmind");
+        let binary = graphmind_bin();
 
         QueryTestEnv {
             home,
