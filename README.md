@@ -285,6 +285,13 @@ conventions, bugs) is shared by all of them: it is repo-wide knowledge.
 - **Nested worktrees**: checkouts inside the main one — Claude Code's
   `.claude/worktrees/<name>` — resolve to themselves, never to the main
   checkout's graph.
+- **Opting a repo out**: `graphmind link-worktrees off` (in the repo, or
+  `--slug <project>`) stops new worktrees of that repo being registered, so
+  nothing of theirs is built or embedded; `on` turns it back on and
+  `graphmind link-worktrees` prints the setting. It is repo-wide and leaves
+  worktrees registered before in place (`graphmind unregister <slug>` drops
+  one). In an opted-out worktree, graphmind commands, MCP tools and the Claude
+  Code hooks find no project, so they give no memory or code context there.
 - **Fast first build**: a new worktree's graph is copied from the main
   checkout's, then updated incrementally in the background. Only the files
   that differ between the two checkouts get parsed.

@@ -124,6 +124,33 @@ pub struct ProjectConfig {
     /// worktree support, which keeps its own memory exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary: Option<String>,
+    /// `false` opts the whole repo out of automatic worktree registration
+    /// ([`Registry::link_worktree`]): when any project of the repo (same `repo_id`)
+    /// has it off, no new worktree of the repo is registered, so nothing of it is
+    /// built or embedded, and commands there (the Claude Code hooks' `graphmind
+    /// which` included) resolve as if the worktree were unknown. Worktrees registered
+    /// before stay registered; registering one by hand still works. Saved only when
+    /// `false`.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub link_worktrees: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// Whether the repo `repo_id` opted out of automatic worktree registration: any of
+/// its projects has `link_worktrees` off. Repo-wide, so the answer doesn't depend on
+/// which project [`family_match`] picks (ties are broken in HashMap order).
+fn repo_opted_out(config: &GlobalConfig, repo_id: &str) -> bool {
+    config
+        .projects
+        .values()
+        .any(|p| p.repo_id.as_deref() == Some(repo_id) && !p.link_worktrees)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -473,7 +500,7 @@ impl Registry {
         let branch = git_identity::current_branch(Path::new(&abs_path));
         let now = chrono::Utc::now().to_rfc3339();
 
-        let build = |slug: String, primary: Option<String>| ProjectConfig {
+        let build = |slug: String, primary: Option<String>, link_worktrees: bool| ProjectConfig {
             path: abs_path.clone(),
             slug,
             registered: now.clone(),
@@ -484,6 +511,7 @@ impl Registry {
             repo_id: repo_id.clone(),
             branch: branch.clone(),
             primary,
+            link_worktrees,
         };
 
         let project = mutate_config(|config| {
@@ -505,11 +533,13 @@ impl Registry {
                     _ => None,
                 },
             };
-            let project = build(slug.clone(), primary);
+            // Re-running `init` or `register` keeps a worktree opt-out.
+            let link_worktrees = existing.as_ref().is_none_or(|e| e.link_worktrees);
+            let project = build(slug.clone(), primary, link_worktrees);
             config.projects.insert(slug, project.clone());
             (project, true)
         })
-        .unwrap_or_else(|| build(slug.map(String::from).unwrap_or_else(|| slugify(&abs_path)), None));
+        .unwrap_or_else(|| build(slug.map(String::from).unwrap_or_else(|| slugify(&abs_path)), None, true));
 
         fs::create_dir_all(paths::graph_dir(&project.slug)).ok();
 
@@ -526,13 +556,14 @@ impl Registry {
     /// `None` when `dir` isn't in a git repo or no registered project matches.
     pub fn link_worktree(dir: &Path) -> Option<ProjectConfig> {
         let repo_id = git_identity::repo_id(dir)?;
-        // Lock-free early exit for the common case — a repo graphmind doesn't know —
-        // since hooks run this on every tool call there.
-        let known = load_config().projects.values().any(|p| {
+        // Lock-free early exit for the common case — a repo graphmind doesn't know,
+        // or one that opted out — since hooks run this on every tool call there.
+        let config = load_config();
+        let known = config.projects.values().any(|p| {
             p.repo_id.as_deref() == Some(repo_id.as_str())
                 || (p.repo_id.is_none() && Path::new(&p.path).is_dir())
         });
-        if !known {
+        if !known || repo_opted_out(&config, &repo_id) {
             return None;
         }
         let root = git_identity::work_tree(dir)?.root;
@@ -540,6 +571,11 @@ impl Registry {
 
         let (linked, pruned) = mutate_config(|config| {
             let backfilled = backfill_repo_ids(config);
+            // Checked again after the backfill: a project registered before `repo_id`
+            // existed may be the one that opted out.
+            if repo_opted_out(config, &repo_id) {
+                return ((None, Vec::new()), backfilled);
+            }
             let Some((here, sibling)) = family_match(config, &repo_id, &root, &dir) else {
                 return ((None, Vec::new()), backfilled);
             };
@@ -556,6 +592,7 @@ impl Registry {
                 repo_id: Some(repo_id.clone()),
                 branch: git_identity::current_branch(&here),
                 primary: Some(sibling.primary.clone().unwrap_or(sibling.slug.clone())),
+                link_worktrees: true,
             };
             config.projects.insert(slug.clone(), project.clone());
             // Locked before the registration is visible to other processes, so a
@@ -614,9 +651,11 @@ impl Registry {
         config.projects.get(slug).cloned()
     }
 
-    /// Forgets the worktrees graphmind registered automatically whose directory is gone and
-    /// removes their graphs: their memory lives with the primary, so nothing is lost. Returns
-    /// their slugs. Projects registered by hand stay (`graphmind clean --stale` prunes those).
+    /// Forgets the worktrees whose directory is gone and removes their graphs: their memory lives
+    /// with the primary, so nothing is lost. Returns their slugs. A worktree here is any project
+    /// with a `primary` (`is_gone_worktree`), whether it was linked automatically or registered
+    /// by hand (`graphmind register` on a worktree's root sets `primary` too). Projects without a
+    /// `primary` stay, even when their directory is gone (`graphmind clean --stale` prunes those).
     pub fn forget_gone_worktrees() -> Vec<String> {
         // Lock-free early exit for the common case: nothing to forget.
         if !load_config().projects.values().any(is_gone_worktree) {
@@ -662,6 +701,75 @@ impl Registry {
             }
         }
         Some(best.clone())
+    }
+
+    /// The registered project for `dir`, without registering a new worktree (which
+    /// resolving the usual way does): the project containing `dir`, else the main
+    /// project of `dir`'s repo (no `primary`, first by slug), else another of its projects.
+    pub fn find_without_linking(dir: &Path) -> Option<ProjectConfig> {
+        if let Some(project) = Self::find_by_path(&dir.to_string_lossy()) {
+            return Some(project);
+        }
+        let repo_id = git_identity::repo_id(dir)?;
+        let config = load_config();
+        config
+            .projects
+            .values()
+            .filter(|p| p.repo_id.as_deref() == Some(repo_id.as_str()))
+            .min_by_key(|p| (p.primary.is_some(), p.slug.clone()))
+            .cloned()
+    }
+
+    /// Whether automatic worktree registration is on for `slug`'s repo (see
+    /// [`ProjectConfig::link_worktrees`]). `true` for an unknown slug.
+    pub fn worktrees_linked(slug: &str) -> bool {
+        let config = load_config();
+        match config.projects.get(slug) {
+            Some(ProjectConfig { repo_id: Some(id), .. }) => !repo_opted_out(&config, id),
+            Some(project) => project.link_worktrees,
+            None => true,
+        }
+    }
+
+    /// Turns automatic worktree registration on or off for `slug`'s repo. Off is
+    /// stored on the repo's main project (`slug`'s `primary`, else `slug`); on clears
+    /// it on every project of the repo. Returns the slugs changed (empty: already so),
+    /// or `None` when `slug` isn't registered or the config can't be written.
+    pub fn set_link_worktrees(slug: &str, on: bool) -> Option<Vec<String>> {
+        mutate_config(|config| {
+            let Some(project) = config.projects.get(slug).cloned() else {
+                return (None, false);
+            };
+            let targets: Vec<String> = if on {
+                config
+                    .projects
+                    .values()
+                    .filter(|p| !p.link_worktrees)
+                    .filter(|p| p.slug == project.slug || (project.repo_id.is_some() && p.repo_id == project.repo_id))
+                    .map(|p| p.slug.clone())
+                    .collect()
+            } else {
+                let main = project.primary.clone().filter(|s| config.projects.contains_key(s)).unwrap_or(project.slug.clone());
+                let already_off = project.repo_id.as_deref().map_or(!project.link_worktrees, |id| repo_opted_out(config, id));
+                if already_off { Vec::new() } else { vec![main] }
+            };
+            for target in &targets {
+                if let Some(p) = config.projects.get_mut(target) {
+                    p.link_worktrees = on;
+                }
+            }
+            let changed = !targets.is_empty();
+            (Some(targets), changed)
+        })
+        .flatten()
+    }
+
+    /// The worktrees graphmind registered automatically that share `slug`'s memory.
+    pub fn linked_worktrees(slug: &str) -> Vec<ProjectConfig> {
+        let mut linked: Vec<ProjectConfig> =
+            load_config().projects.into_values().filter(|p| p.primary.as_deref() == Some(slug)).collect();
+        linked.sort_by(|a, b| a.slug.cmp(&b.slug));
+        linked
     }
 
     pub fn update_project(slug: &str, f: impl FnOnce(&mut ProjectConfig)) {
@@ -849,5 +957,31 @@ mod save_config_tests {
         fs::write(&real, "not json").unwrap();
         save_config(&GlobalConfig::default());
         assert_eq!(fs::read_to_string(&real).unwrap(), "not json");
+    }
+}
+
+#[cfg(test)]
+mod link_worktrees_tests {
+    use super::ProjectConfig;
+
+    const WITHOUT_FIELD: &str = r#"{"path":"/r","slug":"r","registered":"2026-11-05T00:00:00Z",
+        "last_build":null,"auto_watch":false,"languages":[],"exclude":[]}"#;
+
+    #[test]
+    fn a_project_saved_before_the_field_existed_links_worktrees() {
+        let p: ProjectConfig = serde_json::from_str(WITHOUT_FIELD).unwrap();
+        assert!(p.link_worktrees);
+        // `true` isn't written back, so older builds read the same file.
+        assert!(!serde_json::to_string(&p).unwrap().contains("link_worktrees"));
+    }
+
+    #[test]
+    fn the_opt_out_is_saved() {
+        let mut p: ProjectConfig = serde_json::from_str(WITHOUT_FIELD).unwrap();
+        p.link_worktrees = false;
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"link_worktrees\":false"), "{json}");
+        let back: ProjectConfig = serde_json::from_str(&json).unwrap();
+        assert!(!back.link_worktrees);
     }
 }

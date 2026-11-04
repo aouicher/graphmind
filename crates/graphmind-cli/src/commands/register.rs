@@ -73,11 +73,13 @@ pub fn list() {
             (None, Some(primary)) => format!("  [worktree of {primary}]"),
             (None, None) => String::new(),
         };
+        let opt_out = if p.link_worktrees { "" } else { "  [worktrees not linked]" };
         println!(
-            "  {} {}{}",
+            "  {} {}{}{}",
             p.slug.cyan().bold(),
             p.path.dimmed(),
-            worktree.dimmed()
+            worktree.dimmed(),
+            opt_out.dimmed()
         );
         println!(
             "    last build: {}  languages: {}",
@@ -170,5 +172,49 @@ pub fn forget_gone_worktrees() {
     let gone = Registry::forget_gone_worktrees();
     if !gone.is_empty() {
         eprintln!("{} removed worktree(s) forgotten: {}", "→".cyan(), gone.join(", "));
+    }
+}
+
+/// `graphmind link-worktrees [on|off]`: whether new git worktrees of the project's repo are
+/// registered automatically when a command runs in one. Repo-wide: set on a worktree, it applies
+/// to the repo. Without a state, prints the setting.
+pub fn link_worktrees(state: Option<&str>, in_slug: Option<&str>) {
+    // Never resolve the usual way: run in a new worktree, that would register (and build) it first.
+    let project = match in_slug {
+        Some(s) => Registry::get(s).or_else(|| {
+            let dir = Path::new(s);
+            if dir.is_dir() { Registry::find_without_linking(dir) } else { None }
+        }),
+        None => std::env::current_dir().ok().and_then(|d| Registry::find_without_linking(&d)),
+    };
+    let Some(project) = project else {
+        eprintln!(
+            "{} No registered project here{}. Pass --slug <project>",
+            "Error:".red().bold(),
+            in_slug.map(|s| format!(" named '{s}'")).unwrap_or_default()
+        );
+        std::process::exit(1);
+    };
+    let label = |on: bool| if on { "on" } else { "off" };
+    let main = project.primary.clone().unwrap_or_else(|| project.slug.clone());
+    let Some(state) = state else {
+        println!("{}: link-worktrees {}", main.cyan(), label(Registry::worktrees_linked(&project.slug)));
+        return;
+    };
+    let on = state == "on";
+    if Registry::set_link_worktrees(&project.slug, on).is_none() {
+        eprintln!("{} Could not update the config for '{}'", "Error:".red().bold(), project.slug);
+        std::process::exit(1);
+    }
+    println!("{} link-worktrees {} for {} and its worktrees", "OK".green().bold(), label(on), main.cyan());
+    let linked = Registry::linked_worktrees(&main);
+    if !on && !linked.is_empty() {
+        println!(
+            "  {} worktrees registered before stay registered and keep building; to drop one: graphmind unregister <slug>",
+            "note:".dimmed()
+        );
+        for w in &linked {
+            println!("    {} {}", w.slug.cyan(), w.path.dimmed());
+        }
     }
 }
