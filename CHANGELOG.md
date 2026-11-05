@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Changed
+
+- **Agents pick the cheapest tool for the question instead of graphmind first.** The instructions graphmind installs (setup's global block, the `graphmind sync` section, the `/gm` skill, the hooks and the MCP server) no longer send every lookup through the graph: memory and ADRs for "why is it like this", `rg` for exact strings, `gm_search` for vague searches with no names to grep for, `gm_fn` for callers and blast radius. Memory advice now asks for one fact with its identifiers, an update instead of a contradicting fact, and priority only for the few facts every session needs. An unedited copy of the old global block is replaced on the next `graphmind setup`; an edited one is kept. Thanks @KennethWKZ.
+
 ## [0.3.7] - 2026-10-15
 
 ### Fixed

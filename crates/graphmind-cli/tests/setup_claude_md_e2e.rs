@@ -199,6 +199,86 @@ fn setup_keeps_an_edited_previous_stock_block() {
     });
 }
 
+/// The "ALWAYS use `/gm` as the FIRST step" block text, 0.3.3 to 0.3.7 (fingerprint
+/// `9f04d679619395e4`), before the block routed by question.
+const STOCK_BLOCK_ALWAYS_GM_FIRST: &str = r#"## Mandatory: Code exploration via graphmind
+
+In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY code exploration, architecture understanding, or symbol lookup. This applies to:
+- Answering questions about how something works
+- Finding symbols, callers, dependencies, outlines
+- Understanding code before making changes
+- Exploring architecture or blast radius
+
+**Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first.
+
+To **read** a symbol's source code, use `/gm-fn <symbol>` — it returns full source + callers + callees in one call. Prefer it over Read when you already know the symbol name.
+
+Only fall back to grep for: string literals, config values, env vars, non-code patterns.
+
+Invoke: `Skill(skill: "gm", args: "<your query>")`
+
+Outside a registered project (`graphmind which` prints nothing and exits with code 1), use `/gm` for questions about a registered project: it lists the registered projects (`graphmind list`) and targets the one the question is about with `--slug`. For a question about the current folder when it is not registered, use your normal tools (and suggest `graphmind init` to index it).
+
+**Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory **during** and after every session, without waiting for the user to ask. Save immediately when something is decided or discovered — do not wait for the end of the session.
+
+Categories and commands:
+- Architectural decisions → `graphmind memory add "<decision>" --type decision`
+- Patterns/conventions → `--type pattern` or `--type convention`
+- Bugs found or fixed → `--type bug`
+- Critical always-needed facts → add `--priority` (injected every session)
+- Cross-project or user-level facts → add `--global`
+
+In a registered project: save without `--global` by default (project-scoped).
+Outside a registered project: save with `--slug <project>` when the fact is about that project; use `--global` only for cross-project or personal facts.
+
+Be selective — only facts useful in a future session. Skip task details and temporary state."#;
+
+/// That block as setup wrote it, with its fingerprint, and without it.
+fn always_gm_first_blocks() -> [String; 2] {
+    [
+        format!("<!-- GM:START -->\n<!-- GM:HASH:9f04d679619395e4 -->\n<!-- GM:VERSION:0.3.7 -->\n\n{STOCK_BLOCK_ALWAYS_GM_FIRST}\n\n<!-- GM:END -->"),
+        format!("<!-- GM:START -->\n<!-- GM:VERSION:0.3.7 -->\n\n{STOCK_BLOCK_ALWAYS_GM_FIRST}\n\n<!-- GM:END -->"),
+    ]
+}
+
+#[test]
+fn setup_replaces_the_always_gm_first_block_with_routing_by_question() {
+    with_home(|home| {
+        let claude_md = home.join(".claude").join("CLAUDE.md");
+        fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
+
+        for previous in always_gm_first_blocks() {
+            fs::write(&claude_md, format!("# Mine\n\n{previous}\n\nmore\n")).unwrap();
+            assert_eq!(install_claude_md_block(), Outcome::Written, "{previous}");
+            let content = fs::read_to_string(&claude_md).unwrap();
+            assert!(content.contains("no tool has to come first"), "{content}");
+            assert!(content.contains("`rg` (or the Grep tool), then Read"), "{content}");
+            for gone in ["ALWAYS use `/gm` as the FIRST step", "You MUST proactively save", "9f04d679619395e4"] {
+                assert!(!content.contains(gone), "{gone:?} still in: {content}");
+            }
+            assert_eq!(content.matches("<!-- GM:START -->").count(), 1);
+            assert!(content.starts_with("# Mine\n\n") && content.ends_with("\n\nmore\n"), "{content}");
+        }
+    });
+}
+
+#[test]
+fn setup_keeps_an_edited_always_gm_first_block() {
+    with_home(|home| {
+        let claude_md = home.join(".claude").join("CLAUDE.md");
+        fs::create_dir_all(claude_md.parent().unwrap()).unwrap();
+
+        for previous in always_gm_first_blocks() {
+            let edited = previous.replace("ALWAYS use `/gm`", "prefer `/gm`");
+            assert_ne!(edited, previous);
+            let content = format!("# Mine\n\n{edited}\n");
+            fs::write(&claude_md, &content).unwrap();
+            assert!(matches!(install_claude_md_block(), Outcome::Kept(_)), "{edited}");
+            assert_eq!(fs::read_to_string(&claude_md).unwrap(), content);
+        }
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn setup_leaves_an_unreadable_claude_md_alone() {
