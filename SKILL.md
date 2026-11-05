@@ -2,16 +2,21 @@
 description: >
   graphmind gives Claude Code persistent memory and structural code intelligence
   across all registered projects. Auto-triggers in any registered project directory.
-  MANDATORY: query graphmind before using grep, find, or reading source files.
+  Use the cheapest tool for the question: graphmind for callers, blast radius and
+  searches with no names to grep for; rg for exact strings.
 allowed-tools: Bash, Read, Write
 ---
 
 # graphmind — Persistent Code Intelligence
 
-## MANDATORY: Search through graphmind FIRST
+## When to use graphmind
 
-**Before using Grep, find, rg, ag, or reading files to understand code:**
-You MUST query graphmind first. Only fall back to grep/find if graphmind cannot answer (e.g., string literals, config values, non-code patterns).
+Use the cheapest tool that answers the question; no tool has to come first.
+1. "Why is it like this / did we already decide this": `graphmind memory search "<terms>"` and the repo's ADRs, before reading code.
+2. Exact strings, config values, env vars, routes, migrations: `rg` (or Grep), then Read.
+3. A vague "where is the thing that does X", with no names to search for: `graphmind search "<query>"`, then Read.
+4. Callers, callees or blast radius of one symbol: `graphmind fn <symbol>` or `gm_who_calls_chain`, then Read what you'll edit.
+5. Memory and code disagree: say so and show both.
 
 | Need | Command | MCP tool |
 |------|---------|----------|
@@ -33,10 +38,8 @@ You MUST query graphmind first. Only fall back to grep/find if graphmind cannot 
 Check: `graphmind status`
 Register if not: `graphmind register .`
 
-## The 3-Layer Rule — always follow this order
-
-### Layer 1 — Structural graph (what the code IS)
-Query before touching any code:
+## Graph — what the code IS
+Use it for structural questions:
 - Find a symbol: `graphmind fn <symbol>` or MCP `gm_fn`
 - File dependencies: `graphmind deps <file>` or MCP `gm_deps`
 - Blast radius before editing: `graphmind fn-impact <symbol> --no-tests`
@@ -45,13 +48,13 @@ Query before touching any code:
 - File structure: `graphmind outline <file>` or MCP `gm_outline`
 - Transitive callers: MCP `gm_who_calls_chain`
 
-### Layer 2 — Persistent memory (what was DECIDED, PREFERRED, KNOWN)
-Query for context, decisions, conventions:
+## Memory — what was DECIDED, PREFERRED, KNOWN
+Search it before reading code when the question is "why is it like this" or "did we already decide this":
 - `graphmind memory search "<query>"` or MCP `gm_memory_search`
 
-**AUTO-RECALL:** The hook automatically searches memory on each prompt. Use `gm_memory_search` for deeper/targeted recall.
+**Recall:** the prompt hook searches memory on each prompt and injects the facts that match. Use `gm_memory_search` for deeper or targeted recall.
 
-**AUTO-SAVE:** When the conversation reveals any of the following, immediately save via `gm_memory_add`:
+**Save** when something is decided or discovered that a future session needs, with `graphmind memory add "<fact>" --type <type> --tags <tags>` or MCP `gm_memory_add`:
 - **Decisions** (type: decision) — architecture choices, tech choices, trade-off resolutions
 - **Patterns** (type: pattern) — recurring approaches, solutions, code patterns
 - **Conventions** (type: convention) — naming, style, workflow rules
@@ -62,11 +65,13 @@ Save rules:
 - Do NOT ask "should I save this?" — just save it
 - Use `project=<slug>` for project-specific facts (or the absolute path of the checkout — in a git worktree, its path selects its own graph and the repo's shared memory)
 - Use `global=true` for user preferences, team conventions, cross-project knowledge
-- Keep entries atomic: one fact per entry, clear and reusable
-- Do NOT save ephemeral task progress or things derivable from code/git
+- One fact per entry, under about 600 characters, with the exact identifiers someone would search for (file paths, function, config and command names)
+- When a fact changes, rewrite it (`graphmind memory update <id> --content "<new text>"`) or delete it; don't add a contradicting fact next to it
+- `--priority` only for the few facts every session needs
+- Do NOT save ephemeral task progress or things derivable from code/git; a decision recorded in the repo (an ADR) needs no memory copy
 
-### Layer 3 — Raw files (only when layers 1-2 are insufficient)
-Read source files only when editing or when the graph doesn't have the answer.
+## Files
+Read a file when you are about to edit it, after `rg` finds an exact string, or when the graph and memory don't have the answer.
 
 ## Cross-project queries
 When a symbol or pattern might exist in another project:
@@ -83,8 +88,6 @@ When a symbol or pattern might exist in another project:
 - Command: `graphmind build` (fast, SHA256-cached)
 
 ## NEVER
-- Never use grep/find/rg to search for symbols — use graphmind
-- Never re-read the entire codebase if graphmind can answer it
+- Never re-read the entire codebase when one graph query or one `rg` answers the question
 - Never manually edit files in `~/.graphmind/`
 - Never rebuild the graph every session
-- Never skip the 3-layer rule

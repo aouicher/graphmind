@@ -1014,3 +1014,58 @@ fn gm_memory_search_ignores_stale_vectors() {
     assert!(text.contains("fresh entry about caching"), "a current vector still matches: {text}");
     assert!(!text.contains("stale entry about retries"), "a stale vector is ignored: {text}");
 }
+
+// ── MCP instructions: route by question, priority for the few facts every session needs ──
+
+use graphmind_mcp::server::{tool_defs, GraphmindServer};
+use rmcp::ServerHandler;
+
+fn instructions() -> String {
+    GraphmindServer
+        .get_info()
+        .instructions
+        .expect("the server sends instructions")
+}
+
+#[test]
+fn instructions_route_by_question() {
+    let text = instructions();
+    assert!(
+        text.contains("use the cheapest tool that answers the question"),
+        "{text}"
+    );
+    assert!(text.contains("Exact strings, config values, env vars, routes: grep or rg"));
+    assert!(text.contains("no names to search for: gm_search"));
+    assert!(text.contains("Callers, callees or blast radius of one symbol: gm_fn"));
+    assert!(text.contains("Memory and code disagree: say so and show both"));
+    // The project-path hint for worktrees is kept.
+    assert!(text.contains("WORKTREES:"));
+}
+
+#[test]
+fn instructions_keep_priority_for_facts_every_session_needs() {
+    let text = instructions();
+    assert!(
+        !text.contains("Use --priority for critical facts"),
+        "old priority advice is gone: {text}"
+    );
+    assert!(text.contains("set priority only on the few facts every session needs"));
+    assert!(text.contains("instead of adding a contradicting one"));
+}
+
+#[test]
+fn memory_add_priority_parameter_is_for_the_few_facts_every_session_needs() {
+    let add = tool_defs()
+        .into_iter()
+        .find(|t| t.name == "gm_memory_add")
+        .expect("gm_memory_add is defined");
+    let priority = add.input_schema["properties"]["priority"]["description"]
+        .as_str()
+        .expect("priority has a description")
+        .to_string();
+    assert!(
+        priority.contains("Only for the few facts every session needs"),
+        "{priority}"
+    );
+    assert!(!priority.contains("Use for critical conventions"), "{priority}");
+}
