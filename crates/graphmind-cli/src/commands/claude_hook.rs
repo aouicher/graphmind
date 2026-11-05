@@ -11,7 +11,8 @@ use std::path::PathBuf;
 // (config only) to decide whether the cwd is a registered project.
 const PRE_TOOL_HOOK: &str = r#"#!/usr/bin/env bash
 # graphmind PreToolUse hook — lightweight safety net
-# Reminds Claude once per session to use graphmind instead of grep/find/Explore agents.
+# Reminds once per session, at the first search, which questions graphmind answers better than
+# grep/find/Explore agents (callers, blast radius, searches with no names to grep for).
 # Does NOT rewrite commands — just nudges via additionalContext.
 
 export PATH="$HOME/.graphmind/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
@@ -66,7 +67,7 @@ graphmind which &>/dev/null || exit 0
 
 mkdir -p "$STATE_DIR" && touch "$STATE_DIR/nudged"
 
-MSG="⚡ This project is graphmind-indexed. Use /gm <query> for code exploration (symbols, callers, deps, outlines). Grep only for string literals/config values."
+MSG="⚡ This project is graphmind-indexed. rg then Read is right for exact strings, config values and routes. For callers, callees or blast radius of a symbol, use /gm-fn <symbol> (gm_fn, gm_who_calls_chain); for a vague search with no names to grep for, use /gm <query> (gm_search)."
 
 jq -n --arg msg "$MSG" '{
   "hookSpecificOutput": {
@@ -126,7 +127,7 @@ PRIORITY_MEM=$(graphmind memory list --priority --limit 20 --max-chars 250 2>/de
 # Recent memories that are not already in the priority list
 RECENT_MEM=$(graphmind memory list --limit 10 --max-chars 200 2>/dev/null | grep -v "^>>" | grep -v "^$" | grep -v "★" | head -5)
 
-MSG="[graphmind] Project indexed and ready. Use MCP tools (gm_search, gm_fn, gm_deps, gm_map, gm_outline, gm_query) for code exploration.${NL}${NL}Project status:${NL}$STATUS${NL}${NL}Structure:${NL}$MAP"
+MSG="[graphmind] Project indexed and ready. Use the cheapest tool for the question: rg then Read for exact strings; gm_fn / gm_who_calls_chain for callers and blast radius; gm_search for a vague search with no names; gm_deps, gm_map, gm_outline for structure.${NL}${NL}Project status:${NL}$STATUS${NL}${NL}Structure:${NL}$MAP"
 
 if [ -n "$PRIORITY_MEM" ]; then
   MSG="$MSG${NL}${NL}★ Priority context (always active):${NL}$PRIORITY_MEM"
@@ -136,7 +137,7 @@ if [ -n "$RECENT_MEM" ]; then
   MSG="$MSG${NL}${NL}Recent memories:${NL}$RECENT_MEM"
 fi
 
-MSG="$MSG${NL}${NL}Auto-memory is ON: save decisions/patterns/conventions via gm_memory_add. Use --priority for always-injected facts. Recall via gm_memory_search."
+MSG="$MSG${NL}${NL}Memory: save a decision, pattern, convention or bug when it is decided or found, and only if a future session needs it: one fact with the exact identifiers someone would search for (graphmind memory add '<fact>' --type <type> --tags <tag> <tag>). Rewrite or delete a fact that changed (graphmind memory update <id> --content '<new text>'); never add a contradicting one. --priority only for the few facts every session needs. Recall: graphmind memory search or gm_memory_search."
 
 if [ ${#MSG} -gt $MAX_CHARS ]; then
   MSG="${MSG:0:$MAX_CHARS}${NL}[graphmind: cut to fit the hook output limit]"

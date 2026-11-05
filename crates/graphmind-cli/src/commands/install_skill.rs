@@ -8,10 +8,11 @@ use std::fs;
 const SKILL_CONTENT: &str = r#"---
 name: gm
 description: >
-  Code intelligence via graphmind. Use /gm <query> for ALL code exploration:
-  find symbols, trace callers, view dependencies, file outlines, impact analysis.
-  Replaces grep/find/Explore agents in any graphmind-registered project, and
-  answers questions about a registered project from outside it (with --slug).
+  Code intelligence via graphmind: callers and callees of a symbol, blast radius,
+  dependencies, file outlines, and searches with no names to grep for, in any
+  graphmind-registered project; also answers questions about a registered project
+  from outside it (with --slug). For exact strings, config values and routes, rg
+  then Read is the right tool.
 allowed-tools: Bash, Read
 ---
 
@@ -79,7 +80,7 @@ Outside a registered project:
 
 Every command above takes `--slug` except `graphmind list` and `graphmind cross query`, which span all projects. A slug that isn't registered fails with "Project '<slug>' is not registered (see `graphmind list`)". `graphmind diff-impact` reads the git changes of the current directory, so it only works from inside the project's checkout.
 
-When a registered project matches the question, never fall back to grep or find across unrelated folders.
+When a registered project matches the question, stay in that project: `--slug <project>` for callers, blast radius, vague searches and memory, and `rg` in its path (from `graphmind list`) for exact strings. Don't search unrelated folders.
 
 ## Execution
 

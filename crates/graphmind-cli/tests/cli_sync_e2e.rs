@@ -19,6 +19,25 @@ fn sync_creates_claude_md_if_missing() {
     assert!(content.contains("| Find symbol | `gm_fn` |"), "{content}");
 }
 
+/// The project section routes by question (cheapest tool first), not "/gm first for everything",
+/// and keeps memory small and current.
+#[test]
+fn sync_section_routes_by_question_not_graph_first() {
+    let env = QueryTestEnv::new();
+    let tmp_dir = tempfile::tempdir().unwrap();
+    env.run_ok(&["sync", &env.slug, "--dir", tmp_dir.path().to_str().unwrap()]);
+    let content = fs::read_to_string(tmp_dir.path().join("CLAUDE.md")).unwrap();
+
+    assert!(content.contains("no tool has to come first"), "{content}");
+    assert!(content.contains("`rg` (or the Grep tool), then Read"), "{content}");
+    assert!(content.contains("`gm_fn` (`/gm-fn <symbol>`) or `gm_who_calls_chain`"), "{content}");
+    assert!(content.contains("`graphmind memory update <id> --content"), "{content}");
+    assert!(content.contains("facts about it stay project-scoped (no `--global`)"), "{content}");
+    for graph_first in ["ALWAYS use `/gm` as the FIRST step", "Only fall back to grep", "You MUST proactively save"] {
+        assert!(!content.contains(graph_first), "{graph_first:?} still in: {content}");
+    }
+}
+
 #[test]
 fn sync_updates_claude_md_markers() {
     let env = QueryTestEnv::new();

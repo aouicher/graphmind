@@ -101,38 +101,28 @@ pub fn uninstall_claude_md_block() {
 }
 
 /// The instructions of the GM block, shared by the global block (setup) and the per-project
-/// section (`graphmind sync`).
-pub(crate) const GM_INSTRUCTIONS: &str = r#"## Mandatory: Code exploration via graphmind
+/// section (`graphmind sync`). Routes by question, cheapest tool first: measured on real repos,
+/// `rg` + Read find code as accurately as the graph tools, and graph-first routing only added
+/// calls and context. The graph tools earn their place on callers, callees and blast radius, and
+/// on searches with no names to grep for. Memory stays small and current, since recall drops as
+/// a store bloats.
+pub(crate) const GM_INSTRUCTIONS: &str = r#"## Code exploration and memory (graphmind)
 
-In any graphmind-registered project, ALWAYS use `/gm` as the FIRST step for ANY code exploration, architecture understanding, or symbol lookup. This applies to:
-- Answering questions about how something works
-- Finding symbols, callers, dependencies, outlines
-- Understanding code before making changes
-- Exploring architecture or blast radius
+Use the cheapest tool that answers the question; no tool has to come first.
 
-**Do NOT** spawn Explore agents, use grep/find/Glob for code structure, or delegate code search to sub-agents until `/gm` has been tried first.
+1. "Why is it like this / did we already decide this": search memory (`graphmind memory search "<terms>"` or `gm_memory_search`) and the repo's ADRs before reading code.
+2. Exact strings, config values, env vars, routes, migrations: `rg` (or the Grep tool), then Read.
+3. A vague "where is the thing that does X", with no names to search for: `gm_search` (or `/gm <query>`), then Read.
+4. Callers, callees or blast radius of one symbol: `gm_fn` (`/gm-fn <symbol>`) or `gm_who_calls_chain`, then Read what you'll edit.
+5. Memory and code disagree: say so and show both; don't silently pick one.
 
-To **read** a symbol's source code, use `/gm-fn <symbol>` — it returns full source + callers + callees in one call. Prefer it over Read when you already know the symbol name.
-
-Only fall back to grep for: string literals, config values, env vars, non-code patterns.
-
-Invoke: `Skill(skill: "gm", args: "<your query>")`
+Pass `project=<slug>` to `gm_*` tools, spelled as `graphmind list` shows it; in a git worktree, pass the checkout's absolute path. Graph answers reflect the last build: run `graphmind build` before querying uncommitted changes.
 
 Outside a registered project (`graphmind which` prints nothing and exits with code 1), use `/gm` for questions about a registered project: it lists the registered projects (`graphmind list`) and targets the one the question is about with `--slug`. For a question about the current folder when it is not registered, use your normal tools (and suggest `graphmind init` to index it).
 
-**Auto-memory — mandatory behavior**: You MUST proactively save knowledge to graphmind memory **during** and after every session, without waiting for the user to ask. Save immediately when something is decided or discovered — do not wait for the end of the session.
-
-Categories and commands:
-- Architectural decisions → `graphmind memory add "<decision>" --type decision`
-- Patterns/conventions → `--type pattern` or `--type convention`
-- Bugs found or fixed → `--type bug`
-- Critical always-needed facts → add `--priority` (injected every session)
-- Cross-project or user-level facts → add `--global`
-
-In a registered project: save without `--global` by default (project-scoped).
-Outside a registered project: save with `--slug <project>` when the fact is about that project; use `--global` only for cross-project or personal facts.
-
-Be selective — only facts useful in a future session. Skip task details and temporary state."#;
+Memory: save when something is decided or discovered, and only what helps a future session (no task details or temporary state). In a registered project, facts about it stay project-scoped (no `--global`); outside one, save with `--slug <project>` when the fact is about that project; `--global` is for cross-project facts. One fact per entry, under about 600 characters, with the exact identifiers someone would search for (paths, function, config and command names, ticket ids) in the text and the tags:
+`graphmind memory add "<fact>" --type decision|pattern|convention|bug --tags <tag> <tag>` (the fact goes before `--tags`, which takes several values).
+When a fact changes, rewrite it (`graphmind memory update <id> --content "<new text>"`) or delete it; never add a contradicting one next to it. Use `--priority` only for the few facts every session needs. A decision recorded in the repo (an ADR) needs no memory copy."#;
 
 fn gm_block() -> String {
     let version = env!("CARGO_PKG_VERSION");
@@ -141,10 +131,11 @@ fn gm_block() -> String {
 
 /// `gm_fingerprint(gm_block_body(..))` of every earlier stock block text, oldest first, from the
 /// history of `gm_block`: 0.2.77 to 0.3.2, written before blocks carried a fingerprint, then the
-/// text that invokes `Skill(skill: "gm")` without the outside-a-project line. A block without a
-/// fingerprint is replaced only when its whole text is one of these: any other text was written
-/// or edited by the person.
-const STOCK_BLOCK_FINGERPRINTS: [&str; 8] = [
+/// text that invokes `Skill(skill: "gm")` without the outside-a-project line, then the "ALWAYS use
+/// `/gm` as the FIRST step" text with it (0.3.3 to 0.3.7). A block without a fingerprint is
+/// replaced only when its whole text is one of these: any other text was written or edited by
+/// the person.
+const STOCK_BLOCK_FINGERPRINTS: [&str; 9] = [
     "f3ddd91a594a5fd8",
     "6e566843a79d888f",
     "762c74aa1f1dca65",
@@ -153,6 +144,7 @@ const STOCK_BLOCK_FINGERPRINTS: [&str; 8] = [
     "c5869b2212e82172",
     "cd767b14b681f9cf",
     "a3525aa0ac26eaef",
+    "9f04d679619395e4",
 ];
 
 /// Lines of a GM block without its marker comments (START, VERSION, HASH, END).
