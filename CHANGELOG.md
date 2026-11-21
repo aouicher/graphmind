@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **`graphmind build --watch` works for a project inside a `tmp`, `build`, `out`, `log` or `env` folder.** The excluded-folder check ran on the absolute path, so a project under `/tmp`, `~/build` or the like never rebuilt on any edit. Only the folders inside the project count now: `node_modules`, `.git` or `src/tmp` there are still ignored, and a file merely named `build` isn't.
+
 ## [0.3.9] - 2026-11-27
 
 ### Fixed

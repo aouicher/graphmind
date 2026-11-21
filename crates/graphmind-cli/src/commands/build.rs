@@ -631,6 +631,24 @@ fn run_embedding_for_files(
     sync_embeddings(engine.as_ref(), &store, &model, wanted, Some(changed_rel_paths), config, None);
 }
 
+/// Directory names `build --watch` ignores anywhere inside the project.
+const EXCLUDED_DIRS: [&str; 20] = [
+    "node_modules", "dist", "build", "out", ".git", ".next", ".nuxt",
+    ".turbo", "coverage", "__pycache__", ".venv", "venv", "env",
+    "vendor", "target", "tmp", "log", "cdk.out", ".terraform", ".serverless",
+];
+
+/// Whether `path` lies in an excluded directory of the project at `root`. Only the folders
+/// between the root and the file count, whole names only: a project that itself sits under
+/// `/tmp` or a `build` folder is still watched, and a file named `build` isn't excluded. A path
+/// outside the root counts as excluded, since the rebuild would drop it anyway.
+fn in_excluded_dir(path: &Path, root: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else { return true };
+    rel.parent().is_some_and(|dir| {
+        dir.components().any(|c| EXCLUDED_DIRS.iter().any(|name| c.as_os_str() == *name))
+    })
+}
+
 fn watch_project(slug: &str) {
     let project = match Registry::get(slug) {
         Some(p) => p,
@@ -673,12 +691,7 @@ fn watch_project(slug: &str) {
         ".graphql", ".gql", ".ps1", ".psm1",
     ];
 
-    // Directory segments to ignore
-    let excluded_dirs = [
-        "node_modules", "dist", "build", "out", ".git", ".next", ".nuxt",
-        ".turbo", "coverage", "__pycache__", ".venv", "venv", "env",
-        "vendor", "target", "tmp", "log", "cdk.out", ".terraform", ".serverless",
-    ];
+    let root = PathBuf::from(&project.path);
 
     loop {
         match rx.recv() {
@@ -690,11 +703,8 @@ fn watch_project(slug: &str) {
                         let s = p.to_string_lossy();
                         // Must have a watched extension
                         let has_ext = watched_exts.iter().any(|ext| s.ends_with(ext));
-                        // Must not be inside an excluded directory
-                        let is_excluded = excluded_dirs.iter().any(|dir| {
-                            s.contains(&format!("/{dir}/")) || s.contains(&format!("\\{dir}\\"))
-                        });
-                        has_ext && !is_excluded
+                        // Must not be inside an excluded directory of the project
+                        has_ext && !in_excluded_dir(p, &root)
                     })
                     .collect::<std::collections::HashSet<_>>()
                     .into_iter()
@@ -746,5 +756,39 @@ fn watch_project(slug: &str) {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod excluded_dir_tests {
+    use super::in_excluded_dir;
+    use std::path::Path;
+
+    #[test]
+    fn only_folders_inside_the_project_count() {
+        // A project under /tmp, /private/tmp or a build folder: its own files are watched.
+        for root in ["/tmp/proj", "/private/tmp/proj", "/home/me/build/proj", "/srv/log/env/proj"] {
+            let root = Path::new(root);
+            assert!(!in_excluded_dir(&root.join("src/app.ts"), root), "{}", root.display());
+            assert!(!in_excluded_dir(&root.join("app.ts"), root), "{}", root.display());
+            assert!(in_excluded_dir(&root.join("node_modules/pkg/index.ts"), root), "{}", root.display());
+        }
+    }
+
+    #[test]
+    fn excluded_names_match_whole_folders_at_any_depth() {
+        let root = Path::new("/work/proj");
+        assert!(in_excluded_dir(Path::new("/work/proj/src/tmp/x.ts"), root));
+        assert!(in_excluded_dir(Path::new("/work/proj/packages/a/dist/index.js"), root));
+        assert!(in_excluded_dir(Path::new("/work/proj/.git/hooks/x.sh"), root));
+        // Names that only contain an excluded one, and files named like one, are not excluded.
+        assert!(!in_excluded_dir(Path::new("/work/proj/builder/x.ts"), root));
+        assert!(!in_excluded_dir(Path::new("/work/proj/src/logs/x.ts"), root));
+        assert!(!in_excluded_dir(Path::new("/work/proj/build"), root));
+    }
+
+    #[test]
+    fn a_path_outside_the_project_counts_as_excluded() {
+        assert!(in_excluded_dir(Path::new("/elsewhere/x.ts"), Path::new("/work/proj")));
     }
 }
