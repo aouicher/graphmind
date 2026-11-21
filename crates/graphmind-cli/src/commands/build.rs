@@ -2,7 +2,7 @@ use graphmind_config::{paths, Registry};
 use super::resolve_project_slug;
 use graphmind_config::config::{EmbeddingMode, load_config};
 use colored::Colorize;
-use graphmind_db::builder::{BuildOptions, BuildResult, GraphBuilder};
+use graphmind_db::builder::{script_language, BuildOptions, BuildResult, GraphBuilder};
 use graphmind_db::queries::{GraphQueries, SymbolRow};
 use graphmind_db::schema::init_database;
 use graphmind_embeddings::factory::create_engine;
@@ -631,6 +631,16 @@ fn run_embedding_for_files(
     sync_embeddings(engine.as_ref(), &store, &model, wanted, Some(changed_rel_paths), config, None);
 }
 
+/// Extensions `build --watch` rebuilds on: the ones LANGUAGE_MAP in builder.rs indexes.
+const WATCHED_EXTS: [&str; 47] = [
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb",
+    ".tf", ".tfvars", ".yml", ".yaml", ".md", ".c", ".h", ".m", ".mm",
+    ".java", ".php", ".swift", ".sh", ".bash", ".zsh", ".pl", ".pm",
+    ".html", ".htm", ".toml", ".sql", ".cpp", ".cc", ".cxx", ".hpp",
+    ".hh", ".cs", ".kt", ".kts", ".dart", ".scala", ".sc", ".r", ".R",
+    ".graphql", ".gql", ".ps1", ".psm1",
+];
+
 /// Directory names `build --watch` ignores anywhere inside the project.
 const EXCLUDED_DIRS: [&str; 20] = [
     "node_modules", "dist", "build", "out", ".git", ".next", ".nuxt",
@@ -647,6 +657,29 @@ fn in_excluded_dir(path: &Path, root: &Path) -> bool {
     rel.parent().is_some_and(|dir| {
         dir.components().any(|c| EXCLUDED_DIRS.iter().any(|name| c.as_os_str() == *name))
     })
+}
+
+/// Whether a changed path makes `build --watch` rebuild: a file with a watched extension, or an
+/// extensionless shell script, known by its `#!` line as the builder reads it. A deleted
+/// extensionless path can't be read any more, so it counts when `was_indexed` says the graph has
+/// it. Dotfiles, which the build skips, and paths in an excluded directory of the project at
+/// `root` never count.
+fn is_watched(path: &Path, root: &Path, was_indexed: impl Fn(&Path) -> bool) -> bool {
+    if in_excluded_dir(path, root) {
+        return false;
+    }
+    let s = path.to_string_lossy();
+    if WATCHED_EXTS.iter().any(|ext| s.ends_with(ext)) {
+        return true;
+    }
+    let is_dotfile = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+    if path.extension().is_some() || is_dotfile {
+        return false;
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta.is_file() && script_language(path).is_some(),
+        Err(_) => was_indexed(path),
+    }
 }
 
 fn watch_project(slug: &str) {
@@ -681,17 +714,15 @@ fn watch_project(slug: &str) {
 
     println!("{} Watching for changes... (Ctrl+C to stop)", ">>".cyan().bold());
 
-    // Extensions to watch — matches LANGUAGE_MAP in builder.rs
-    let watched_exts = [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".go", ".rs", ".rb",
-        ".tf", ".tfvars", ".yml", ".yaml", ".md", ".c", ".h", ".m", ".mm",
-        ".java", ".php", ".swift", ".sh", ".bash", ".zsh", ".pl", ".pm",
-        ".html", ".htm", ".toml", ".sql", ".cpp", ".cc", ".cxx", ".hpp",
-        ".hh", ".cs", ".kt", ".kts", ".dart", ".scala", ".sc", ".r", ".R",
-        ".graphql", ".gql", ".ps1", ".psm1",
-    ];
-
     let root = PathBuf::from(&project.path);
+    // A deleted extensionless file can't be read for its `#!` line: it counts when the graph has it.
+    let graph_db_path = paths::graph_db_path(slug);
+    let was_indexed = |path: &Path| -> bool {
+        let Ok(rel) = path.strip_prefix(&project.path) else { return false };
+        init_database(&graph_db_path.to_string_lossy())
+            .map(|db| GraphQueries::new(&db).is_indexed_file(&rel.to_string_lossy()))
+            .unwrap_or(false)
+    };
 
     loop {
         match rx.recv() {
@@ -699,13 +730,7 @@ fn watch_project(slug: &str) {
                 let changed: Vec<PathBuf> = events.iter()
                     .filter(|e| e.kind == DebouncedEventKind::Any)
                     .map(|e| e.path.clone())
-                    .filter(|p| {
-                        let s = p.to_string_lossy();
-                        // Must have a watched extension
-                        let has_ext = watched_exts.iter().any(|ext| s.ends_with(ext));
-                        // Must not be inside an excluded directory of the project
-                        has_ext && !in_excluded_dir(p, &root)
-                    })
+                    .filter(|p| is_watched(p, &root, was_indexed))
                     .collect::<std::collections::HashSet<_>>()
                     .into_iter()
                     .collect();
@@ -756,6 +781,53 @@ fn watch_project(slug: &str) {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use super::is_watched;
+    use std::path::Path;
+
+    fn never(_: &Path) -> bool {
+        false
+    }
+
+    #[test]
+    fn files_with_a_watched_extension_count() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(is_watched(&dir.path().join("src/app.ts"), dir.path(), never));
+        assert!(is_watched(&dir.path().join("deploy.sh"), dir.path(), never));
+        assert!(!is_watched(&dir.path().join("notes.txt"), dir.path(), never));
+        assert!(!is_watched(&dir.path().join("node_modules/pkg/index.ts"), dir.path(), never));
+    }
+
+    #[test]
+    fn extensionless_shell_scripts_count_by_their_shebang() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, body).unwrap();
+            path
+        };
+        assert!(is_watched(&write("mycli", "#!/bin/bash\nmain() { :; }\n"), dir.path(), never));
+        assert!(is_watched(&write("deploy", "#!/usr/bin/env -S zsh -e\n"), dir.path(), never));
+        assert!(!is_watched(&write("NOTES", "plain text\n"), dir.path(), never));
+        assert!(!is_watched(&write("tool", "#!/usr/bin/env python3\n"), dir.path(), never));
+        // The build skips dotfiles, so a change to one never starts a rebuild.
+        assert!(!is_watched(&write(".envrc", "#!/bin/sh\n"), dir.path(), never));
+        // A folder named like a script isn't a file.
+        std::fs::create_dir(dir.path().join("bin")).unwrap();
+        assert!(!is_watched(&dir.path().join("bin"), dir.path(), never));
+    }
+
+    #[test]
+    fn a_deleted_extensionless_path_counts_only_when_the_graph_has_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("mycli");
+        assert!(is_watched(&gone, dir.path(), |p: &Path| p.ends_with("mycli")));
+        // An editor's probe file (vim's "4913") the graph never held.
+        assert!(!is_watched(&dir.path().join("4913"), dir.path(), |p: &Path| p.ends_with("mycli")));
     }
 }
 

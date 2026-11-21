@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Added
+
+- **Shell scripts without an extension are indexed.** A file with no extension whose first line is a `sh`, `bash`, `zsh`, `dash` or `ksh` shebang, directly or through `env`, is now indexed as bash: a repo's own CLI script, `bin/deploy` and the like. Before, only the extension (or a known name such as `Dockerfile`) decided, so such scripts were never in the graph. `graphmind build --watch` now rebuilds one when it changes and drops it when it's deleted. The next build picks existing scripts up.
+
 ### Fixed
 
 - **`graphmind build --watch` works for a project inside a `tmp`, `build`, `out`, `log` or `env` folder.** The excluded-folder check ran on the absolute path, so a project under `/tmp`, `~/build` or the like never rebuilt on any edit. Only the folders inside the project count now: `node_modules`, `.git` or `src/tmp` there are still ignored, and a file merely named `build` isn't.
