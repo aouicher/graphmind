@@ -282,6 +282,47 @@ fn prompt_hook_dedupes_priority_entries_by_id() {
     assert!(!again.contains("RELEASING.md"), "new priority entry shown only once: {again}");
 }
 
+/// A prompt guard at ~/.graphmind/prompt-guard sees the hook's input; a prompt it blocks, or any
+/// prompt when it fails, gets no context and no search. Without a guard nothing changes.
+#[test]
+fn prompt_hook_skips_prompts_the_guard_blocks() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return; // the hooks need jq
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    let project = env.fixture_path();
+    env.run_ok(&["install", "hook-claude"]);
+    env.run_ok(&["memory", "add", "deploy pipeline uses terraform apply", "--slug", "hooks-test", "--priority"]);
+    let guard = env.home.path().join(".graphmind/prompt-guard");
+    let seen = env.home.path().join("guard-saw.json");
+    let write_guard = |body: &str| {
+        std::fs::write(&guard, body).unwrap();
+        std::fs::set_permissions(&guard, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    write_guard(&format!(
+        "#!/bin/sh\ninput=$(cat)\nprintf '%s' \"$input\" > '{}'\ncase \"$input\" in *Zorbenta*) echo '{{\"decision\":\"block\",\"reason\":\"name\"}}' ;; esac\nexit 0\n",
+        seen.display()
+    ));
+    let prompt = |session: &str, text: &str| run_hook(&env, "graphmind-prompt.sh", &project, &json!({"session_id": session, "prompt": text}));
+
+    let blocked = prompt("g1", "how does the deploy pipeline terraform step work for Zorbenta Quillfeather");
+    assert!(blocked.is_empty(), "blocked prompt got context: {blocked}");
+    assert!(std::fs::read_to_string(&seen).unwrap().contains("Zorbenta"), "guard got the hook input");
+
+    let allowed = prompt("g2", "how does the deploy pipeline terraform step work");
+    assert!(allowed.contains("terraform apply"), "allowed prompt gets context: {allowed}");
+
+    write_guard("#!/bin/sh\nexit 3\n");
+    let failed = prompt("g3", "how does the deploy pipeline terraform step work");
+    assert!(failed.is_empty(), "a failing guard skips the prompt: {failed}");
+
+    std::fs::remove_file(&guard).unwrap();
+    let no_guard = prompt("g4", "how does the deploy pipeline terraform step work for Zorbenta Quillfeather");
+    assert!(no_guard.contains("terraform apply"), "without a guard nothing changes: {no_guard}");
+}
+
 /// A priority entry cut from the output to fit the size limit isn't recorded as shown, so a later
 /// prompt still offers it. Both hooks' limits are lowered in the installed copies to force a cut.
 #[test]
