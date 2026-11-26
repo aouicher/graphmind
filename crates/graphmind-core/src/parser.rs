@@ -55,11 +55,10 @@ pub fn parse(path: &str, source: &str, language: &str) -> Result<ParseResult, St
     let root = tree.root_node();
 
     let (symbols, call_sites, imports) = match language {
-        "typescript" | "tsx" | "javascript" | "jsx" | "mjs" => (
-            extractor::extract_symbols(root, source),
-            extractor::extract_call_sites(root, source),
-            resolver::extract_imports(root, source, path),
-        ),
+        "typescript" | "tsx" | "javascript" | "jsx" | "mjs" => {
+            let (symbols, call_sites) = extractor::extract_symbols_and_call_sites(root, source);
+            (symbols, call_sites, resolver::extract_imports(root, source, path))
+        }
         "python" => (
             languages::python::extract_symbols(root, source),
             languages::python::extract_call_sites(root, source),

@@ -1,6 +1,8 @@
 #[cfg(feature = "napi")]
 use napi_derive::napi;
 
+use std::collections::HashMap;
+
 use tree_sitter::Node;
 
 #[cfg_attr(feature = "napi", napi(string_enum))]
@@ -43,94 +45,112 @@ where
     symbols
 }
 
+/// Symbols in source order, and the nodes whose calls they own, keyed by node id.
+#[derive(Default)]
+struct Collected {
+    symbols: Vec<Symbol>,
+    scopes: HashMap<usize, String>,
+}
+
+impl Collected {
+    fn push(&mut self, symbol: Symbol) {
+        self.symbols.push(symbol);
+    }
+
+    /// A symbol that owns the calls made inside `node`.
+    fn push_scope(&mut self, node: Node, symbol: Symbol) {
+        self.scopes.insert(node.id(), symbol.name.clone());
+        self.symbols.push(symbol);
+    }
+
+    /// A function held by a variable or an object key owns its calls only at module
+    /// level. Elsewhere they stay with the scope around it: a local callback passed
+    /// around keeps its function in blast radius, and same-named locals (two
+    /// components' `onClick`, two `describe` blocks' `setup`) cannot be mixed up by the
+    /// builder, which resolves callers by name. Such a local is a symbol with no callees.
+    fn push_held(&mut self, function: Node, symbol: Symbol) {
+        if is_module_level(function) {
+            self.push_scope(function, symbol);
+        } else {
+            self.push(symbol);
+        }
+    }
+}
+
+/// True when only declaration wrappers separate `node` from the program root.
+fn is_module_level(node: Node) -> bool {
+    let mut parent = node.parent();
+    while let Some(p) = parent {
+        match p.kind() {
+            "program" => return true,
+            "pair" | "object" | "variable_declarator" | "lexical_declaration" | "export_statement" => {
+                parent = p.parent();
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 pub fn extract_symbols(root: Node, source: &str) -> Vec<Symbol> {
-    let mut symbols = Vec::new();
-    collect_symbols(root, source, &mut symbols);
-    symbols
+    extract_symbols_and_call_sites(root, source).0
 }
 
 pub fn extract_call_sites(root: Node, source: &str) -> Vec<CallSite> {
-    let mut call_sites = Vec::new();
-    collect_call_sites(root, source, &mut call_sites, None);
-    call_sites
+    extract_symbols_and_call_sites(root, source).1
 }
 
-fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
+/// Symbols, and call sites attributed to the symbol that owns the scope they sit in.
+pub fn extract_symbols_and_call_sites(root: Node, source: &str) -> (Vec<Symbol>, Vec<CallSite>) {
+    let mut collected = Collected::default();
+    collect_symbols(root, source, &mut collected);
+    let mut call_sites = Vec::new();
+    collect_call_sites(root, source, &mut call_sites, None, &collected.scopes);
+    (collected.symbols, call_sites)
+}
+
+fn collect_symbols(node: Node, source: &str, out: &mut Collected) {
     match node.kind() {
-        "function_declaration" | "generator_function_declaration" | "function" => {
+        "function_declaration" | "generator_function_declaration" => {
             if let Some(sym) = extract_function(node, source) {
-                symbols.push(sym);
+                out.push_scope(node, sym);
             }
         }
         "class_declaration" => {
             if let Some(sym) = extract_class(node, source) {
-                symbols.push(sym);
+                out.push(sym);
             }
             for i in 0..node.named_child_count() {
                 if let Some(child) = node.named_child(i) {
                     if child.kind() == "class_body" {
-                        collect_class_members(child, source, symbols);
+                        collect_class_members(child, source, out);
                     }
                 }
             }
         }
         "interface_declaration" => {
             if let Some(sym) = extract_interface(node, source) {
-                symbols.push(sym);
+                out.push(sym);
             }
         }
         "type_alias_declaration" => {
             if let Some(sym) = extract_type_alias(node, source) {
-                symbols.push(sym);
+                out.push(sym);
             }
         }
-        "export_statement" => {
-            if let Some(child) = find_arrow_function(node, source) {
-                symbols.push(child);
-                // Recurse into the arrow function body directly, skipping the
-                // lexical_declaration wrapper to avoid duplicate detection
-                for i in 0..node.named_child_count() {
-                    if let Some(c) = node.named_child(i) {
-                        if c.kind() == "lexical_declaration" {
-                            // Find the arrow body and recurse into it
-                            for j in 0..c.named_child_count() {
-                                if let Some(decl) = c.named_child(j) {
-                                    if decl.kind() == "variable_declarator" {
-                                        if let Some(val) = decl.child_by_field_name("value") {
-                                            if val.kind() == "arrow_function" {
-                                                if let Some(body) = val.child_by_field_name("body") {
-                                                    for k in 0..body.named_child_count() {
-                                                        if let Some(stmt) = body.named_child(k) {
-                                                            collect_symbols(stmt, source, symbols);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+        "export_statement" | "lexical_declaration" => {
+            if let Some((sym, function)) = find_assigned_function(node, source) {
+                out.push_held(function, sym);
+                // Recurse into the body only, so the declaration is not found twice.
+                if let Some(body) = function.child_by_field_name("body") {
+                    collect_symbols(body, source, out);
                 }
                 return;
             }
-            // export const obj = { method() {} } — extract object literal methods
-            let before = symbols.len();
-            collect_object_literal_methods(node, source, symbols, None);
-            if symbols.len() > before {
-                return;
-            }
-        }
-        "lexical_declaration" => {
-            if let Some(child) = find_arrow_function(node, source) {
-                symbols.push(child);
-                return;
-            }
             // const obj = { method() {} } — extract object literal methods
-            let before = symbols.len();
-            collect_object_literal_methods(node, source, symbols, None);
-            if symbols.len() > before {
+            let before = out.symbols.len();
+            collect_object_literal_methods(node, source, out, None);
+            if out.symbols.len() > before {
                 return;
             }
         }
@@ -139,7 +159,7 @@ fn collect_symbols(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
 
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i) {
-            collect_symbols(child, source, symbols);
+            collect_symbols(child, source, out);
         }
     }
 }
@@ -202,38 +222,47 @@ fn extract_type_alias(node: Node, source: &str) -> Option<Symbol> {
     })
 }
 
-fn find_arrow_function(node: Node, source: &str) -> Option<Symbol> {
+/// Node kinds of a function used as a value: `() => {}`, `function () {}`, `function* () {}`.
+fn is_function_value(node: Node) -> bool {
+    matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    )
+}
+
+/// `const name = <function>`: the first such declarator, as a Function symbol, with its function node.
+fn find_assigned_function<'t>(node: Node<'t>, source: &str) -> Option<(Symbol, Node<'t>)> {
     for i in 0..node.named_child_count() {
         let child = node.named_child(i)?;
         if child.kind() == "lexical_declaration" {
-            return find_arrow_function(child, source);
+            return find_assigned_function(child, source);
         }
         if child.kind() == "variable_declarator" {
             let name_node = child.child_by_field_name("name")?;
             let value = child.child_by_field_name("value")?;
-            if value.kind() == "arrow_function" {
-                let name = node_text(name_node, source);
-                return Some(Symbol {
-                    name,
+            if is_function_value(value) {
+                let symbol = Symbol {
+                    name: node_text(name_node, source),
                     kind: SymbolKind::Function,
                     line_start: child.start_position().row as u32 + 1,
                     line_end: child.end_position().row as u32 + 1,
                     signature: Some(build_signature(value, source)),
                     doc: extract_doc_comment(node, source),
-                });
+                };
+                return Some((symbol, value));
             }
         }
     }
     None
 }
 
-fn collect_class_members(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
+fn collect_class_members(node: Node, source: &str, out: &mut Collected) {
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i) {
             if child.kind() == "method_definition" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = node_text(name_node, source);
-                    symbols.push(Symbol {
+                    out.push_scope(child, Symbol {
                         name,
                         kind: SymbolKind::Method,
                         line_start: child.start_position().row as u32 + 1,
@@ -249,7 +278,7 @@ fn collect_class_members(node: Node, source: &str, symbols: &mut Vec<Symbol>) {
 
 /// Extract methods from `export const obj = { method() {}, arrow: () => {} }`
 /// container_name: if provided, names symbols as "container.method"
-fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Symbol>, container_name: Option<&str>) {
+fn collect_object_literal_methods(node: Node, source: &str, out: &mut Collected, container_name: Option<&str>) {
     for i in 0..node.named_child_count() {
         let child = match node.named_child(i) {
             Some(c) => c,
@@ -258,7 +287,7 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
         match child.kind() {
             // Traverse wrappers to reach variable_declarator
             "lexical_declaration" | "export_statement" => {
-                collect_object_literal_methods(child, source, symbols, container_name);
+                collect_object_literal_methods(child, source, out, container_name);
             }
             "variable_declarator" => {
                 // Determine container name from the variable name
@@ -268,7 +297,7 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
                 if let Some(val) = value {
                     if val.kind() == "object" {
                         let cname = var_name.as_deref().or(container_name);
-                        collect_object_literal_methods(val, source, symbols, cname);
+                        collect_object_literal_methods(val, source, out, cname);
                     }
                 }
             }
@@ -283,18 +312,15 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
                     } else {
                         key_name.clone()
                     };
-                    match val_node.kind() {
-                        "arrow_function" | "function" | "function_expression" => {
-                            symbols.push(Symbol {
-                                name: sym_name,
-                                kind: SymbolKind::Method,
-                                line_start: child.start_position().row as u32 + 1,
-                                line_end: child.end_position().row as u32 + 1,
-                                signature: Some(build_signature(val_node, source)),
-                                doc: extract_doc_comment(child, source),
-                            });
-                        }
-                        _ => {}
+                    if is_function_value(val_node) {
+                        out.push_held(val_node, Symbol {
+                            name: sym_name,
+                            kind: SymbolKind::Method,
+                            line_start: child.start_position().row as u32 + 1,
+                            line_end: child.end_position().row as u32 + 1,
+                            signature: Some(build_signature(val_node, source)),
+                            doc: extract_doc_comment(child, source),
+                        });
                     }
                 }
             }
@@ -307,7 +333,7 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
                     } else {
                         method_name
                     };
-                    symbols.push(Symbol {
+                    out.push_held(child, Symbol {
                         name: sym_name,
                         kind: SymbolKind::Method,
                         line_start: child.start_position().row as u32 + 1,
@@ -322,14 +348,14 @@ fn collect_object_literal_methods(node: Node, source: &str, symbols: &mut Vec<Sy
     }
 }
 
-fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, current_fn: Option<&str>) {
-    let fn_name = match node.kind() {
-        "function_declaration" | "generator_function_declaration" | "method_definition" => node
-            .child_by_field_name("name")
-            .map(|n| node_text(n, source)),
-        _ => None,
-    };
-    let active_fn = fn_name.as_deref().or(current_fn);
+fn collect_call_sites<'a>(
+    node: Node,
+    source: &str,
+    sites: &mut Vec<CallSite>,
+    current_fn: Option<&'a str>,
+    scopes: &'a HashMap<usize, String>,
+) {
+    let active_fn = scopes.get(&node.id()).map(String::as_str).or(current_fn);
 
     if node.kind() == "new_expression" {
         if let Some(constructor) = node.child_by_field_name("constructor") {
@@ -373,7 +399,7 @@ fn collect_call_sites(node: Node, source: &str, sites: &mut Vec<CallSite>, curre
 
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i) {
-            collect_call_sites(child, source, sites, active_fn);
+            collect_call_sites(child, source, sites, active_fn, scopes);
         }
     }
 }
