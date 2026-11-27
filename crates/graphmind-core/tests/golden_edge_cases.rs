@@ -112,6 +112,99 @@ import * as utils from './utils';
     assert!(all_specs.contains(&"DefaultExport"), "missing default export");
 }
 
+/// Functions held by a const or an object key are symbols, and own the calls made
+/// inside them at top level. Inside another function, the calls stay with it.
+const ASSIGNED_FUNCTIONS: &str = r#"
+export const arrow = () => helperA();
+const arrowBlock = () => { helperB(); };
+const assignedFn = function () { helperC(); };
+const assignedGen = function* () { yield helperD(); };
+const obj = {
+  fe: function () { helperE(); },
+  gen: function* () { yield helperF(); },
+  ar: () => helperG(),
+  m() { helperH(); },
+};
+function outer(items) {
+  items.map((x) => helperI(x));
+  const local = () => helperJ();
+  var untracked = () => helperK();
+}
+function handler() { helperL(); }
+function registers() { register({ handler: () => helperM() }); }
+function A() { const onClick = () => api.saveA(); }
+function B() { const onClick = () => api.saveB(); }
+function setup(app) { const route = (req) => db.query(req); app.get("/", route); }
+const Component = () => { const inner = () => helperN(); return inner; };
+describe("a", () => { const setupA = () => mountA(); const shared = () => mountC(); });
+describe("b", () => { const shared = () => mountD(); });
+"#;
+
+fn parse_js_and_ts(source: &str) -> Vec<(&'static str, graphmind_core::ParsedFile)> {
+    [("typescript", "test.ts"), ("javascript", "test.js")]
+        .into_iter()
+        .map(|(lang, path)| (lang, parse_single(path, source, lang).unwrap()))
+        .collect()
+}
+
+fn callers<'a>(parsed: &'a graphmind_core::ParsedFile, callee: &str) -> Vec<&'a str> {
+    parsed
+        .call_sites
+        .iter()
+        .filter(|c| c.callee == callee)
+        .map(|c| c.caller.as_str())
+        .collect()
+}
+
+#[test]
+fn ts_assigned_functions_are_symbols() {
+    for (lang, parsed) in parse_js_and_ts(ASSIGNED_FUNCTIONS) {
+        let names: Vec<&str> = parsed.symbols.iter().map(|s| s.name.as_str()).collect();
+        for expected in [
+            "arrow", "arrowBlock", "assignedFn", "assignedGen",
+            "obj.fe", "obj.gen", "obj.ar", "obj.m", "outer", "local", "Component", "inner",
+        ] {
+            assert!(names.contains(&expected), "{lang}: {expected} missing from {names:?}");
+        }
+    }
+}
+
+#[test]
+fn ts_each_call_has_exactly_its_owner_as_caller() {
+    for (lang, parsed) in parse_js_and_ts(ASSIGNED_FUNCTIONS) {
+        for (callee, expected) in [
+            ("helperA", "arrow"),
+            ("helperB", "arrowBlock"),
+            ("helperC", "assignedFn"),
+            ("helperD", "assignedGen"),
+            ("helperE", "obj.fe"),
+            ("helperF", "obj.gen"),
+            ("helperG", "obj.ar"),
+            ("helperH", "obj.m"),
+            // Inside a function, callbacks and locals leave their calls to it.
+            ("helperI", "outer"),
+            ("helperJ", "outer"),
+            ("helperK", "outer"),
+            ("helperL", "handler"),
+            // An object key named like another symbol does not take the call.
+            ("helperM", "registers"),
+            // Same-named locals of two functions are not mixed up.
+            ("saveA", "A"),
+            ("saveB", "B"),
+            // A callback passed around keeps its function in blast radius.
+            ("query", "setup"),
+            ("helperN", "Component"),
+        ] {
+            assert_eq!(callers(&parsed, callee), [expected], "{lang}: callers of {callee}");
+        }
+        // Locals of blocks outside any function (Jest `describe`) have no owner, so
+        // same-named ones in sibling blocks cannot be confused.
+        for callee in ["mountA", "mountC", "mountD"] {
+            assert!(callers(&parsed, callee).is_empty(), "{lang}: callers of {callee}");
+        }
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // Python edge cases
 // ══════════════════════════════════════════════════════════════════

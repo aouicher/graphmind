@@ -7,7 +7,18 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ### Fixed
 
-- **`graphmind init <PATH>` sets up `<PATH>` from any folder.** Run from outside the repo, it registered `<PATH>` and then stopped at the git hooks step with "Not in a registered project", leaving the project without hooks or a graph. Run from inside another registered repo, it installed hooks in that repo and built it instead. The hooks and the build now use the project `init` just registered. Reported in #183.
+- **`graphmind init <PATH>` sets up `<PATH>` from any folder.** Run from outside the repo, it registered `<PATH>` and then stopped at the git hooks step with "Not in a registered project", leaving the project without hooks or a graph. Run from inside another registered repo, it installed hooks in that repo and built it instead. The hooks and the build now use the project `init` just registered. Reported in #183, fixed by @KennethWKZ in #189.
+
+## [0.3.8] - 2026-11-27
+
+### Fixed
+
+- **Generator functions are indexed.** In TypeScript and JavaScript, `function* name() {}` was never stored as a symbol, so `outline`, `fn` and `who-calls` didn't know it, and calls to it or from it were dropped without a warning. Generator functions are now functions like any other, with their callers and callees. Run `graphmind build --full` once to pick up generators in files that haven't changed. Reported in #187, fixed by @KennethWKZ in #188.
+- **Calls made inside arrow functions and object-literal functions are kept.** In TypeScript and JavaScript, a call inside `const f = () => {}`, `const f = function () {}` or `const obj = { k() {}, k: () => {} }` was dropped, so `who-calls` and blast-radius answers missed those callers. When declared at module level, such a function now owns the calls made inside it. Declared inside another function, its calls still go to that function, as before. `const f = function () {}`, `function* () {}` assigned to a const, and `{ k: function* () {} }` are now symbols too, as are functions declared inside a non-exported arrow function. Run `graphmind build --full` once to update files that haven't changed.
+
+### Upgrading
+
+Run `graphmind build --full` once in each TypeScript or JavaScript project. Files that haven't changed keep their old symbols and calls until then.
 
 ## [0.3.7] - 2026-10-15
 
