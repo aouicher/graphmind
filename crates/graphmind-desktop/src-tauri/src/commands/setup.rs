@@ -2,11 +2,6 @@ use crate::types::CliStatus;
 use graphmind_config::paths::home_dir;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-
-fn local_bin_path() -> PathBuf {
-    home_dir().join(".graphmind").join("bin").join("graphmind")
-}
 
 #[tauri::command]
 pub fn check_cli_installed() -> CliStatus {
@@ -176,44 +171,6 @@ pub async fn update_cli() -> Result<CliStatus, String> {
         path: Some(cli_path),
         version,
     })
-}
-
-#[tauri::command]
-pub fn ensure_cli_in_path() -> Result<String, String> {
-    let path = super::updater::find_graphmind_binary();
-    if path != "graphmind" {
-        return Ok(path);
-    }
-
-    let local = local_bin_path();
-    if !local.exists() {
-        return Err("CLI not installed yet".to_string());
-    }
-
-    // Try symlink to /usr/local/bin (no sudo needed on macOS if dir exists)
-    let target = PathBuf::from("/usr/local/bin/graphmind");
-    if !target.exists() && std::os::unix::fs::symlink(&local, &target).is_err() {
-        // Fallback: add ~/.graphmind/bin to shell profiles
-        let bin_dir = home_dir().join(".graphmind").join("bin");
-        let line = format!("\nexport PATH=\"{}:$PATH\"\n", bin_dir.display());
-        for profile in &[".zshrc", ".bashrc", ".bash_profile", ".profile"] {
-            let path = home_dir().join(profile);
-            if path.exists() {
-                let content = fs::read_to_string(&path).unwrap_or_default();
-                if !content.contains(".graphmind/bin") {
-                    fs::write(&path, format!("{}{}", content, line)).ok();
-                }
-            }
-        }
-        let current_path = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            format!("{}:{}", bin_dir.display(), current_path),
-        );
-        return Ok(local.to_string_lossy().to_string());
-    }
-
-    Ok(target.to_string_lossy().to_string())
 }
 
 fn get_version(path: &str) -> Option<String> {

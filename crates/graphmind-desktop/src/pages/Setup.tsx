@@ -166,8 +166,7 @@ function StepInstallCli({
         setError("Installation failed. Please try again.");
         return;
       }
-      const path = await api.ensureCliInPath();
-      setCliPath(path);
+      setCliPath(result.path);
       setStatus("done");
     } catch (e) {
       setStatus("error");

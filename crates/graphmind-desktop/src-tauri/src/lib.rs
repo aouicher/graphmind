@@ -48,7 +48,6 @@ pub fn run() {
             commands::integrations::uninstall_mcp_for_client,
             commands::setup::check_cli_installed,
             commands::setup::install_cli,
-            commands::setup::ensure_cli_in_path,
             commands::setup::check_cli_update,
             commands::setup::update_cli,
             commands::setup::get_cli_path,
