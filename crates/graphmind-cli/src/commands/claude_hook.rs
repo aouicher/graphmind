@@ -86,6 +86,12 @@ if ! command -v graphmind &>/dev/null; then exit 0; fi
 
 INPUT=$(cat)
 
+# A resumed or forked session already holds the briefing in its restored transcript, and its shown-state is
+# still valid: running again only adds a duplicate and work at the moment many sessions resume at once.
+case "$(echo "$INPUT" | jq -r '.source // empty')" in
+  resume|fork) exit 0 ;;
+esac
+
 # Check if we're in a graphmind-registered project
 graphmind which &>/dev/null || exit 0
 
