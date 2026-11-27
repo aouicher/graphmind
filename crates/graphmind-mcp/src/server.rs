@@ -254,10 +254,13 @@ pub fn tool_defs() -> Vec<Tool> {
                 "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             }
         })),
-        make_tool("gm_file", "Returns the full raw source content of an indexed file of a registered project, given by its path relative to the project root as gm_outline and gm_search report it. Files graphmind doesn't index (dotfiles, gitignored files, files it doesn't parse) are not served. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol.", json!({
+        make_tool("gm_file", "Returns the raw source content of an indexed file of a registered project, given by its path relative to the project root as gm_outline and gm_search report it. Files graphmind doesn't index (dotfiles, gitignored files, files it doesn't parse) are not served. Use when you need to read the entire file, not just symbols. Prefer gm_outline when you only need structure, and gm_fn when you need a specific symbol. Returns pages of about 10k tokens, cut after the last whole line that fits; a page that stops before the end of the file ends with a note giving the offset (and, inside a very long line, the column) to continue from.", json!({
             "type": "object",
             "properties": {
                 "file": { "type": "string", "description": "Path of an indexed file, relative to the project root" },
+                "offset": { "type": "integer", "description": "1-based line number to start from (default 1)" },
+                "column": { "type": "integer", "description": "1-based byte column within that line to start from (default 1); the continuation note fills it in for lines longer than a page" },
+                "limit": { "type": "integer", "description": "Max lines to return (default 0: no line limit; a page is still about 10k tokens at most)" },
                 "project": { "type": "string", "description": "Project slug or absolute checkout path (optional)" }
             },
             "required": ["file"]
