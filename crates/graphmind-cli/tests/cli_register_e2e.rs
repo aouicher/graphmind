@@ -2,6 +2,16 @@ mod common;
 use common::CliTestEnv;
 
 #[test]
+fn test_env_runs_the_binary_cargo_built() {
+    // A fixed `<workspace>/target/debug/graphmind` broke every e2e test under CARGO_TARGET_DIR
+    // ("failed to run graphmind: No such file or directory") and could run a stale binary.
+    let env = CliTestEnv::new();
+    assert_eq!(env.binary, std::path::PathBuf::from(env!("CARGO_BIN_EXE_graphmind")));
+    let out = env.run_ok(&["--version"]);
+    assert!(out.contains(env!("CARGO_PKG_VERSION")), "got: {out}");
+}
+
+#[test]
 fn register_creates_project_entry() {
     let env = CliTestEnv::new();
     let fixture = env.fixture_path();
