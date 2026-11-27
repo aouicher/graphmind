@@ -177,6 +177,17 @@ if [ ${#PROMPT} -lt 10 ]; then exit 0; fi
 # Check if we're in a graphmind-registered project
 graphmind which &>/dev/null || exit 0
 
+# Optional prompt guard. Claude Code runs UserPromptSubmit hooks side by side, so a guard that
+# blocks a prompt (secrets, names that must not leave the machine) doesn't stop this one, and a
+# code search sends the prompt's words to the embedding provider. An executable at
+# ~/.graphmind/prompt-guard gets this hook's input on stdin; when it answers
+# {"decision":"block"} or fails, this prompt is skipped.
+GUARD="$HOME/.graphmind/prompt-guard"
+if [ -x "$GUARD" ]; then
+  GUARD_OUT=$(printf '%s' "$INPUT" | "$GUARD" 2>/dev/null) || exit 0
+  if printf '%s' "$GUARD_OUT" | jq -e '.decision == "block"' >/dev/null 2>&1; then exit 0; fi
+fi
+
 MAX_CHARS=9000
 NL=$'\n'
 # The 8-character id a listing line starts with (after an optional ★). Spelled out for awks
