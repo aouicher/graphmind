@@ -127,8 +127,6 @@ fn build_section(slug: &str) -> String {
 | Cross-project | `gm_cross_query` | `graphmind cross query` |
 | Memory search | `gm_memory_search` | `graphmind memory search` |
 
-Only fall back to grep/find for: string literals, config values, non-code patterns.
-
 ### Rebuild when
 Structural changes, new modules, after merge.
 Command: `graphmind build`
