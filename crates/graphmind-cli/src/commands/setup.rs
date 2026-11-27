@@ -151,17 +151,18 @@ pub fn init(path: Option<&str>, skip_build: bool) {
     );
 
     print_step(1, 4, &format!("Register project ({})", project_path));
-    super::register::add(project_path, None, &[]);
+    // Hooks and build target the project just registered, not the current directory's.
+    let project = super::register::add(project_path, None, &[]);
 
     print_step(2, 4, "MCP project configs (Claude Code, VS Code)");
     ensure_project_mcp_configs(project_path);
 
     print_step(3, 4, "Git hooks (commit, merge, rebase, checkout, push)");
-    super::hooks::install(None);
+    super::hooks::install(Some(&project.slug));
 
     if !skip_build {
         print_step(4, 4, "Build code graph");
-        super::build::build(None, false, false, false, false);
+        super::build::build(Some(&project.slug), false, false, false, false);
     } else {
         println!("  {} Build skipped (use {} to index later)", "[4/4]".cyan().bold(), "graphmind build".dimmed());
     }

@@ -5,6 +5,10 @@ Releases before 0.3.0: see [GitHub releases](https://github.com/aouicher/graphmi
 
 ## [Unreleased]
 
+### Fixed
+
+- **`graphmind init <PATH>` sets up `<PATH>` from any folder.** Run from outside the repo, it registered `<PATH>` and then stopped at the git hooks step with "Not in a registered project", leaving the project without hooks or a graph. Run from inside another registered repo, it installed hooks in that repo and built it instead. The hooks and the build now use the project `init` just registered. Reported in #183, fixed by @KennethWKZ in #189.
+
 ## [0.3.8] - 2026-11-27
 
 ### Fixed
