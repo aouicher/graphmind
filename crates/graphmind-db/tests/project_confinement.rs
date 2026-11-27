@@ -121,8 +121,8 @@ fn build_fails_and_keeps_the_graph_when_the_project_directory_cannot_be_resolved
     assert_eq!(indexed_files(&work), ["src/lib.rs"], "the graph is left as it was");
 }
 
-/// Removes every permission on `dir` until dropped. None when permissions don't stop this
-/// process from reading it (running as root), so the caller can skip its test.
+/// Removes every permission on `dir` (a folder or a file) until dropped. None when permissions
+/// don't stop this process from reading it (running as root), so the caller can skip its test.
 struct Unreadable(std::path::PathBuf);
 
 impl Unreadable {
@@ -130,7 +130,7 @@ impl Unreadable {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o000)).unwrap();
         let guard = Unreadable(dir.to_path_buf());
-        std::fs::read_dir(dir).is_err().then_some(guard)
+        std::fs::File::open(dir).is_err().then_some(guard)
     }
 }
 
@@ -187,4 +187,27 @@ fn files_of_a_folder_that_cannot_be_read_stay_in_the_graph() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     assert_eq!(result.deleted, 1, "only the deleted file leaves the graph");
     assert_eq!(indexed_files(&work), ["data/nested/db.rs", "src/lib.rs", "src/new.rs"]);
+}
+
+/// A file that can't be read (permissions) is skipped with a warning and keeps what the graph
+/// has, like the files of a folder that can't be read; the rest of the build goes on.
+#[test]
+fn a_file_that_cannot_be_read_keeps_its_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("src/lib.rs"), "pub fn lib_fn() {}\n").unwrap();
+    std::fs::write(project.join("src/locked.rs"), "pub fn locked_fn() {}\n").unwrap();
+    let work = dir.path().join("work");
+    build_and_list(&work, &project);
+    assert_eq!(indexed_files(&work), ["src/lib.rs", "src/locked.rs"]);
+
+    std::fs::write(project.join("src/new.rs"), "pub fn new_fn() {}\n").unwrap();
+    let Some(_guard) = Unreadable::new(&project.join("src/locked.rs")) else { return };
+    let result = rebuild(&work, &project);
+
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(result.deleted, 0, "a file that can't be read is not deleted");
+    assert_eq!(indexed_files(&work), ["src/lib.rs", "src/locked.rs", "src/new.rs"]);
+    assert!(build_and_list(&work, &project).iter().any(|(_, name)| name == "locked_fn"), "its symbols stay");
 }
