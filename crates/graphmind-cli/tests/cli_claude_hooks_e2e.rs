@@ -395,3 +395,27 @@ fn prompt_hook_searches_do_not_count_recalls() {
         .unwrap();
     assert_eq!(entry["recall_count"], 0, "{entry}");
 }
+
+/// The idle-state cleanup leaves a new empty state folder alone: a parallel session's hook has just made it and
+/// writes into it a moment later. During a burst of session starts, deleting it made that write fail.
+#[test]
+fn session_hook_keeps_new_empty_state_folders() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return; // the hooks need jq
+    }
+    let env = CliTestEnv::new();
+    current_setup(&env);
+    let project = env.fixture_path();
+    env.run_ok(&["install", "hook-claude"]);
+    env.run_ok(&["memory", "add", "deploy pipeline uses terraform apply", "--slug", "hooks-test", "--priority"]);
+
+    let state = env.home.path().join(".graphmind/hook-state");
+    let fresh = state.join("parallel-session");
+    std::fs::create_dir_all(&fresh).unwrap();
+
+    let out = run_hook(&env, "graphmind-session.sh", &project, &json!({"session_id": "s1", "source": "startup"}));
+    assert!(out.contains("terraform apply"), "startup briefs: {out}");
+    assert!(fresh.is_dir(), "a new empty state folder of another session is kept");
+    let shown = std::fs::read_to_string(state.join("s1/priority-ids")).unwrap();
+    assert!(!shown.trim().is_empty(), "shown ids recorded");
+}

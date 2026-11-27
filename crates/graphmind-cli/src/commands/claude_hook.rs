@@ -95,7 +95,9 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' | tr -cd 'A-Za-z0-9_-'
 STATE_DIR="$STATE_ROOT/${SESSION_ID:-default}"
 # Drop state of sessions idle for more than 2 days
 find "$STATE_ROOT" -mindepth 2 -maxdepth 2 -type f -mtime +2 -delete 2>/dev/null
-find "$STATE_ROOT" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null
+# Empty folders only once they are 10 minutes old: a parallel session's hook has just made its folder and
+# writes into it a moment later (a burst of session starts deleted those, and the write failed).
+find "$STATE_ROOT" -mindepth 1 -maxdepth 1 -type d -empty -mmin +10 -delete 2>/dev/null
 rm -f "$STATE_DIR"/*
 mkdir -p "$STATE_DIR"
 
