@@ -99,6 +99,32 @@ fn extension_to_language(ext: &str) -> Option<&'static str> {
     LANGUAGE_MAP.iter().find(|(e, _)| *e == ext).map(|(_, l)| *l)
 }
 
+/// The language of a script named without an extension (`bin/deploy`), from its `#!` line:
+/// `#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env bash`, `#!/usr/bin/env -S zsh -e`. Only shells
+/// the bash parser reads; any other interpreter, or no `#!`, gives None.
+fn shebang_language(first_line: &str) -> Option<&'static str> {
+    let mut words = first_line.strip_prefix("#!")?.split_whitespace();
+    let mut program = words.next()?;
+    if Path::new(program).file_name()? == "env" {
+        // env's own options (-S, -i) and VAR=value assignments come before the program.
+        program = words.find(|w| !w.starts_with('-') && !w.contains('='))?;
+    }
+    match Path::new(program).file_name()?.to_str()? {
+        "sh" | "bash" | "zsh" | "dash" | "ksh" => Some("bash"),
+        _ => None,
+    }
+}
+
+/// The language of the regular file at `path` from its first line, read from at most its first
+/// 256 bytes. None when it can't be read or names no known shell. `build --watch` uses it too.
+pub fn script_language(path: &Path) -> Option<&'static str> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(256);
+    fs::File::open(path).ok()?.take(256).read_to_end(&mut head).ok()?;
+    let line = head.split(|b| *b == b'\n').next()?;
+    shebang_language(String::from_utf8_lossy(line).trim_end_matches('\r'))
+}
+
 #[derive(Debug, Clone)]
 #[derive(Default)]
 pub struct BuildResult {
@@ -671,7 +697,12 @@ impl GraphBuilder {
             let ext = Path::new(&name).extension()
                 .map(|e| format!(".{}", e.to_string_lossy()))
                 .unwrap_or_default();
-            let Some(language) = extension_to_language(&ext).or_else(|| extension_to_language(&name)) else {
+            // A file with no extension and no known name may still be a script: read its `#!`
+            // line. Only regular files: a link's target is checked further down, before any read.
+            let Some(language) = extension_to_language(&ext)
+                .or_else(|| extension_to_language(&name))
+                .or_else(|| if ext.is_empty() && !is_link { script_language(entry.path()) } else { None })
+            else {
                 continue;
             };
             if only.is_some_and(|only| !only.contains(&pathdiff(entry.path().to_str().unwrap_or(""), project_path))) {
@@ -761,4 +792,41 @@ fn pathdiff(full_path: &str, base: &str) -> String {
     full.strip_prefix(base)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| full_path.to_string())
+}
+
+#[cfg(test)]
+mod shebang_tests {
+    use super::shebang_language;
+
+    #[test]
+    fn shell_shebangs_map_to_bash() {
+        for line in [
+            "#!/bin/sh",
+            "#!/bin/bash",
+            "#! /bin/bash -eu",
+            "#!/usr/bin/env bash",
+            "#!/usr/bin/env -S zsh -e",
+            "#!/usr/bin/env LC_ALL=C dash",
+            "#!/opt/homebrew/bin/ksh",
+        ] {
+            assert_eq!(shebang_language(line), Some("bash"), "{line}");
+        }
+    }
+
+    #[test]
+    fn other_first_lines_map_to_nothing() {
+        for line in [
+            "",
+            "echo hi",
+            "# a comment",
+            "#!",
+            "#!/usr/bin/env",
+            "#!/usr/bin/env -S",
+            "#!/usr/bin/env python3",
+            "#!/usr/bin/perl",
+            "#!/bin/bashful",
+        ] {
+            assert_eq!(shebang_language(line), None, "{line:?}");
+        }
+    }
 }
