@@ -6,6 +6,21 @@ use std::sync::{Mutex, OnceLock};
 
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// `<exe> <args>` with `home` as HOME and update notices and background builds off, for tests
+/// that run a graphmind binary of their own (a copy in `~/.local/bin`, say). Add PATH or SHELL
+/// before running it.
+pub fn graphmind_command(exe: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Command {
+    let mut command = Command::new(exe);
+    command
+        .args(args)
+        .env("HOME", home)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env("GRAPHMIND_SKIP_NOTICES", "1")
+        // A background build outliving the command would race the test's assertions.
+        .env("GRAPHMIND_NO_AUTO_BUILD", "1");
+    command
+}
+
 /// For suites that call setup functions in-process: create a fresh temp HOME, point `HOME` at it,
 /// run `f`, then drop. PATH holds the system directories plus `<home>/bin` (empty unless a test
 /// puts a fake CLI there), so the `claude` and `opencode` installed on the machine running the
@@ -85,15 +100,7 @@ impl CliTestEnv {
     /// `graphmind <args>` with the temp HOME, for tests that add their own environment (PATH,
     /// SHELL) before running it.
     pub fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(&self.binary);
-        command
-            .args(args)
-            .env("HOME", self.home.path())
-            .env_remove("CLAUDE_CONFIG_DIR")
-            .env("GRAPHMIND_SKIP_NOTICES", "1")
-            // A background build outliving the command would race the test's assertions.
-            .env("GRAPHMIND_NO_AUTO_BUILD", "1");
-        command
+        graphmind_command(&self.binary, self.home.path(), args)
     }
 
     /// Like `run`, but executes with the given directory as cwd — needed
